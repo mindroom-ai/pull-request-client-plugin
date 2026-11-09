@@ -1,0 +1,4 @@
+node_modules/
+.mindroom-chat
+coverage/
+*.log
