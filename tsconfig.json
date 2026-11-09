@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "types": [],
+    "baseUrl": ".",
+    "paths": {
+      "@mindroom/client-sdk/*": ["./.mindroom-chat/src/client-sdk/*"],
+      "*": ["./node_modules/*", "./.mindroom-chat/node_modules/*"]
+    }
+  },
+  "include": ["src"]
+}
