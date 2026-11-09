@@ -150,3 +150,145 @@
 .mrpr-actions {
   margin-block-start: 8px;
 }
+
+.mrpr-button-icon {
+  inline-size: 14px;
+  block-size: 14px;
+}
+
+.mrpr-link {
+  color: var(--pr-primary);
+  text-decoration: none;
+}
+.mrpr-link:hover {
+  text-decoration: underline;
+}
+
+/* The Code tab: the file tree at the start beside the diffs in a panel at least 640 px wide,
+   else above them. The variables are the ones the ported diff styles draw with. */
+.mrpr-code {
+  --code-background: var(--pr-surface);
+  --code-foreground: var(--pr-fg);
+  --font-sans: var(--pr-font-sans);
+  --font-mono: var(--pr-font-mono);
+  --diff-addition: var(--pr-added);
+  --diff-deletion: var(--pr-removed);
+  --diff-addition-foreground: var(--pr-added);
+  --diff-deletion-foreground: var(--pr-removed);
+  --info-foreground: var(--pr-primary);
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  block-size: 100%;
+  min-block-size: 0;
+  background: var(--code-background);
+}
+
+.mrpr-code-toolbar {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  block-size: 40px;
+  padding-inline: 12px 6px;
+  border-block-end: 1px solid var(--pr-border);
+}
+
+.mrpr-code-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-block-size: 0;
+}
+
+.mrpr-code-tree {
+  display: flex;
+  flex: 0 1 auto;
+  flex-direction: column;
+  min-block-size: 0;
+  max-block-size: 40%;
+  border-block-end: 1px solid var(--pr-border);
+}
+
+.mrpr-code-diffs {
+  position: relative;
+  flex: 1;
+  min-block-size: 0;
+  min-inline-size: 0;
+}
+
+@container (min-inline-size: 640px) {
+  .mrpr-code-body {
+    flex-direction: row;
+  }
+  .mrpr-code-tree {
+    flex: 0 0 240px;
+    max-block-size: none;
+    border-block-end: 0;
+    border-inline-end: 1px solid var(--pr-border);
+  }
+}
+
+.mrpr-tree {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-block-size: 0;
+}
+
+.mrpr-tree-header {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+  block-size: 36px;
+  padding-inline: 12px 6px;
+  font-size: 12px;
+  color: var(--pr-muted);
+}
+
+.mrpr-tree-title {
+  font-weight: 500;
+  color: var(--pr-fg);
+}
+
+.mrpr-tree-count {
+  margin-inline-start: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+/* React 18 gives a custom element `classname`, not `class`, so the tree's element goes by its tag. */
+.mrpr-tree > file-tree-container {
+  flex: 1 1 calc(var(--mrpr-tree-rows-height, 0px) + 4px);
+  min-block-size: 0;
+  overflow: hidden;
+}
+
+.mrpr-diff-view {
+  block-size: 100%;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  outline: none;
+}
+
+.mrpr-no-diff-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mrpr-no-diff {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-block: 8px;
+  padding-inline: 12px;
+  border-block-start: 1px solid var(--pr-border);
+  font-size: 12px;
+}
+
+.mrpr-no-diff-path {
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}

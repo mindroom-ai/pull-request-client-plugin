@@ -1,0 +1,180 @@
+// Ported from T3 Code (https://github.com/pingdotgg/t3code, apps/web/src/lib/diffRendering.ts at 8ab427c6), MIT, Copyright (c) 2026 T3 Tools Inc. See NOTICE.
+// Patch parsing and the diff surface's theme, the part of T3 Code's diff rendering the Code tab uses.
+import { parsePatchFiles, type FileDiffMetadata } from '@pierre/diffs';
+
+export const DIFF_THEME_NAMES = {
+  light: 'pierre-light',
+  dark: 'pierre-dark',
+} as const;
+
+const FNV_OFFSET_BASIS_32 = 0x811c9dc5;
+const FNV_PRIME_32 = 0x01000193;
+const SECONDARY_HASH_SEED = 0x9e3779b9;
+const SECONDARY_HASH_MULTIPLIER = 0x85ebca6b;
+
+export function fnv1a32(
+  input: string,
+  seed = FNV_OFFSET_BASIS_32,
+  multiplier = FNV_PRIME_32
+): number {
+  let hash = seed >>> 0;
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index);
+    hash = Math.imul(hash, multiplier) >>> 0;
+  }
+  return hash >>> 0;
+}
+
+function buildPatchCacheKey(patch: string, scope = 'diff-panel'): string {
+  const primary = fnv1a32(patch, FNV_OFFSET_BASIS_32, FNV_PRIME_32).toString(36);
+  const secondary = fnv1a32(patch, SECONDARY_HASH_SEED, SECONDARY_HASH_MULTIPLIER).toString(36);
+  return `${scope}:${patch.length}:${primary}:${secondary}`;
+}
+
+export type RenderablePatch =
+  | {
+      kind: 'files';
+      files: FileDiffMetadata[];
+    }
+  | {
+      kind: 'raw';
+      text: string;
+      reason: string;
+    };
+
+export interface DiffLineStat {
+  additions: number;
+  deletions: number;
+}
+
+export function getDiffLineStat(files: ReadonlyArray<FileDiffMetadata>): DiffLineStat {
+  return files.reduce<DiffLineStat>(
+    (total, file) => {
+      for (const hunk of file.hunks) {
+        total.additions += hunk.additionLines;
+        total.deletions += hunk.deletionLines;
+      }
+
+      return total;
+    },
+    { additions: 0, deletions: 0 }
+  );
+}
+
+export function getRenderablePatch(
+  patch: string | undefined,
+  cacheScope = 'diff-panel'
+): RenderablePatch | null {
+  if (!patch?.trim()) return null;
+
+  try {
+    const parsedPatches = parsePatchFiles(patch, {
+      cacheKeyPrefix: buildPatchCacheKey(patch, cacheScope),
+    });
+    const files = parsedPatches.flatMap((parsedPatch) => parsedPatch.files);
+    if (files.length > 0) {
+      return { kind: 'files', files };
+    }
+
+    return {
+      kind: 'raw',
+      text: patch,
+      reason: 'Unsupported diff format. Showing raw patch.',
+    };
+  } catch {
+    return {
+      kind: 'raw',
+      text: patch,
+      reason: 'Failed to parse patch. Showing raw patch.',
+    };
+  }
+}
+
+/** Uses the parser-decoded filename, including Git's quoted and escaped names. */
+export function resolveFileDiffPath(fileDiff: FileDiffMetadata): string {
+  return fileDiff.name ?? fileDiff.prevName ?? '';
+}
+
+export const DIFF_SURFACE_THEME_UNSAFE_CSS = `
+[data-diffs-header],
+[data-diff],
+[data-file],
+[data-error-wrapper],
+[data-virtualizer-buffer] {
+  --diffs-header-font-family: var(--font-sans) !important;
+  --diffs-font-family: var(--font-mono) !important;
+  --diffs-bg: var(--code-background) !important;
+  --diffs-light-bg: var(--code-background) !important;
+  --diffs-dark-bg: var(--code-background) !important;
+  --diffs-token-light-bg: transparent;
+  --diffs-token-dark-bg: transparent;
+
+  /* Gutter, context, and row tints all derive from the code surface the diff
+     body sits on. Mixing from the canvas leaves the gutter looking unthemed
+     when a palette separates the two. */
+  --diffs-bg-context-override: color-mix(in srgb, var(--code-background) 97%, var(--code-foreground));
+  --diffs-bg-hover-override: color-mix(in srgb, var(--code-background) 94%, var(--code-foreground));
+  --diffs-bg-separator-override: color-mix(
+    in srgb,
+    var(--code-background) 95%,
+    var(--code-foreground)
+  );
+  --diffs-bg-buffer-override: color-mix(in srgb, var(--code-background) 90%, var(--code-foreground));
+
+  --diffs-bg-addition-override: light-dark(
+    color-mix(in srgb, var(--code-background) 50%, var(--diff-addition)),
+    color-mix(in srgb, var(--code-background) 70%, var(--diff-addition))
+  );
+  --diffs-bg-addition-number-override: light-dark(
+    color-mix(in srgb, var(--code-background) 35%, var(--diff-addition)),
+    color-mix(in srgb, var(--code-background) 60%, var(--diff-addition))
+  );
+  --diffs-bg-addition-hover-override: color-mix(in srgb, var(--code-background) 85%, var(--diff-addition));
+  --diffs-bg-addition-emphasis-override: color-mix(
+    in srgb,
+    var(--code-background) 80%,
+    var(--diff-addition)
+  );
+
+  --diffs-bg-deletion-override: light-dark(
+    color-mix(in srgb, var(--code-background) 50%, var(--diff-deletion)),
+    color-mix(in srgb, var(--code-background) 70%, var(--diff-deletion))
+  );
+  --diffs-bg-deletion-number-override: light-dark(
+    color-mix(in srgb, var(--code-background) 35%, var(--diff-deletion)),
+    color-mix(in srgb, var(--code-background) 60%, var(--diff-deletion))
+  );
+  --diffs-bg-deletion-hover-override: color-mix(
+    in srgb,
+    var(--code-background) 85%,
+    var(--diff-deletion)
+  );
+  --diffs-bg-deletion-emphasis-override: color-mix(
+    in srgb,
+    var(--code-background) 80%,
+    var(--diff-deletion)
+  );
+
+  background-color: var(--diffs-bg) !important;
+  color: var(--code-foreground) !important;
+}
+
+/* The library's change-icon colors are tuned for dark canvases; light mode takes the app's darker tokens. */
+[data-change-icon="new"] {
+  color: var(
+    --diff-added-icon,
+    light-dark(var(--diff-addition-foreground), var(--diffs-addition-base))
+  ) !important;
+}
+[data-change-icon="deleted"] {
+  color: light-dark(var(--diff-deletion-foreground), var(--diffs-deletion-base)) !important;
+}
+[data-change-icon="change"],
+[data-change-icon="rename-pure"],
+[data-change-icon="rename-changed"] {
+  color: var(
+    --diff-modified-icon,
+    light-dark(var(--info-foreground), var(--diffs-modified-base))
+  ) !important;
+}
+`;

@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react';
-import { color } from 'folds';
+import { color, config } from 'folds';
 
 /**
  * The variables `styles.css` draws with, from the app's theme tokens, so the card and the panel
@@ -18,6 +18,8 @@ export function pluginRootStyle(): CSSProperties {
     '--pr-closed': color.Critical.Main,
     '--pr-merged': color.Primary.Main,
     '--pr-draft': color.SurfaceVariant.OnContainer,
+    '--pr-primary': color.Primary.Main,
+    '--pr-font-sans': config.font.Inter,
     '--pr-font-mono': 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
   } as CSSProperties;
 }
