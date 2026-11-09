@@ -193,16 +193,24 @@ export async function fetchPullRequestFiles(
   return files;
 }
 
-/** One file as a git patch, which the diff view parses; null when GitHub sent no patch. */
+/**
+ * One file as a git patch, which the diff view parses; null when GitHub sent no patch, except for
+ * a pure rename, which becomes a header-only rename. GitHub gives no similarity, so the 99% of a
+ * rename with changes only makes the parser type it as changed; a pure rename says 100%.
+ */
 export function filePatch(file: PullRequestFile): string | null {
-  if (file.patch === null) return null;
   const from = file.previousPath ?? file.path;
-  let head = `diff --git a/${from} b/${file.path}\n`;
+  const diff = `diff --git a/${from} b/${file.path}\n`;
+  const rename = (similarity: number) =>
+    `similarity index ${similarity}%\nrename from ${from}\nrename to ${file.path}\n`;
+  if (file.patch === null) {
+    const pure = file.status === 'renamed' && file.additions === 0 && file.deletions === 0;
+    return pure ? `${diff}${rename(100)}` : null;
+  }
+  let head = diff;
   if (file.status === 'added') head += 'new file mode 100644\n';
   else if (file.status === 'removed') head += 'deleted file mode 100644\n';
-  else if (file.status === 'renamed') {
-    head += `similarity index 100%\nrename from ${from}\nrename to ${file.path}\n`;
-  }
+  else if (file.status === 'renamed') head += rename(99);
   head += file.status === 'added' ? '--- /dev/null\n' : `--- a/${from}\n`;
   head += file.status === 'removed' ? '+++ /dev/null\n' : `+++ b/${file.path}\n`;
   return `${head}${file.patch}\n`;

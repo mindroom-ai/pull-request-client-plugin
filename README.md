@@ -21,8 +21,10 @@ Run `npm install` here first. `.npmrc` sets `legacy-peer-deps`, so that the Pier
 The tests run with the client's vitest, from the client's checkout:
 
 ```sh
-MINDROOM_CLIENT_PLUGINS=/path/to/pull-request-client-plugin nix develop -c npx vitest run /path/to/pull-request-client-plugin
+MINDROOM_CLIENT_PLUGINS=/path/to/pull-request-client-plugin nix develop -c npx vitest run /path/to/pull-request-client-plugin/src
 ```
+
+The `/src` filter matters: without it, vitest also collects the client's own tests through the `.mindroom-chat` link.
 
 `npm run typecheck` uses the client's TypeScript and its source types. For that, link the client's checkout as `.mindroom-chat` in this directory (it is git-ignored):
 

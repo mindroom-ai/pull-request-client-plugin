@@ -245,7 +245,7 @@ describe('filePatch', () => {
 
   it('assembles a renamed file with changes', () => {
     expect(filePatch(file({ status: 'renamed', path: 'n.ts', previousPath: 'o.ts' }))).toBe(
-      'diff --git a/o.ts b/n.ts\nsimilarity index 100%\nrename from o.ts\nrename to n.ts\n--- a/o.ts\n+++ b/n.ts\n@@ -1 +1 @@\n-a\n+b\n'
+      'diff --git a/o.ts b/n.ts\nsimilarity index 99%\nrename from o.ts\nrename to n.ts\n--- a/o.ts\n+++ b/n.ts\n@@ -1 +1 @@\n-a\n+b\n'
     );
   });
 
@@ -259,6 +259,30 @@ describe('filePatch', () => {
     expect(filePatch(file({ patch: null }))).toBeNull();
   });
 
+  it('writes a header-only rename for a pure rename', () => {
+    const pure = file({
+      status: 'renamed',
+      path: 'n.ts',
+      previousPath: 'o.ts',
+      patch: null,
+      additions: 0,
+      deletions: 0,
+    });
+    expect(filePatch(pure)).toBe(
+      'diff --git a/o.ts b/n.ts\nsimilarity index 100%\nrename from o.ts\nrename to n.ts\n'
+    );
+    const files = parsePatchFiles(filePatch(pure) ?? '').flatMap((p) => p.files);
+    expect(files.map((f) => [f.name, f.prevName, f.type, f.hunks.length])).toEqual([
+      ['n.ts', 'o.ts', 'rename-pure', 0],
+    ]);
+  });
+
+  it('keeps a patchless rename with changes as null', () => {
+    expect(
+      filePatch(file({ status: 'renamed', previousPath: 'o.ts', patch: null, additions: 1 }))
+    ).toBeNull();
+  });
+
   it('parses the assembled patches', () => {
     const patch = [
       file({ status: 'added', path: 'new.ts', patch: '@@ -0,0 +1 @@\n+a' }),
@@ -268,12 +292,10 @@ describe('filePatch', () => {
       .map((f) => filePatch(f))
       .join('');
     const files = parsePatchFiles(patch).flatMap((p) => p.files);
-    // The brief's fixed header says similarity 100%, so the parser types a rename as pure, but it
-    // still reads the hunks of the changes.
     expect(files.map((f) => [f.name, f.prevName, f.type, f.hunks.length])).toEqual([
       ['new.ts', undefined, 'new', 1],
       ['gone.ts', undefined, 'deleted', 1],
-      ['n.ts', 'o.ts', 'rename-pure', 1],
+      ['n.ts', 'o.ts', 'rename-changed', 1],
     ]);
   });
 });
