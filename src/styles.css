@@ -292,3 +292,190 @@
   font-family: var(--font-mono);
   overflow-wrap: anywhere;
 }
+
+/* The side panel: a column as tall as the panel. The header and tab bar keep their height; the
+   tab's area takes the rest, so the Code tab scrolls inside itself and the Summary as a whole. */
+.mrpr-panel {
+  display: flex;
+  flex-direction: column;
+  block-size: 100%;
+  min-block-size: 0;
+}
+
+.mrpr-panel-note {
+  padding: 12px 16px;
+}
+
+.mrpr-header {
+  flex-shrink: 0;
+  min-inline-size: 0;
+  padding-inline: 16px;
+  padding-block: 4px 16px;
+}
+
+.mrpr-crumbs {
+  display: flex;
+  min-inline-size: 0;
+  align-items: center;
+  gap: 4px;
+  block-size: 28px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--pr-muted);
+}
+
+.mrpr-panel-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.375;
+  text-wrap: pretty;
+  overflow-wrap: anywhere;
+}
+
+.mrpr-panel-meta {
+  display: flex;
+  min-inline-size: 0;
+  align-items: center;
+  min-block-size: 20px;
+  margin-block-start: 8px;
+  white-space: nowrap;
+}
+.mrpr-panel-meta .mrpr-meta {
+  min-inline-size: 0;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.mrpr-branches {
+  display: flex;
+  min-inline-size: 0;
+  align-items: center;
+  gap: 8px;
+  min-block-size: 20px;
+  margin-block-start: 16px;
+  font-size: 12px;
+  color: var(--pr-muted);
+}
+
+.mrpr-refs {
+  display: flex;
+  min-inline-size: 0;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--pr-font-mono);
+  opacity: 0.7;
+}
+
+.mrpr-arrow {
+  inline-size: 14px;
+  block-size: 14px;
+  flex-shrink: 0;
+  opacity: 0.6;
+}
+
+.mrpr-counts {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-inline-start: auto;
+}
+
+.mrpr-file-count {
+  display: inline-flex;
+  min-inline-size: 64px;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.mrpr-file-icon {
+  align-self: center;
+  opacity: 1;
+}
+
+.mrpr-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-block-start: 12px;
+  font-size: 12px;
+}
+
+.mrpr-tabbar {
+  display: flex;
+  flex-shrink: 0;
+  min-inline-size: 0;
+  align-items: center;
+  padding-block: 8px;
+  padding-inline: 16px;
+  border-block-start: 1px solid var(--pr-border);
+}
+
+.mrpr-tabs {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--pr-hover);
+}
+
+.mrpr-tab {
+  padding: 3px 12px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--pr-muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.mrpr-tab[aria-selected='true'] {
+  background: var(--pr-surface);
+  color: var(--pr-fg);
+}
+
+.mrpr-tabpanel {
+  flex: 1;
+  min-block-size: 0;
+  overflow: auto;
+  padding: 12px 16px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.mrpr-tabpanel-code {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+  border-block-start: 1px solid var(--pr-border);
+}
+.mrpr-tabpanel-code > .mrpr-code {
+  flex: 1;
+  block-size: auto;
+}
+
+.mrpr-description {
+  overflow-wrap: anywhere;
+}
+.mrpr-description > :first-child {
+  margin-block-start: 0;
+}
+.mrpr-description img {
+  max-inline-size: 100%;
+}
+.mrpr-description pre {
+  overflow: auto;
+  padding: 8px;
+  border-radius: 6px;
+  background: var(--pr-hover);
+}
+.mrpr-description a {
+  color: var(--pr-primary);
+}

@@ -1,3 +1,4 @@
+// Ported from T3 Code (https://github.com/pingdotgg/t3code, apps/web/src/components/pullRequest/PullRequestCodeTab.tsx at 8ab427c6), MIT, Copyright (c) 2026 T3 Tools Inc. See NOTICE.
 // The Code tab of the panel, laid out as T3 Code's pull request Code tab: the changed files as a
 // tree beside their diffs, or above them in a narrow panel. Choosing a file in the tree scrolls
 // its diff to the top.

@@ -36,12 +36,12 @@ describe('orderDiffFilesLikeTree', () => {
 describe('diffFileTreeModel', () => {
   it("gives a file at a directory's path an alias with the file's own icon", () => {
     const model = diffFileTreeModel(['src/a.ts', 'src/a.ts/b.ts']);
-    expect(model.paths).toEqual(['src/a.ts​', 'src/a.ts/b.ts']);
-    expect(model.selectionPath('src/a.ts​')).toBe('src/a.ts');
-    expect(model.modelPath('src/a.ts')).toBe('src/a.ts​');
+    expect(model.paths).toEqual(['src/a.ts\u200b', 'src/a.ts/b.ts']);
+    expect(model.selectionPath('src/a.ts\u200b')).toBe('src/a.ts');
+    expect(model.modelPath('src/a.ts')).toBe('src/a.ts\u200b');
     const icon = createFileTreeIconResolver(model.icons).resolveIcon(
       'file-tree-icon-file',
-      'src/a.ts​'
+      'src/a.ts\u200b'
     );
     expect(icon).toMatchObject({ name: 'file-tree-builtin-typescript', token: 'typescript' });
   });

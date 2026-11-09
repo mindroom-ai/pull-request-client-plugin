@@ -39,7 +39,7 @@ export function diffFileTreeModel(paths: ReadonlyArray<string>) {
     if (!directories.has(`${path}/`)) return path;
     let modelPath = path;
     do {
-      modelPath += '​';
+      modelPath += '\u200b';
     } while (occupiedNames.has(basenameOfPath(modelPath).toLowerCase()));
     occupiedNames.add(basenameOfPath(modelPath).toLowerCase());
     selectionByModelPath.set(modelPath, path);
