@@ -55,7 +55,7 @@ function TabBar({ value, onChange }: { value: Tab; onChange: (tab: Tab) => void 
     barRef.current?.querySelector<HTMLElement>(`#mrpr-tab-${next}`)?.focus();
   };
   return (
-    <nav className="mrpr-tabbar" aria-label={t('panelLabel')}>
+    <div className="mrpr-tabbar">
       <div ref={barRef} className="mrpr-tabs" role="tablist" onKeyDown={onKeyDown}>
         {TABS.map((tab) => (
           <button
@@ -73,7 +73,7 @@ function TabBar({ value, onChange }: { value: Tab; onChange: (tab: Tab) => void 
           </button>
         ))}
       </div>
-    </nav>
+    </div>
   );
 }
 
@@ -138,9 +138,9 @@ export default function PullRequestPanel({ request }: { roomId: string; request?
             <p className="mrpr-panel-title">{pr.title}</p>
             <div className="mrpr-panel-meta">
               <PullRequestMetaLine>
-                <PullRequestActorAvatar key="avatar" actor={pr.author} />
-                <span key="name" className="mrpr-truncate">
-                  {pr.author?.login ?? t('ghost')}
+                <span key="author" className="mrpr-author-name">
+                  <PullRequestActorAvatar actor={pr.author} />
+                  <span className="mrpr-truncate">{pr.author?.login ?? t('ghost')}</span>
                 </span>
                 <span key="updated" className="mrpr-shrink-0">
                   <RelativeTime timestamp={pr.updatedAt} label={(time) => t('updated', { time })} />
@@ -149,8 +149,11 @@ export default function PullRequestPanel({ request }: { roomId: string; request?
             </div>
             <div className="mrpr-branches">
               <span className="mrpr-refs">
-                <span className="mrpr-truncate">{pr.baseRef}</span>
-                <ArrowLeft aria-label={t('receivesChanges')} className="mrpr-arrow" />
+                <span className="mrpr-truncate mrpr-base-ref">{pr.baseRef}</span>
+                <ArrowLeft
+                  aria-label={t('receivesChanges')}
+                  className="mrpr-arrow mrpr-arrow-back"
+                />
                 <span className="mrpr-truncate">{pr.headRef}</span>
               </span>
               <span className="mrpr-counts">

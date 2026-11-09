@@ -55,7 +55,7 @@ const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(
 
 const show = async (close = vi.fn()) => {
   const client = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
+    defaultOptions: { queries: { retry: false, retryDelay: 0 } },
   });
   return renderPluginComponent(
     <QueryClientProvider client={client}>
@@ -123,6 +123,69 @@ describe('PullRequestCard', () => {
     expect(await view.findByText('GitHub refused the saved token.')).toBeTruthy();
     await click(view.getByRole('button', { name: 'Forget token' }));
     await vi.waitFor(() => expect(view.queryByText('GitHub refused the saved token.')).toBeNull());
+  });
+
+  it('reads the author and the time as one meta line without a separator before the login', async () => {
+    fetchMock.mockImplementation(async () => respond(pull()));
+    const view = await show();
+    const login = await view.findByText('basnijholt');
+    expect(login.closest('.mrpr-meta')?.textContent).toBe('basnijholt·opened 3 days ago');
+    expect(login.previousElementSibling?.className).toContain('mrpr-avatar');
+    expect(login.parentElement?.nextElementSibling?.className).toContain('mrpr-separator');
+  });
+
+  it('shows the status of a failure and Try again', async () => {
+    fetchMock.mockResolvedValue(respond({}, 500));
+    const view = await show();
+    expect(await view.findByText('GitHub answered with status 500.')).toBeTruthy();
+    fetchMock.mockClear();
+    await click(view.getByRole('button', { name: 'Try again' }));
+    expect(fetchMock).toHaveBeenCalled();
+  });
+
+  it('says GitHub could not be reached when the request fails outright', async () => {
+    fetchMock.mockRejectedValue(new TypeError('offline'));
+    const view = await show();
+    expect(await view.findByText('GitHub could not be reached.')).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Try again' })).toBeTruthy();
+  });
+
+  describe('with a saved token', () => {
+    const saveToken = async (view: Awaited<ReturnType<typeof show>>) => {
+      await view.findByLabelText('GitHub token');
+      await type(view.getByLabelText('GitHub token'), 'ghp_saved');
+      await click(view.getByRole('button', { name: 'Save' }));
+    };
+
+    it('does not ask for a token when the repository is not found', async () => {
+      fetchMock.mockResolvedValue(respond({}, 404));
+      const view = await show();
+      await saveToken(view);
+      expect(
+        await view.findByText(
+          'GitHub did not find this pull request. The saved token may not be able to read this repository.'
+        )
+      ).toBeTruthy();
+      expect(view.queryByText(/A private repository needs a token/)).toBeNull();
+      expect(view.getByRole('button', { name: 'Forget token' })).toBeTruthy();
+      expect(view.getByLabelText('GitHub token')).toBeTruthy();
+    });
+
+    it('shows no token form when the rate limit was reached', async () => {
+      fetchMock.mockResolvedValue(respond({}, 404));
+      const view = await show();
+      await saveToken(view);
+      fetchMock.mockResolvedValue(respond({}, 429));
+      await click(
+        await view
+          .findByRole('button', { name: 'Forget token' })
+          .then(() => view.getByRole('button', { name: 'Forget token' }))
+      );
+      await view.findByLabelText('GitHub token');
+      await saveToken(view);
+      expect(await view.findByText("GitHub's rate limit was reached.")).toBeTruthy();
+      expect(view.queryByLabelText('GitHub token')).toBeNull();
+    });
   });
 
   it('opens the side panel with the reference and closes', async () => {

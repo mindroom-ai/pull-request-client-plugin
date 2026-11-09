@@ -21,6 +21,7 @@
     "@tanstack/react-query": "*",
     "folds": "*",
     "react": "*",
-    "react-dom": "*"
+    "react-dom": "*",
+    "react-i18next": "*"
   }
 }

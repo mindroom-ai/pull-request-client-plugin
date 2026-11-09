@@ -29,7 +29,10 @@ export const en = {
     notFound: 'GitHub did not find this pull request. A private repository needs a token.',
     rateLimited: "GitHub's rate limit was reached.",
     badToken: 'GitHub refused the saved token.',
+    notFoundWithToken:
+      'GitHub did not find this pull request. The saved token may not be able to read this repository.',
     failed: 'GitHub could not be reached.',
+    failedStatus: 'GitHub answered with status {{status}}.',
     retry: 'Try again',
   },
   token: {

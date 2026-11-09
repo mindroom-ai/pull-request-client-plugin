@@ -69,6 +69,8 @@ export function PullRequestActorAvatar({
     <img
       aria-hidden
       alt=""
+      // Set before `src`, so the request for the image already sends no referrer.
+      referrerPolicy="no-referrer"
       src={avatarUrl}
       loading="lazy"
       className="mrpr-avatar"

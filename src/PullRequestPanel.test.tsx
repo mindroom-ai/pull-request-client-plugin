@@ -117,6 +117,19 @@ describe('PullRequestPanel', () => {
     );
   });
 
+  it('keeps the avatar and login together, with no separator before the login', async () => {
+    const view = await show();
+    const login = await view.findByText('basnijholt');
+    expect(login.closest('.mrpr-meta')?.textContent).toBe('Bbasnijholt·updated 2 days ago');
+    expect(login.parentElement?.nextElementSibling?.className).toContain('mrpr-separator');
+  });
+
+  it('puts the tab list in no landmark', async () => {
+    const view = await show();
+    await view.findByText('Add pull request cards');
+    expect(view.getByRole('tablist').closest('nav')).toBeNull();
+  });
+
   it('renders the description', async () => {
     const view = await show();
     const bold = await view.findByText('bold');

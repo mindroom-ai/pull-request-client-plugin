@@ -36,4 +36,4 @@ ln -s /path/to/mindroom-chat .mindroom-chat
 
 ## GitHub token
 
-Public pull requests need no token. For a private repository, or to avoid GitHub's rate limit for requests without one, a person can enter a GitHub token in the plugin's panel. The token is kept in the browser's localStorage for the signed-in account, where any script running on the page can read it. Use a token that can read pull requests only. Requests go to `https://api.github.com` and nowhere else; the token is sent only there, and only when one is stored.
+Public pull requests need no token. For a private repository, or to avoid GitHub's rate limit for requests without one, a person can enter a GitHub token in the plugin's panel. The token is kept in the browser's localStorage for the signed-in account, where any script running on the page can read it. Use a fine-grained token with read access to the pull requests and contents of the repositories. Requests go to `https://api.github.com` and nowhere else; the token is sent only there, and only when one is stored.

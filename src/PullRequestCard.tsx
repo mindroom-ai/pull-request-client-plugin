@@ -70,9 +70,9 @@ export function PullRequestCard({ href, close }: MessageLinkCardProps) {
             <p className="mrpr-title">{pr.title}</p>
             <div className="mrpr-author">
               <PullRequestMetaLine>
-                <PullRequestActorAvatar key="avatar" actor={pr.author} />
-                <span key="name" className="mrpr-truncate">
-                  {pr.author?.login ?? t('ghost')}
+                <span key="author" className="mrpr-author-name">
+                  <PullRequestActorAvatar actor={pr.author} />
+                  <span className="mrpr-truncate">{pr.author?.login ?? t('ghost')}</span>
                 </span>
                 <span key="opened" className="mrpr-shrink-0">
                   <RelativeTime timestamp={pr.createdAt} label={(time) => t('opened', { time })} />
