@@ -190,6 +190,17 @@ export const en = {
     outdated: 'Outdated',
     truncated: 'Showing the first {{count}}; see the rest on GitHub',
   },
+  // A list GitHub gave only the start of, by the list.
+  truncated: {
+    commits_one: 'Showing the first {{count}} commit; see the rest on GitHub',
+    commits_other: 'Showing the first {{count}} commits; see the rest on GitHub',
+    reviews_one: 'Showing the first {{count}} review; see the rest on GitHub',
+    reviews_other: 'Showing the first {{count}} reviews; see the rest on GitHub',
+    comments_one: 'Showing the first {{count}} comment; see the rest on GitHub',
+    comments_other: 'Showing the first {{count}} comments; see the rest on GitHub',
+    reviewComments_one: 'Showing the first {{count}} review comment; see the rest on GitHub',
+    reviewComments_other: 'Showing the first {{count}} review comments; see the rest on GitHub',
+  },
   comment: { showFull: 'Show full comment', showLess: 'Show less' },
   actor: {
     profile: "Open {{login}}'s profile",

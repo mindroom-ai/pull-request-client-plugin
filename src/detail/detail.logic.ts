@@ -6,6 +6,7 @@ import type {
   Actor,
   Comment,
   Commit,
+  Paged,
   PullRequest,
   PullRequestCheck,
   Review,
@@ -234,6 +235,13 @@ export function filterConversationItems(
     return comments.some((comment) => comment.author?.isBot !== true);
   });
 }
+
+/**
+ * Whether the pull request's commits came only in part: GitHub lists 250 at most without saying
+ * so, which fewer commits than the pull request counts shows.
+ */
+export const commitsCut = (commits: Paged<Commit>, commitCount: number): boolean =>
+  commits.truncated || commits.items.length < commitCount;
 
 export type TimelineEvent =
   | { kind: 'opened' | 'merged' | 'closed'; at: string; actor: Actor | null }

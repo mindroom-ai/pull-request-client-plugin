@@ -23,6 +23,7 @@ vi.mock('./CodeTab', async () => {
       commit?: string;
       onCommitChange: (sha: string | undefined) => void;
       truncatedReviewComments?: number;
+      truncatedCommits?: number;
     }) {
       const [mount] = useState(() => (mounts += 1));
       return (
@@ -36,6 +37,7 @@ vi.mock('./CodeTab', async () => {
           <p data-testid="code-commits">{listed(props.commits, 'sha')}</p>
           <p data-testid="code-commit">{props.commit ?? 'all'}</p>
           <p data-testid="code-truncated">{props.truncatedReviewComments ?? 'whole'}</p>
+          <p data-testid="code-truncated-commits">{props.truncatedCommits ?? 'whole'}</p>
           <p data-testid="code-mount">{mount}</p>
           <button type="button" onClick={() => props.onCommitChange(undefined)}>
             Choose All commits
@@ -234,6 +236,81 @@ describe('PullRequestPanel', () => {
     await view.findByText('Add pull request cards');
     await click(view.getByRole('button', { name: 'Forget token' }));
     await vi.waitFor(() => expect(view.queryByRole('button', { name: 'Forget token' })).toBeNull());
+  });
+
+  it('asks GitHub for 7 requests for the header and Summary, then one per tab', async () => {
+    const SHA = 'abc123';
+    const repo = { full_name: 'mindroom-ai/mindroom-chat' };
+    const pathOf = (url: string) =>
+      new URL(url).pathname.replace('/repos/mindroom-ai/mindroom-chat', '');
+    // Every endpoint the panel reads for one open pull request, each list on one page.
+    fetchMock.mockImplementation(async (url) => {
+      switch (pathOf(url)) {
+        case '/pulls/200':
+          return respond(
+            pull({
+              head: { ref: 'feature', sha: SHA, repo },
+              base: { ref: 'main', repo },
+              commits: 1,
+            })
+          );
+        case `/commits/${SHA}/check-runs`:
+          return respond({ total_count: 0, check_runs: [] });
+        case `/commits/${SHA}/status`:
+          return respond({ total_count: 0, statuses: [] });
+        case `/compare/main...${SHA}`:
+          return respond({ behind_by: 0 });
+        case '/pulls/200/reviews':
+        case '/issues/200/comments':
+        case '/pulls/200/comments':
+          return respond([]);
+        case '/pulls/200/commits':
+          return respond([
+            {
+              sha: 'abcdef1234',
+              html_url: 'x',
+              author: null,
+              commit: {
+                message: 'Add cards',
+                author: { name: 'Ann' },
+                committer: { date: '2026-11-01T00:05:00Z' },
+              },
+            },
+          ]);
+        case '/pulls/200/files':
+          return respond([
+            { filename: 'src/a.ts', status: 'modified', additions: 1, deletions: 1 },
+          ]);
+        default:
+          throw new Error(`unexpected request ${url}`);
+      }
+    });
+    const paths = () => fetchMock.mock.calls.map(([url]) => pathOf(url)).sort();
+    const summary = [
+      '/pulls/200',
+      `/commits/${SHA}/check-runs`,
+      `/commits/${SHA}/status`,
+      `/compare/main...${SHA}`,
+      '/pulls/200/reviews',
+      '/issues/200/comments',
+      '/pulls/200/comments',
+    ];
+
+    const view = await show();
+    expect(await view.findByText('No comments yet.')).toBeTruthy();
+    expect(await view.findByText('No checks')).toBeTruthy();
+    expect(view.getByText('None')).toBeTruthy();
+    expect(paths()).toEqual([...summary].sort());
+
+    await click(view.getByRole('tab', { name: 'Timeline' }));
+    expect(await view.findByText('Add cards')).toBeTruthy();
+    expect(paths()).toEqual([...summary, '/pulls/200/commits'].sort());
+
+    // The Code tab's review comments and commits are the ones the other tabs loaded.
+    await click(view.getByRole('tab', { name: 'Code' }));
+    expect(await view.findByText('src/a.ts')).toBeTruthy();
+    expect(view.getByTestId('code-commits').textContent).toBe('abcdef1234');
+    expect(paths()).toEqual([...summary, '/pulls/200/commits', '/pulls/200/files'].sort());
   });
 
   describe('header', () => {
@@ -554,6 +631,25 @@ describe('PullRequestPanel', () => {
       expect(
         await view.findByText('1000', { selector: '[data-testid="code-truncated"]' })
       ).toBeTruthy();
+    });
+
+    it('tells the Code tab when GitHub listed fewer commits than the pull request has', async () => {
+      serve(withHead({ commits: 300 }), { commits: COMMITS });
+      const view = await show();
+      await view.findByText('Add pull request cards');
+      await click(view.getByRole('tab', { name: 'Code' }));
+      expect(
+        await view.findByText('2', { selector: '[data-testid="code-truncated-commits"]' })
+      ).toBeTruthy();
+    });
+
+    it('tells the Code tab nothing is cut when every commit came', async () => {
+      serve(withHead({ commits: 2 }), { commits: COMMITS });
+      const view = await show();
+      await view.findByText('Add pull request cards');
+      await click(view.getByRole('tab', { name: 'Code' }));
+      await view.findByText('abcdef1234,bcdef12345');
+      expect(view.getByTestId('code-truncated-commits').textContent).toBe('whole');
     });
 
     it('reads the reviews for the Summary tab, and the files only for the Code tab', async () => {

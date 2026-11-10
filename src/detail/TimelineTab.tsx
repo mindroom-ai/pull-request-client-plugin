@@ -26,8 +26,10 @@ import { useCommits, useConversationComments, useReviewComments, useReviews } fr
 import { buildReviewThreads } from '../reviewThreads';
 import { CommentBody } from './CommentBody';
 import { ConversationCard } from './ConversationCards';
+import { TruncatedNote } from './TruncatedNote';
 import {
   buildTimeline,
+  commitsCut,
   reviewOutcome,
   type ConversationItem,
   type TimelineEvent,
@@ -287,9 +289,15 @@ export function TimelineTab({
   );
   const queries = [commits, reviews, comments, reviewComments];
   const loading = queries.some((query) => query.isPending);
-  const truncated = [commits, reviews, comments, reviewComments].find(
-    (query) => query.data?.truncated
-  );
+  // Each list that came only in part says so, with how much of it is here.
+  const cut = (
+    [
+      ['commits', commits.data, commits.data && commitsCut(commits.data, pullRequest.commitCount)],
+      ['reviews', reviews.data, reviews.data?.truncated],
+      ['comments', comments.data, comments.data?.truncated],
+      ['reviewComments', reviewComments.data, reviewComments.data?.truncated],
+    ] as const
+  ).flatMap(([list, data, isCut]) => (data && isCut ? [{ list, count: data.items.length }] : []));
 
   return (
     <div className="mrpr-timeline-tab">
@@ -303,13 +311,13 @@ export function TimelineTab({
           />
         ) : null
       )}
-      {truncated ? (
-        <p className="mrpr-status mrpr-note">
-          <a className="mrpr-link" href={pullRequest.url} target="_blank" rel="noopener noreferrer">
-            {t('summary.truncated', { count: truncated.data?.items.length ?? 0 })}
-          </a>
-        </p>
-      ) : null}
+      {cut.map(({ list, count }) => (
+        <TruncatedNote
+          key={list}
+          label={t(`truncated.${list}`, { count })}
+          href={list === 'commits' ? `${pullRequest.url}/commits` : pullRequest.url}
+        />
+      ))}
       {loading ? <p className="mrpr-status">{t('timeline.loading')}</p> : null}
       {events.length === 0 ? (
         loading ? null : (

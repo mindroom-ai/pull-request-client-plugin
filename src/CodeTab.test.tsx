@@ -243,6 +243,7 @@ type Options = {
   commits?: ListState<Commit>;
   commit?: string;
   truncatedReviewComments?: number;
+  truncatedCommits?: number;
 };
 
 // The panel keeps the chosen commit; this stands in for it.
@@ -252,6 +253,7 @@ function Holder({
   commits,
   initial,
   truncatedReviewComments,
+  truncatedCommits,
 }: Omit<Options, 'themeKind' | 'commit'> & { initial?: string }) {
   const [chosen, setChosen] = useState(initial);
   return (
@@ -263,6 +265,7 @@ function Holder({
       commit={chosen}
       onCommitChange={setChosen}
       truncatedReviewComments={truncatedReviewComments}
+      truncatedCommits={truncatedCommits}
     />
   );
 }
@@ -993,8 +996,21 @@ describe('CodeTab', () => {
 
   it('says when GitHub cut the review comments short', async () => {
     const tab = await show({ truncatedReviewComments: 1000 });
-    const note = tab.getByRole('link', { name: 'Showing the first 1000; see the rest on GitHub' });
+    const note = tab.getByRole('link', {
+      name: 'Showing the first 1000 review comments; see the rest on GitHub',
+    });
     expect(note.getAttribute('href')).toBe('https://github.com/mindroom-ai/mindroom-chat/pull/200');
     expect(diffNames()).toHaveLength(6);
+  });
+
+  it('says when the commit selector lists only some of the commits', async () => {
+    const tab = await show({ truncatedCommits: 250 });
+    const note = tab.getByRole('link', {
+      name: 'Showing the first 250 commits; see the rest on GitHub',
+    });
+    expect(note.getAttribute('href')).toBe(
+      'https://github.com/mindroom-ai/mindroom-chat/pull/200/commits'
+    );
+    expect(tab.getByRole('button', { name: /^Diff scope:/ })).toBeTruthy();
   });
 });

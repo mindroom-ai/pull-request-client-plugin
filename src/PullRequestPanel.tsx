@@ -16,7 +16,7 @@ import { CodeTab, type ListState } from './CodeTab';
 import { BaseBranch } from './detail/BaseBranch';
 import { ChangeBreakdownStat } from './detail/ChangeBreakdownStat';
 import { ChecksStatusLine } from './detail/ChecksStatusLine';
-import { baseFreshness, latestReviewOutcomes } from './detail/detail.logic';
+import { baseFreshness, commitsCut, latestReviewOutcomes } from './detail/detail.logic';
 import { SummaryTab } from './detail/SummaryTab';
 import { TimelineTab } from './detail/TimelineTab';
 import {
@@ -230,10 +230,13 @@ function listState<T>(
 /** The Code tab with what it shows: the files, the review threads and the commits. */
 function Files({
   pullRequest,
+  commitCount,
   commit,
   onCommitChange,
 }: {
   pullRequest: PullRequestRef;
+  /** How many commits the pull request has, which the list of them may fall short of. */
+  commitCount: number;
   commit: string | undefined;
   onCommitChange: (sha: string | undefined) => void;
 }) {
@@ -258,6 +261,11 @@ function Files({
         onCommitChange={onCommitChange}
         truncatedReviewComments={
           reviewComments.data?.truncated ? reviewComments.data.items.length : undefined
+        }
+        truncatedCommits={
+          commits.data && commitsCut(commits.data, commitCount)
+            ? commits.data.items.length
+            : undefined
         }
       />
     );
@@ -433,7 +441,12 @@ export default function PullRequestPanel({ request }: { roomId: string; request?
                 }}
               />
             ) : (
-              <Files pullRequest={ref} commit={selectedCommit} onCommitChange={selectCommit} />
+              <Files
+                pullRequest={ref}
+                commitCount={pr.commitCount}
+                commit={selectedCommit}
+                onCommitChange={selectCommit}
+              />
             )}
           </div>
         </PanelTokenFormContext.Provider>

@@ -35,6 +35,7 @@ import { CommitSelector } from './detail/CommitSelector';
 import { DiffOptionsMenu } from './detail/DiffOptionsMenu';
 import { OffDiffThreads } from './detail/OffDiffThreads';
 import { ReviewThreadCard } from './detail/ReviewThreadCard';
+import { TruncatedNote } from './detail/TruncatedNote';
 import { isTestFile } from './diff/changedFileKind';
 import { useCodePrefs } from './diff/codePrefs';
 import {
@@ -238,6 +239,7 @@ export function CodeTab({
   commit,
   onCommitChange,
   truncatedReviewComments,
+  truncatedCommits,
 }: {
   pullRequest: PullRequestRef;
   /** The files of the pull request as a whole. */
@@ -249,6 +251,8 @@ export function CodeTab({
   onCommitChange: (sha: string | undefined) => void;
   /** How many review comments loaded, when GitHub's list of them was cut short. */
   truncatedReviewComments?: number;
+  /** How many commits loaded, when the selector has only some of the pull request's. */
+  truncatedCommits?: number;
 }) {
   const t = usePluginTranslation('pull-requests');
   const themeKind = useThemeKind();
@@ -622,7 +626,8 @@ export function CodeTab({
       {/* A list that did not load leaves the diffs whole; it says so, with a retry, above them. */}
       {commits.status === 'error' ||
       threads.status === 'error' ||
-      truncatedReviewComments !== undefined ? (
+      truncatedReviewComments !== undefined ||
+      truncatedCommits !== undefined ? (
         <div className="mrpr-code-notices">
           {commits.status === 'error' ? (
             <GitHubErrorState compact error={commits.error} onRetry={commits.retry} />
@@ -631,16 +636,16 @@ export function CodeTab({
             <GitHubErrorState compact error={threads.error} onRetry={threads.retry} />
           ) : null}
           {truncatedReviewComments !== undefined ? (
-            <p className="mrpr-status mrpr-note">
-              <a
-                className="mrpr-link"
-                href={pullRequestUrl(pullRequest)}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                {t('summary.truncated', { count: truncatedReviewComments })}
-              </a>
-            </p>
+            <TruncatedNote
+              label={t('truncated.reviewComments', { count: truncatedReviewComments })}
+              href={pullRequestUrl(pullRequest)}
+            />
+          ) : null}
+          {truncatedCommits !== undefined ? (
+            <TruncatedNote
+              label={t('truncated.commits', { count: truncatedCommits })}
+              href={`${pullRequestUrl(pullRequest)}/commits`}
+            />
           ) : null}
         </div>
       ) : null}

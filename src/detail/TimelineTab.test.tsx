@@ -110,7 +110,7 @@ const commit = (sha: string, message: string, minute: number) => ({
 type Parts = {
   commits?: unknown[] | Response;
   reviews?: unknown[];
-  comments?: unknown[];
+  comments?: unknown[] | ((url: string) => unknown[]);
   reviewComments?: unknown[];
 };
 
@@ -122,7 +122,9 @@ const serve = (parts: Parts = {}) =>
     if (url.includes('/pulls/200/commits')) return answer(parts.commits);
     if (url.includes('/pulls/200/reviews')) return answer(parts.reviews);
     if (url.includes('/pulls/200/comments')) return answer(parts.reviewComments);
-    if (url.includes('/issues/200/comments')) return answer(parts.comments);
+    if (url.includes('/issues/200/comments')) {
+      return answer(typeof parts.comments === 'function' ? parts.comments(url) : parts.comments);
+    }
     throw new Error(`unexpected request ${url}`);
   });
 
@@ -253,6 +255,33 @@ describe('TimelineTab', () => {
     const view = await show();
     expect(await view.findByText('No activity yet.')).toBeTruthy();
     expect(view.container.querySelector('.mrpr-timeline')).toBeNull();
+  });
+
+  it('names each list GitHub cut short, the commits by the count of the pull request', async () => {
+    let next = 0;
+    serve({
+      commits: [commit('abcdef1234', 'Add cards', 5), commit('bcdef12345', 'Fix cards', 6)],
+      // Every page is full, so the list stops at ten pages.
+      comments: () =>
+        Array.from({ length: 100 }, () => issueComment((next += 1), 'ann', `C${next}`)),
+    });
+    const view = await show({ pullRequest: pull({ commitCount: 300 }) });
+    const commits = await view.findByRole('link', {
+      name: 'Showing the first 2 commits; see the rest on GitHub',
+    });
+    expect(commits.getAttribute('href')).toBe(`${PR_URL}/commits`);
+    const comments = await view.findByRole('link', {
+      name: 'Showing the first 1000 comments; see the rest on GitHub',
+    });
+    expect(comments.getAttribute('href')).toBe(PR_URL);
+    expect(view.queryByText(/Showing the first \d+;/)).toBeNull();
+  });
+
+  it('says nothing is cut when every commit came', async () => {
+    serve({ commits: [commit('abcdef1234', 'Add cards', 5)] });
+    const view = await show({ pullRequest: pull({ commitCount: 1 }) });
+    await view.findByText('Add cards');
+    expect(view.queryByText(/Showing the first/)).toBeNull();
   });
 
   it('a failing query shows its error with Retry while the others still show', async () => {
