@@ -10,6 +10,7 @@ import type { PullRequest, PullRequestRef } from '../github';
 import { pullRequestChecksStatePresentation } from '../presentation';
 import { useChecks } from '../queries';
 import { pluginRootStyle } from '../theme';
+import { usePanelTokenFormFor } from '../token';
 import { ChecksPopover } from './ChecksPopover';
 import { checksState, summarizeChecks } from './detail.logic';
 
@@ -22,6 +23,8 @@ export function ChecksStatusLine({
 }) {
   const t = usePluginTranslation('pull-requests');
   const query = useChecks(pullRequestRef, pullRequest.headSha, true);
+  // The panel's token form is the one to use when a token would let the checks load.
+  usePanelTokenFormFor(query.isError ? query.error : undefined);
   const [anchor, setAnchor] = useState<RectCords>();
   // Escape and a click outside the popover close it, as the app's own menus do.
   const close = () => {

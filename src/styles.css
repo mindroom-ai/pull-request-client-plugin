@@ -122,6 +122,30 @@
   display: flex;
   gap: 6px;
 }
+/* The panel's one token form, between the header and the tabs. */
+.mrpr-panel-token {
+  flex-shrink: 0;
+  padding-block: 0 12px;
+  padding-inline: 16px;
+}
+.mrpr-panel-token .mrpr-token {
+  margin-block-start: 0;
+}
+
+/* A part of a tab that did not load: the reason, Retry and the way to the token form, in a row. */
+.mrpr-error-compact {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin-block-start: 8px;
+}
+.mrpr-error-compact .mrpr-status {
+  margin: 0;
+}
+.mrpr-error-compact .mrpr-link-button {
+  font-size: 12px;
+}
 .mrpr-input {
   min-width: 0;
   flex: 1;

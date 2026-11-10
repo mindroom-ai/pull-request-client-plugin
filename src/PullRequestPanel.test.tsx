@@ -83,6 +83,18 @@ const respond = (body: unknown, status = 200) =>
 
 const click = (element: HTMLElement) => act(async () => element.click());
 
+// Polls as testing-library's findBy queries do: outside React's act environment, so that what the
+// answered requests change renders as it comes.
+const waitUntil = async (check: () => void) => {
+  const scope = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+  scope.IS_REACT_ACT_ENVIRONMENT = false;
+  try {
+    await vi.waitFor(check);
+  } finally {
+    scope.IS_REACT_ACT_ENVIRONMENT = true;
+  }
+};
+
 const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>();
 const filesRequests = () => fetchMock.mock.calls.filter(([url]) => url.includes('/files'));
 
@@ -255,6 +267,7 @@ describe('PullRequestPanel', () => {
           return answer instanceof Response ? answer : respond(answer);
         }
         if (url.includes('/reviews')) return respond(parts.reviews ?? []);
+        if (url.includes('/issues/200/comments')) return respond([]);
         if (url.includes('/files')) return respond(parts.files ?? []);
         return respond(pr);
       });
@@ -551,6 +564,48 @@ describe('PullRequestPanel', () => {
         expect(fetchMock.mock.calls.some(([url]) => url.includes('/pulls/200/reviews'))).toBe(true)
       );
       expect(filesRequests()).toHaveLength(0);
+    });
+
+    it('offers one token form under the rate limit, and each failed part its own Retry', async () => {
+      const limited = () =>
+        new Response('{}', { status: 403, headers: { 'x-ratelimit-remaining': '0' } });
+      let limit = true;
+      serve(withHead());
+      const served = fetchMock.getMockImplementation()!;
+      // The pull request came before the limit; everything after it is refused while it lasts.
+      fetchMock.mockImplementation(async (url, init) =>
+        limit && !url.endsWith('/pulls/200') ? limited() : served(url, init)
+      );
+      const retries = () => view.queryAllByRole('button', { name: 'Try again' });
+      const view = await show();
+      await view.findByText('Add pull request cards');
+      // The reviewers, the conversation comments and the review comments each failed.
+      await waitUntil(() => expect(retries()).toHaveLength(3));
+      expect(view.getAllByText("GitHub's rate limit was reached.")).toHaveLength(3);
+      expect(view.getByText('Checks unavailable')).toBeTruthy();
+      await waitUntil(() => expect(view.getAllByLabelText('GitHub token')).toHaveLength(1));
+      expect(view.getByText('A token raises the limit.')).toBeTruthy();
+
+      const adds = view.getAllByRole('button', { name: 'Add a GitHub token' });
+      expect(adds).toHaveLength(3);
+      await click(adds[1]!);
+      expect(document.activeElement).toBe(view.getByLabelText('GitHub token'));
+
+      limit = false;
+      const reviewRequests = () =>
+        fetchMock.mock.calls.filter(([url]) => url.includes('/pulls/200/reviews')).length;
+      const before = reviewRequests();
+      await click(retries()[0]!);
+      await waitUntil(() => expect(retries()).toHaveLength(2));
+      expect(reviewRequests()).toBe(before + 1);
+      // The form stays while any part still needs it.
+      expect(view.getAllByLabelText('GitHub token')).toHaveLength(1);
+      for (const retry of retries()) await click(retry);
+      expect(await view.findByText('No comments yet.')).toBeTruthy();
+      expect(view.getByLabelText('GitHub token')).toBeTruthy();
+      await click(view.getByRole('button', { name: 'Retry' }));
+      await waitUntil(() => expect(view.queryByLabelText('GitHub token')).toBeNull());
+      expect(retries()).toHaveLength(0);
     });
 
     it('leaves the header whole when the checks do not load', async () => {

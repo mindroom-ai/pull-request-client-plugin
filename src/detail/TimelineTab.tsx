@@ -295,7 +295,12 @@ export function TimelineTab({
     <div className="mrpr-timeline-tab">
       {queries.map((query, index) =>
         query.isError ? (
-          <GitHubErrorState key={index} error={query.error} onRetry={() => void query.refetch()} />
+          <GitHubErrorState
+            key={index}
+            compact
+            error={query.error}
+            onRetry={() => void query.refetch()}
+          />
         ) : null
       )}
       {truncated ? (

@@ -213,6 +213,7 @@ export const en = {
     label: 'GitHub token',
     save: 'Save',
     forget: 'Forget token',
+    add: 'Add a GitHub token',
     hint: {
       notFound: 'A token that can read the repository shows it.',
       rateLimited: 'A token raises the limit.',

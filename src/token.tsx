@@ -1,6 +1,18 @@
-import { useCallback, useMemo, useState, useSyncExternalStore, type FormEvent } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type FormEvent,
+  type Ref,
+} from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { usePluginStorage, usePluginTranslation } from '@mindroom/client-sdk/core';
+import { GitHubError } from './github';
 
 const KEY = 'githubToken';
 
@@ -55,7 +67,13 @@ export function useStoredToken(): () => string | undefined {
   return useCallback(() => storage.getItem(KEY) ?? undefined, [storage]);
 }
 
-export function TokenForm({ reason }: { reason: 'notFound' | 'rateLimited' | 'badToken' }) {
+export function TokenForm({
+  reason,
+  inputRef,
+}: {
+  reason: 'notFound' | 'rateLimited' | 'badToken';
+  inputRef?: Ref<HTMLInputElement>;
+}) {
   const t = usePluginTranslation('pull-requests');
   const { setToken } = useGitHubToken();
   const [value, setValue] = useState('');
@@ -71,6 +89,7 @@ export function TokenForm({ reason }: { reason: 'notFound' | 'rateLimited' | 'ba
       <p className="mrpr-status">{t(`token.hint.${reason}`)}</p>
       <div className="mrpr-token-row">
         <input
+          ref={inputRef}
           className="mrpr-input"
           type="password"
           autoComplete="off"
@@ -85,4 +104,58 @@ export function TokenForm({ reason }: { reason: 'notFound' | 'rateLimited' | 'ba
       <p className="mrpr-status">{t('token.note')}</p>
     </form>
   );
+}
+
+type TokenReason = 'notFound' | 'rateLimited';
+
+type PanelTokenFormState = {
+  /** Asks for the form for this reason; the returned function withdraws the ask. */
+  need(reason: TokenReason): () => void;
+  focus(): void;
+};
+
+/** The panel's one token form, for the parts inside it whose failures a token would fix. */
+export const PanelTokenFormContext = createContext<PanelTokenFormState | undefined>(undefined);
+
+/**
+ * The panel's token form: shown while one of its parts shows a failure that a token fixes, GitHub's
+ * rate limit before not finding the repository, and focused from those parts.
+ */
+export function usePanelTokenForm() {
+  const [needs, setNeeds] = useState<readonly TokenReason[]>([]);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const context = useMemo(
+    (): PanelTokenFormState => ({
+      need: (reason) => {
+        setNeeds((current) => [...current, reason]);
+        return () =>
+          setNeeds((current) => {
+            const index = current.indexOf(reason);
+            return index < 0 ? current : [...current.slice(0, index), ...current.slice(index + 1)];
+          });
+      },
+      focus: () => inputRef.current?.focus(),
+    }),
+    []
+  );
+  const reason: TokenReason | undefined = needs.includes('rateLimited')
+    ? 'rateLimited'
+    : needs.includes('notFound')
+    ? 'notFound'
+    : undefined;
+  return { context, reason, inputRef };
+}
+
+/**
+ * For a part of the panel that shows `error`: while it is one a token fixes and none is stored,
+ * the panel shows its token form, and this gives what focuses it; otherwise undefined.
+ */
+export function usePanelTokenFormFor(error: unknown): (() => void) | undefined {
+  const form = useContext(PanelTokenFormContext);
+  const { token } = useGitHubToken();
+  const kind = error instanceof GitHubError ? error.kind : undefined;
+  const reason =
+    token === undefined && (kind === 'notFound' || kind === 'rateLimited') ? kind : undefined;
+  useEffect(() => (form && reason ? form.need(reason) : undefined), [form, reason]);
+  return form && reason ? form.focus : undefined;
 }

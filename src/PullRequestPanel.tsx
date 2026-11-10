@@ -42,7 +42,7 @@ import {
 } from './queries';
 import { buildReviewThreads } from './reviewThreads';
 import { pluginRootStyle } from './theme';
-import { useGitHubToken } from './token';
+import { PanelTokenFormContext, TokenForm, useGitHubToken, usePanelTokenForm } from './token';
 
 const TABS = ['summary', 'timeline', 'code'] as const;
 type Tab = (typeof TABS)[number];
@@ -265,7 +265,7 @@ function Files({
   return (
     <div className="mrpr-panel-note">
       {query.isError ? (
-        <GitHubErrorState error={query.error} onRetry={() => void query.refetch()} />
+        <GitHubErrorState compact error={query.error} onRetry={() => void query.refetch()} />
       ) : (
         <p className="mrpr-status">{t('loadingFiles')}</p>
       )}
@@ -278,6 +278,7 @@ export default function PullRequestPanel({ request }: { roomId: string; request?
   const ref = useMemo(() => readRequest(request), [request]);
   const query = usePullRequest(ref);
   const { token, forget } = useGitHubToken();
+  const tokenForm = usePanelTokenForm();
   const [tab, setTab] = useState<Tab>('summary');
   // The Timeline tab's order, which the tab bar's toggle sets.
   const [order, setOrder] = useState<Order>('newest');
@@ -312,7 +313,7 @@ export default function PullRequestPanel({ request }: { roomId: string; request?
           )}
         </div>
       ) : (
-        <>
+        <PanelTokenFormContext.Provider value={tokenForm.context}>
           <div className="mrpr-header">
             <div className="mrpr-crumbs">
               <state.Icon aria-hidden className={`mrpr-icon ${state.toneClassName}`} />
@@ -391,6 +392,12 @@ export default function PullRequestPanel({ request }: { roomId: string; request?
               ) : null}
             </div>
           </div>
+          {/* One token form for every part below that a token would let load. */}
+          {tokenForm.reason ? (
+            <div className="mrpr-panel-token">
+              <TokenForm reason={tokenForm.reason} inputRef={tokenForm.inputRef} />
+            </div>
+          ) : null}
           <TabBar
             value={tab}
             onChange={setTab}
@@ -429,7 +436,7 @@ export default function PullRequestPanel({ request }: { roomId: string; request?
               <Files pullRequest={ref} commit={selectedCommit} onCommitChange={selectCommit} />
             )}
           </div>
-        </>
+        </PanelTokenFormContext.Provider>
       )}
     </div>
   );

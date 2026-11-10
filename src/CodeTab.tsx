@@ -625,10 +625,10 @@ export function CodeTab({
       truncatedReviewComments !== undefined ? (
         <div className="mrpr-code-notices">
           {commits.status === 'error' ? (
-            <GitHubErrorState error={commits.error} onRetry={commits.retry} />
+            <GitHubErrorState compact error={commits.error} onRetry={commits.retry} />
           ) : null}
           {threads.status === 'error' ? (
-            <GitHubErrorState error={threads.error} onRetry={threads.retry} />
+            <GitHubErrorState compact error={threads.error} onRetry={threads.retry} />
           ) : null}
           {truncatedReviewComments !== undefined ? (
             <p className="mrpr-status mrpr-note">
@@ -688,6 +688,7 @@ export function CodeTab({
         <div className="mrpr-panel-note">
           {commitFiles.isError ? (
             <GitHubErrorState
+              compact
               error={commitFiles.error}
               onRetry={() => void commitFiles.refetch()}
             />

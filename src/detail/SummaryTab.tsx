@@ -216,7 +216,7 @@ function ReviewersRow({
           <PullRequestLabelChip key={`team:${team}`} label={{ name: team, color: null }} />
         ))}
       </span>
-      {error ? <GitHubErrorState error={error} onRetry={retry} /> : null}
+      {error ? <GitHubErrorState compact error={error} onRetry={retry} /> : null}
       {reviews?.truncated ? (
         <TruncatedNote
           label={t('summary.truncated', { count: reviews.items.length })}
@@ -246,7 +246,7 @@ function ChecksList({
   const t = usePluginTranslation('pull-requests');
   const query = useChecks(pullRequestRef, pullRequest.headSha, true);
   if (query.isError) {
-    return <GitHubErrorState error={query.error} onRetry={() => void query.refetch()} />;
+    return <GitHubErrorState compact error={query.error} onRetry={() => void query.refetch()} />;
   }
   if (!query.data) return <p className="mrpr-status">{t('summary.loadingChecks')}</p>;
   const checks = query.data.items;
@@ -466,10 +466,15 @@ export function SummaryTab({
         }
       >
         {comments.isError ? (
-          <GitHubErrorState error={comments.error} onRetry={() => void comments.refetch()} />
+          <GitHubErrorState
+            compact
+            error={comments.error}
+            onRetry={() => void comments.refetch()}
+          />
         ) : null}
         {reviewComments.isError ? (
           <GitHubErrorState
+            compact
             error={reviewComments.error}
             onRetry={() => void reviewComments.refetch()}
           />
