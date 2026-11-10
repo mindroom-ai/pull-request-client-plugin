@@ -499,6 +499,21 @@ describe('fetchBehindBy', () => {
   });
 });
 
+describe('commit paths', () => {
+  it('encodes the head sha and a commit sha like the base branch', async () => {
+    const fetchMock = stubRoutes({ '/compare/': { behind_by: 0 }, '/commits/': { files: [] } });
+    await fetchChecks(ref, 'a/b?c', undefined);
+    await fetchBehindBy(ref, 'x/y', 'a/b?c', undefined);
+    await fetchCommitFiles(ref, 'a/b?c', undefined);
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
+      'https://api.github.com/repos/a/b/commits/a%2Fb%3Fc/check-runs?per_page=100',
+      'https://api.github.com/repos/a/b/commits/a%2Fb%3Fc/status',
+      'https://api.github.com/repos/a/b/compare/x%2Fy...a%2Fb%3Fc',
+      'https://api.github.com/repos/a/b/commits/a%2Fb%3Fc',
+    ]);
+  });
+});
+
 describe('the lists', () => {
   it('drops pending reviews', async () => {
     const review = (id: number, state: string) => ({

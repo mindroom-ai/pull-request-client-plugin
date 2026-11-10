@@ -42,6 +42,33 @@ describe('buildReviewThreads', () => {
     expect(threads[0]!.comments.map((c) => c.id)).toEqual([1, 2, 3]);
   });
 
+  it("a reply to a reply joins the root's thread", () => {
+    const threads = buildReviewThreads([
+      comment(3, '2026-01-03T00:00:00Z', { inReplyToId: 2 }),
+      comment(1, '2026-01-01T00:00:00Z'),
+      comment(2, '2026-01-02T00:00:00Z', { inReplyToId: 1 }),
+    ]);
+    expect(threads.map((t) => [t.id, t.comments.map((c) => c.id)])).toEqual([[1, [1, 2, 3]]]);
+  });
+
+  it('a chain whose root is missing starts at its first loaded comment', () => {
+    const threads = buildReviewThreads([
+      comment(4, '2026-01-04T00:00:00Z', { inReplyToId: 3 }),
+      comment(3, '2026-01-03T00:00:00Z', { inReplyToId: 2 }),
+      comment(2, '2026-01-02T00:00:00Z', { inReplyToId: 99 }),
+    ]);
+    expect(threads.map((t) => [t.id, t.comments.map((c) => c.id)])).toEqual([[2, [2, 3, 4]]]);
+  });
+
+  it('keeps every comment of a reply loop', () => {
+    const threads = buildReviewThreads([
+      comment(1, '2026-01-01T00:00:00Z', { inReplyToId: 2 }),
+      comment(2, '2026-01-02T00:00:00Z', { inReplyToId: 1 }),
+      comment(3, '2026-01-03T00:00:00Z', { inReplyToId: 3 }),
+    ]);
+    expect(threads.flatMap((t) => t.comments.map((c) => c.id)).sort()).toEqual([1, 2, 3]);
+  });
+
   it('an orphan reply is its own thread', () => {
     const threads = buildReviewThreads([comment(5, '2026-01-01T00:00:00Z', { inReplyToId: 99 })]);
     expect(threads.map((t) => [t.id, t.comments.length])).toEqual([[5, 1]]);

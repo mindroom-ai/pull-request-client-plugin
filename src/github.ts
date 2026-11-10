@@ -383,7 +383,7 @@ export async function fetchChecks(
   token: string | undefined,
   signal?: AbortSignal
 ): Promise<PullRequestCheck[]> {
-  const base = `${repoPath(ref)}/commits/${headSha}`;
+  const base = `${repoPath(ref)}/commits/${encodeURIComponent(headSha)}`;
   const [runs, statuses] = await Promise.all([
     getOrNothing(`${base}/check-runs?per_page=${PAGE_SIZE}`, token, signal),
     getOrNothing(`${base}/status`, token, signal),
@@ -410,7 +410,7 @@ export async function fetchBehindBy(
 ): Promise<number> {
   const raw = record(
     await getJson(
-      `${repoPath(ref)}/compare/${encodeURIComponent(baseRef)}...${headSha}`,
+      `${repoPath(ref)}/compare/${encodeURIComponent(baseRef)}...${encodeURIComponent(headSha)}`,
       token,
       signal
     )
@@ -579,7 +579,9 @@ export async function fetchCommitFiles(
   token: string | undefined,
   signal?: AbortSignal
 ): Promise<PullRequestFile[]> {
-  const raw = record(await getJson(`${repoPath(ref)}/commits/${sha}`, token, signal));
+  const raw = record(
+    await getJson(`${repoPath(ref)}/commits/${encodeURIComponent(sha)}`, token, signal)
+  );
   if (!raw) throw new GitHubError('failed', 200);
   return mapFiles(raw.files, `https://github.com/${ref.owner}/${ref.repo}/commit/${sha}`);
 }
