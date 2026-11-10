@@ -95,37 +95,56 @@ function isWorkflowApprovalCheck(check: PullRequestCheck): boolean {
   );
 }
 
-/** One line for the checks: what fails, else what waits for someone, else what runs. */
-export function summarizeChecks(checks: PullRequestCheck[]): string {
-  if (checks.length === 0) return 'No checks reported';
+export type ChecksSummaryKey =
+  | 'none'
+  | 'failing'
+  | 'oneWorkflowAndChecksAwaitingAction'
+  | 'workflowsAndChecksAwaitingAction'
+  | 'workflowsAwaitingApproval'
+  | 'checksAwaitingAction'
+  | 'running'
+  | 'allPassed'
+  | 'passing';
+
+/**
+ * The checks' summary line as the key of its text under `checks` in the plugin's strings, with the
+ * numbers the text needs: `total` checks, `count` of them that the text is about (failing, awaiting
+ * action that is not a workflow approval, running or passing; workflows awaiting approval for
+ * `workflowsAwaitingApproval`), and the `workflows` awaiting approval.
+ */
+export type ChecksSummary = {
+  key: ChecksSummaryKey;
+  count: number;
+  total: number;
+  workflows: number;
+};
+
+/** What the checks line says: what fails, else what waits for someone, else what runs. */
+export function summarizeChecks(checks: PullRequestCheck[]): ChecksSummary {
+  const total = checks.length;
   const actionRequired = checks.filter((check) => check.status === 'action-required');
-  const workflowApprovalRequired = actionRequired.filter(isWorkflowApprovalCheck).length;
-  const otherActionRequired = actionRequired.length - workflowApprovalRequired;
+  const workflows = actionRequired.filter(isWorkflowApprovalCheck).length;
+  const otherActionRequired = actionRequired.length - workflows;
   const failed = checks.filter(
     (check) => check.status === 'failure' || check.status === 'cancelled'
   ).length;
   const pending = checks.filter((check) => check.status === 'pending').length;
   const passed = checks.filter((check) => check.status === 'success').length;
-  if (failed > 0) return `${failed} of ${checks.length} failing`;
-  if (workflowApprovalRequired > 0 && otherActionRequired > 0) {
-    return `${workflowApprovalRequired} ${
-      workflowApprovalRequired === 1 ? 'workflow' : 'workflows'
-    } and ${otherActionRequired} ${otherActionRequired === 1 ? 'check' : 'checks'} awaiting action`;
+  const summary = (key: ChecksSummaryKey, count: number) => ({ key, count, total, workflows });
+  if (total === 0) return summary('none', 0);
+  if (failed > 0) return summary('failing', failed);
+  // i18next plurals follow one count, so the number of workflows picks the key, as the app's
+  // own strings do for a second count.
+  if (workflows > 0 && otherActionRequired > 0) {
+    return summary(
+      workflows === 1 ? 'oneWorkflowAndChecksAwaitingAction' : 'workflowsAndChecksAwaitingAction',
+      otherActionRequired
+    );
   }
-  if (workflowApprovalRequired > 0) {
-    return `${workflowApprovalRequired} ${
-      workflowApprovalRequired === 1 ? 'workflow' : 'workflows'
-    } awaiting approval`;
-  }
-  if (otherActionRequired > 0) {
-    return `${otherActionRequired} ${
-      otherActionRequired === 1 ? 'check' : 'checks'
-    } awaiting action`;
-  }
-  if (pending > 0) return `${pending} of ${checks.length} running`;
-  return passed === checks.length
-    ? 'All checks have passed'
-    : `${passed} of ${checks.length} passing`;
+  if (workflows > 0) return summary('workflowsAwaitingApproval', workflows);
+  if (otherActionRequired > 0) return summary('checksAwaitingAction', otherActionRequired);
+  if (pending > 0) return summary('running', pending);
+  return summary(passed === total ? 'allPassed' : 'passing', passed);
 }
 
 export function groupChecks(checks: PullRequestCheck[]): {

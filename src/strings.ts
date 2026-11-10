@@ -22,6 +22,26 @@ export const en = {
   updated: 'updated {{time}}',
   receivesChanges: 'receives changes from',
   tab: { summary: 'Summary', code: 'Code' },
+  // The checks' summary line, by `summarizeChecks`' key.
+  checks: {
+    none: 'No checks reported',
+    failing: '{{count}} of {{total}} failing',
+    oneWorkflowAndChecksAwaitingAction_one:
+      '{{workflows}} workflow and {{count}} check awaiting action',
+    oneWorkflowAndChecksAwaitingAction_other:
+      '{{workflows}} workflow and {{count}} checks awaiting action',
+    workflowsAndChecksAwaitingAction_one:
+      '{{workflows}} workflows and {{count}} check awaiting action',
+    workflowsAndChecksAwaitingAction_other:
+      '{{workflows}} workflows and {{count}} checks awaiting action',
+    workflowsAwaitingApproval_one: '{{count}} workflow awaiting approval',
+    workflowsAwaitingApproval_other: '{{count}} workflows awaiting approval',
+    checksAwaitingAction_one: '{{count}} check awaiting action',
+    checksAwaitingAction_other: '{{count}} checks awaiting action',
+    running: '{{count}} of {{total}} running',
+    allPassed: 'All checks have passed',
+    passing: '{{count}} of {{total}} passing',
+  },
   opened: 'opened {{time}}',
   ghost: 'ghost',
   state: { open: 'Open', draft: 'Draft', closed: 'Closed', merged: 'Merged' },

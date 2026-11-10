@@ -248,25 +248,40 @@ describe('checks', () => {
   });
 
   it('summarizes failing first, then awaiting action, then running', () => {
-    expect(summarizeChecks([])).toBe('No checks reported');
+    const summary = (key: string, count: number, total: number, workflows = 0) => ({
+      key,
+      count,
+      total,
+      workflows,
+    });
+    expect(summarizeChecks([])).toEqual(summary('none', 0, 0));
     expect(
       summarizeChecks([check('failure'), check('cancelled'), check('pending'), check('success')])
-    ).toBe('2 of 4 failing');
-    expect(summarizeChecks([check('pending'), check('success'), check('pending')])).toBe(
-      '2 of 3 running'
+    ).toEqual(summary('failing', 2, 4));
+    expect(summarizeChecks([check('pending'), check('success'), check('pending')])).toEqual(
+      summary('running', 2, 3)
     );
-    expect(summarizeChecks([check('action-required'), check('pending')])).toBe(
-      '1 check awaiting action'
+    expect(summarizeChecks([check('action-required'), check('pending')])).toEqual(
+      summary('checksAwaitingAction', 1, 2)
     );
-    expect(summarizeChecks([check('action-required', run), check('action-required', run)])).toBe(
-      '2 workflows awaiting approval'
+    expect(summarizeChecks([check('action-required', run), check('action-required', run)])).toEqual(
+      summary('workflowsAwaitingApproval', 2, 2, 2)
     );
-    expect(summarizeChecks([check('action-required', run), check('action-required')])).toBe(
-      '1 workflow and 1 check awaiting action'
+    expect(summarizeChecks([check('action-required', run), check('action-required')])).toEqual(
+      summary('oneWorkflowAndChecksAwaitingAction', 1, 2, 1)
     );
-    expect(summarizeChecks([check('success'), check('success')])).toBe('All checks have passed');
-    expect(summarizeChecks([check('success'), check('skipped'), check('neutral')])).toBe(
-      '1 of 3 passing'
+    expect(
+      summarizeChecks([
+        check('action-required', run),
+        check('action-required', run),
+        check('action-required'),
+      ])
+    ).toEqual(summary('workflowsAndChecksAwaitingAction', 1, 3, 2));
+    expect(summarizeChecks([check('success'), check('success')])).toEqual(
+      summary('allPassed', 2, 2)
+    );
+    expect(summarizeChecks([check('success'), check('skipped'), check('neutral')])).toEqual(
+      summary('passing', 1, 3)
     );
   });
 
