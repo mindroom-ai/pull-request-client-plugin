@@ -6,16 +6,47 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import plugin from './index';
 import PullRequestPanel from './PullRequestPanel';
 
-// The Code tab's diff libraries need a browser; the tab stands in as its file paths.
-vi.mock('./CodeTab', () => ({
-  CodeTab: ({ files }: { files: { path: string }[] }) => (
-    <ul aria-label="Changed files">
-      {files.map((file) => (
-        <li key={file.path}>{file.path}</li>
-      ))}
-    </ul>
-  ),
-}));
+// The Code tab's diff libraries need a browser; the tab stands in as its file paths, what it was
+// given of the threads, the commits and the chosen commit, how many review comments loaded of a
+// list cut short, which mount of the tab it is, and a button that chooses All commits.
+vi.mock('./CodeTab', async () => {
+  const { useState } = await import('react');
+  type List = { status: string; items?: { id?: number; sha?: string }[] };
+  const listed = (list: List, key: 'id' | 'sha') =>
+    list.items ? list.items.map((item) => item[key]).join(',') : list.status;
+  let mounts = 0;
+  return {
+    CodeTab: function CodeTab(props: {
+      files: { path: string }[];
+      threads: List;
+      commits: List;
+      commit?: string;
+      onCommitChange: (sha: string | undefined) => void;
+      truncatedReviewComments?: number;
+      truncatedCommits?: number;
+    }) {
+      const [mount] = useState(() => (mounts += 1));
+      return (
+        <div>
+          <ul aria-label="Changed files">
+            {props.files.map((file) => (
+              <li key={file.path}>{file.path}</li>
+            ))}
+          </ul>
+          <p data-testid="code-threads">{listed(props.threads, 'id')}</p>
+          <p data-testid="code-commits">{listed(props.commits, 'sha')}</p>
+          <p data-testid="code-commit">{props.commit ?? 'all'}</p>
+          <p data-testid="code-truncated">{props.truncatedReviewComments ?? 'whole'}</p>
+          <p data-testid="code-truncated-commits">{props.truncatedCommits ?? 'whole'}</p>
+          <p data-testid="code-mount">{mount}</p>
+          <button type="button" onClick={() => props.onCommitChange(undefined)}>
+            Choose All commits
+          </button>
+        </div>
+      );
+    },
+  };
+});
 
 // The app's Markdown renderer loads on demand and cannot load here; this one renders bold text.
 vi.mock('@mindroom/client-sdk/ui', async (importOriginal) => {
@@ -53,6 +84,18 @@ const respond = (body: unknown, status = 200) =>
   });
 
 const click = (element: HTMLElement) => act(async () => element.click());
+
+// Polls as testing-library's findBy queries do: outside React's act environment, so that what the
+// answered requests change renders as it comes.
+const waitUntil = async (check: () => void) => {
+  const scope = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+  scope.IS_REACT_ACT_ENVIRONMENT = false;
+  try {
+    await vi.waitFor(check);
+  } finally {
+    scope.IS_REACT_ACT_ENVIRONMENT = true;
+  }
+};
 
 const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>();
 const filesRequests = () => fetchMock.mock.calls.filter(([url]) => url.includes('/files'));
@@ -150,10 +193,10 @@ describe('PullRequestPanel', () => {
     await act(async () => {
       summary.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
     });
-    expect(view.getByRole('tab', { name: 'Code' }).getAttribute('aria-selected')).toBe('true');
+    expect(view.getByRole('tab', { name: 'Timeline' }).getAttribute('aria-selected')).toBe('true');
     await act(async () => {
       view
-        .getByRole('tab', { name: 'Code' })
+        .getByRole('tab', { name: 'Timeline' })
         .dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
     });
     expect(view.getByRole('tab', { name: 'Summary' }).getAttribute('aria-selected')).toBe('true');
@@ -193,5 +236,482 @@ describe('PullRequestPanel', () => {
     await view.findByText('Add pull request cards');
     await click(view.getByRole('button', { name: 'Forget token' }));
     await vi.waitFor(() => expect(view.queryByRole('button', { name: 'Forget token' })).toBeNull());
+  });
+
+  it('asks GitHub for 7 requests for the header and Summary, then one per tab', async () => {
+    const SHA = 'abc123';
+    const repo = { full_name: 'mindroom-ai/mindroom-chat' };
+    const pathOf = (url: string) =>
+      new URL(url).pathname.replace('/repos/mindroom-ai/mindroom-chat', '');
+    // Every endpoint the panel reads for one open pull request, each list on one page.
+    fetchMock.mockImplementation(async (url) => {
+      switch (pathOf(url)) {
+        case '/pulls/200':
+          return respond(
+            pull({
+              head: { ref: 'feature', sha: SHA, repo },
+              base: { ref: 'main', repo },
+              commits: 1,
+            })
+          );
+        case `/commits/${SHA}/check-runs`:
+          return respond({ total_count: 0, check_runs: [] });
+        case `/commits/${SHA}/status`:
+          return respond({ total_count: 0, statuses: [] });
+        case `/compare/main...${SHA}`:
+          return respond({ behind_by: 0 });
+        case '/pulls/200/reviews':
+        case '/issues/200/comments':
+        case '/pulls/200/comments':
+          return respond([]);
+        case '/pulls/200/commits':
+          return respond([
+            {
+              sha: 'abcdef1234',
+              html_url: 'x',
+              author: null,
+              commit: {
+                message: 'Add cards',
+                author: { name: 'Ann' },
+                committer: { date: '2026-11-01T00:05:00Z' },
+              },
+            },
+          ]);
+        case '/pulls/200/files':
+          return respond([
+            { filename: 'src/a.ts', status: 'modified', additions: 1, deletions: 1 },
+          ]);
+        default:
+          throw new Error(`unexpected request ${url}`);
+      }
+    });
+    const paths = () => fetchMock.mock.calls.map(([url]) => pathOf(url)).sort();
+    const summary = [
+      '/pulls/200',
+      `/commits/${SHA}/check-runs`,
+      `/commits/${SHA}/status`,
+      `/compare/main...${SHA}`,
+      '/pulls/200/reviews',
+      '/issues/200/comments',
+      '/pulls/200/comments',
+    ];
+
+    const view = await show();
+    expect(await view.findByText('No comments yet.')).toBeTruthy();
+    expect(await view.findByText('No checks')).toBeTruthy();
+    expect(view.getByText('None')).toBeTruthy();
+    expect(paths()).toEqual([...summary].sort());
+
+    await click(view.getByRole('tab', { name: 'Timeline' }));
+    expect(await view.findByText('Add cards')).toBeTruthy();
+    expect(paths()).toEqual([...summary, '/pulls/200/commits'].sort());
+
+    // The Code tab's review comments and commits are the ones the other tabs loaded.
+    await click(view.getByRole('tab', { name: 'Code' }));
+    expect(await view.findByText('src/a.ts')).toBeTruthy();
+    expect(view.getByTestId('code-commits').textContent).toBe('abcdef1234');
+    expect(paths()).toEqual([...summary, '/pulls/200/commits', '/pulls/200/files'].sort());
+  });
+
+  describe('header', () => {
+    const SHA = 'abc123';
+    const withHead = (over: Record<string, unknown> = {}) =>
+      pull({
+        head: { ref: 'feature', sha: SHA, repo: { full_name: 'mindroom-ai/mindroom-chat' } },
+        base: { ref: 'main', repo: { full_name: 'mindroom-ai/mindroom-chat' } },
+        ...over,
+      });
+    // Each endpoint the header reads answers with its own body; the rest gets the pull request.
+    const serve = (
+      pr: Record<string, unknown>,
+      parts: {
+        files?: unknown[];
+        behind?: number;
+        reviews?: unknown[];
+        commits?: unknown[];
+        reviewComments?: unknown[] | Response;
+        checks?: Response;
+        statuses?: Response;
+      } = {}
+    ) =>
+      fetchMock.mockImplementation(async (url) => {
+        if (url.includes('/check-runs')) return parts.checks ?? respond({ check_runs: [] });
+        if (url.includes('/status?')) return parts.statuses ?? respond({ statuses: [] });
+        if (url.includes('/compare/')) return respond({ behind_by: parts.behind ?? 0 });
+        if (url.includes('/commits')) return respond(parts.commits ?? []);
+        if (url.includes('/pulls/200/comments')) {
+          const answer = parts.reviewComments ?? [];
+          return answer instanceof Response ? answer : respond(answer);
+        }
+        if (url.includes('/reviews')) return respond(parts.reviews ?? []);
+        if (url.includes('/issues/200/comments')) return respond([]);
+        if (url.includes('/files')) return respond(parts.files ?? []);
+        return respond(pr);
+      });
+    const comparisons = () => fetchMock.mock.calls.filter(([url]) => url.includes('/compare/'));
+
+    it('links the repository and number', async () => {
+      const view = await show();
+      expect(await view.findByRole('link', { name: 'mindroom-ai/mindroom-chat' })).toBeTruthy();
+      expect(
+        view.getByRole('link', { name: 'mindroom-ai/mindroom-chat' }).getAttribute('href')
+      ).toBe('https://github.com/mindroom-ai/mindroom-chat');
+      expect(view.getByRole('link', { name: '#200' }).getAttribute('href')).toBe(
+        'https://github.com/mindroom-ai/mindroom-chat/pull/200'
+      );
+    });
+
+    it("opens the author's profile", async () => {
+      serve(withHead({ user: { login: 'basnijholt', html_url: 'https://github.com/basnijholt' } }));
+      const view = await show();
+      const link = await view.findByRole('link', { name: "Open basnijholt's profile" });
+      expect(link.getAttribute('href')).toBe('https://github.com/basnijholt');
+    });
+
+    it('copies the checkout command', async () => {
+      const writeText = vi.fn(async () => undefined);
+      vi.stubGlobal('navigator', { clipboard: { writeText } });
+      const view = await show();
+      await click(await view.findByRole('button', { name: 'Copy checkout command' }));
+      expect(writeText).toHaveBeenCalledWith('gh pr checkout 200 -R mindroom-ai/mindroom-chat');
+      expect(view.getByRole('button', { name: 'Copied' })).toBeTruthy();
+    });
+
+    it('leaves the checkout button as it was where there is no clipboard', async () => {
+      vi.stubGlobal('navigator', {});
+      const view = await show();
+      await click(await view.findByRole('button', { name: 'Copy checkout command' }));
+      expect(view.getByRole('button', { name: 'Copy checkout command' })).toBeTruthy();
+      expect(view.queryByRole('button', { name: 'Copied' })).toBeNull();
+    });
+
+    it('names the owner of a fork head', async () => {
+      serve(withHead({ head: { ref: 'feature', sha: SHA, repo: { full_name: 'octo/chat' } } }));
+      const view = await show();
+      expect(await view.findByText('octo:feature')).toBeTruthy();
+    });
+
+    it('shows the head branch plain when it is in the same repository', async () => {
+      serve(withHead());
+      const view = await show();
+      expect(await view.findByText('feature')).toBeTruthy();
+      expect(view.queryByText(/:feature/)).toBeNull();
+    });
+
+    it('shows behind and conflicts', async () => {
+      serve(withHead({ mergeable_state: 'dirty' }), { behind: 3 });
+      const view = await show();
+      const button = await view.findByRole('button', { name: 'Warnings for main' });
+      expect(button.getAttribute('aria-haspopup')).toBe('dialog');
+      await click(button);
+      expect(await view.findByText('feature is 3 commits behind main')).toBeTruthy();
+      expect(view.getByText('This branch has conflicts that must be resolved')).toBeTruthy();
+      expect(view.getByRole('dialog', { name: 'Warnings for main' })).toBeTruthy();
+      expect(view.queryByRole('menu')).toBeNull();
+    });
+
+    it('closes the base warning with a second click', async () => {
+      serve(withHead(), { behind: 1 });
+      const view = await show();
+      const button = await view.findByRole('button', { name: 'Warnings for main' });
+      await click(button);
+      expect(await view.findByText('feature is 1 commit behind main')).toBeTruthy();
+      await click(button);
+      expect(view.queryByText('feature is 1 commit behind main')).toBeNull();
+    });
+
+    it('shows no warning for a branch that is current, and asks nothing of a merged pull request', async () => {
+      serve(withHead({ merged_at: '2026-11-02T00:00:00Z', state: 'closed' }), { behind: 5 });
+      const view = await show();
+      await view.findByText('Add pull request cards');
+      expect(view.queryByRole('button', { name: 'Warnings for main' })).toBeNull();
+      expect(comparisons()).toHaveLength(0);
+    });
+
+    it.each([
+      ['Draft', { draft: true }],
+      ['Merged', { state: 'closed', merged_at: '2026-11-02T00:00:00Z' }],
+      ['Closed', { state: 'closed' }],
+      ['Auto-merge (squash)', { auto_merge: { merge_method: 'squash' } }],
+    ])('badge: %s', async (label, over) => {
+      serve(withHead(over));
+      const view = await show();
+      expect(await view.findByText(label)).toBeTruthy();
+    });
+
+    it('has no badge for an open pull request', async () => {
+      serve(withHead());
+      const view = await show();
+      await view.findByText('Add pull request cards');
+      for (const label of ['Draft', 'Merged', 'Closed']) expect(view.queryByText(label)).toBeNull();
+      expect(view.queryByText(/Auto-merge/)).toBeNull();
+    });
+
+    it('splits the line breakdown by kind in a tooltip', async () => {
+      serve(withHead({ additions: 20, deletions: 13 }), {
+        files: [
+          { filename: 'src/a.ts', status: 'modified', additions: 5, deletions: 1 },
+          { filename: 'src/a.test.ts', status: 'added', additions: 3, deletions: 0 },
+          { filename: 'package-lock.json', status: 'modified', additions: 10, deletions: 10 },
+          { filename: 'README.md', status: 'modified', additions: 2, deletions: 2 },
+        ],
+      });
+      const view = await show();
+      await view.findByText('Add pull request cards');
+      expect(filesRequests()).toHaveLength(0);
+      const stat = view.getByRole('button', { name: /^Lines changed/ });
+      expect(stat.getAttribute('aria-haspopup')).toBe('dialog');
+      expect(stat.getAttribute('aria-expanded')).toBe('false');
+      await act(async () => stat.focus());
+      await view.findByText('Total');
+      expect(stat.getAttribute('aria-expanded')).toBe('true');
+      expect(view.getByRole('dialog', { name: 'Lines changed: +20 -13' })).toBeTruthy();
+      expect(view.queryByRole('menu')).toBeNull();
+      expect(document.querySelector('.mrpr-breakdown')?.textContent).toBe(
+        'Code+5-1Tests+3-0Generated+10-10Docs+2-2Total+20-13'
+      );
+      expect(filesRequests()).toHaveLength(1);
+    });
+
+    it('shows the counts and the order toggle on Timeline, with approvals of the head only', async () => {
+      const review = (id: number, login: string, state: string, commit: string) => ({
+        id,
+        state,
+        user: { login },
+        body: '',
+        commit_id: commit,
+        submitted_at: `2026-11-0${id}T00:00:00Z`,
+        html_url: 'x',
+      });
+      serve(withHead({ comments: 4, review_comments: 3, commits: 5 }), {
+        reviews: [
+          review(1, 'ann', 'APPROVED', SHA),
+          review(2, 'bob', 'APPROVED', 'old'),
+          review(3, 'cy', 'CHANGES_REQUESTED', SHA),
+        ],
+      });
+      const view = await show();
+      await view.findByText('Add pull request cards');
+      await click(view.getByRole('tab', { name: 'Timeline' }));
+      expect(view.getByText('7 comments')).toBeTruthy();
+      expect(view.getByText('5 commits')).toBeTruthy();
+      expect(await view.findByText('1 approval')).toBeTruthy();
+      const toggle = view.getByRole('button', { name: 'Newest first' });
+      await click(toggle);
+      expect(view.getByRole('button', { name: 'Oldest first' })).toBeTruthy();
+      await click(view.getByRole('tab', { name: 'Summary' }));
+      // The Summary tab's comments have an order of their own, still the newest first.
+      expect(view.queryByRole('button', { name: 'Oldest first' })).toBeNull();
+    });
+
+    const commitEntry = (sha: string, message: string, date: string) => ({
+      sha,
+      html_url: 'x',
+      author: null,
+      commit: { message, author: { name: 'Ann' }, committer: { date } },
+    });
+    const COMMITS = [
+      commitEntry('abcdef1234', 'Add cards', '2026-11-01T00:05:00Z'),
+      commitEntry('bcdef12345', 'Fix cards', '2026-11-01T00:06:00Z'),
+    ];
+    const reviewComment = (id: number, over: Record<string, unknown> = {}) => ({
+      id,
+      user: { login: 'ann' },
+      body: `Thread ${id}`,
+      created_at: `2026-11-01T00:0${id}:00Z`,
+      html_url: 'x',
+      path: 'src/a.ts',
+      line: 1,
+      side: 'RIGHT',
+      position: 1,
+      commit_id: SHA,
+      ...over,
+    });
+    const commitsRequests = () =>
+      fetchMock.mock.calls.filter(([url]) => url.includes('/pulls/200/commits'));
+
+    it('opens the Code tab from a commit of the Timeline', async () => {
+      serve(withHead(), { commits: COMMITS });
+      const view = await show();
+      await view.findByText('Add pull request cards');
+      await click(view.getByRole('tab', { name: 'Timeline' }));
+      await click(await view.findByRole('button', { name: 'View commit abcdef1' }));
+      expect(view.getByRole('tab', { name: 'Code' }).getAttribute('aria-selected')).toBe('true');
+      expect((await view.findByTestId('code-commit')).textContent).toBe('abcdef1234');
+      await click(view.getByRole('button', { name: 'Choose All commits' }));
+      expect(view.getByTestId('code-commit').textContent).toBe('all');
+    });
+
+    it('gives the Code tab the review threads and the commits, which it loads', async () => {
+      serve(withHead(), {
+        commits: COMMITS,
+        reviewComments: [
+          reviewComment(1),
+          reviewComment(2, { in_reply_to_id: 1 }),
+          reviewComment(3),
+        ],
+      });
+      const view = await show();
+      await view.findByText('Add pull request cards');
+      expect(commitsRequests()).toHaveLength(0);
+      await click(view.getByRole('tab', { name: 'Code' }));
+      expect(await view.findByText('abcdef1234,bcdef12345')).toBeTruthy();
+      expect((await view.findByTestId('code-threads')).textContent).toBe('1,3');
+      expect(view.getByTestId('code-commit').textContent).toBe('all');
+      expect(commitsRequests()).toHaveLength(1);
+    });
+
+    it('tells the Code tab when the review comments do not load', async () => {
+      serve(withHead(), {
+        files: [{ filename: 'src/a.ts', status: 'modified', additions: 1, deletions: 1 }],
+        reviewComments: respond({}, 404),
+      });
+      const view = await show();
+      await view.findByText('Add pull request cards');
+      await click(view.getByRole('tab', { name: 'Code' }));
+      expect(await view.findByText('error')).toBeTruthy();
+      expect(view.getByText('src/a.ts')).toBeTruthy();
+    });
+
+    it('forgets the chosen commit when the panel shows another pull request', async () => {
+      serve(withHead(), { commits: COMMITS });
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      const panel = (number: number) => (
+        <QueryClientProvider client={client}>
+          <PullRequestPanel roomId="!room:example.org" request={{ ...REQUEST, number }} />
+        </QueryClientProvider>
+      );
+      const view = await renderPluginComponent(panel(200), { id: 'pull-requests', plugin });
+      await view.findByText('Add pull request cards');
+      await click(view.getByRole('tab', { name: 'Timeline' }));
+      await click(await view.findByRole('button', { name: 'View commit abcdef1' }));
+      expect((await view.findByTestId('code-commit')).textContent).toBe('abcdef1234');
+      view.rerender(panel(201));
+      expect((await view.findByTestId('code-commit')).textContent).toBe('all');
+    });
+
+    it('starts the Code tab afresh for another pull request', async () => {
+      serve(withHead(), { commits: COMMITS });
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      const panel = (number: number) => (
+        <QueryClientProvider client={client}>
+          <PullRequestPanel roomId="!room:example.org" request={{ ...REQUEST, number }} />
+        </QueryClientProvider>
+      );
+      // Both pull requests load once, so that showing either again finds its files at once.
+      const view = await renderPluginComponent(panel(201), { id: 'pull-requests', plugin });
+      await view.findByText('Add pull request cards');
+      await click(view.getByRole('tab', { name: 'Code' }));
+      await view.findByTestId('code-mount');
+      view.rerender(panel(200));
+      const mount = Number((await view.findByTestId('code-mount')).textContent);
+      view.rerender(panel(201));
+      // The tab's own state, such as the open bar or the folded files, is the other pull request's.
+      expect(
+        await view.findByText(String(mount + 1), { selector: '[data-testid="code-mount"]' })
+      ).toBeTruthy();
+    });
+
+    it('tells the Code tab when GitHub cut the review comments short', async () => {
+      let next = 0;
+      serve(withHead());
+      const served = fetchMock.getMockImplementation()!;
+      fetchMock.mockImplementation(async (url, init) =>
+        url.includes('/pulls/200/comments')
+          ? respond(
+              Array.from({ length: 100 }, () =>
+                reviewComment((next += 1), { created_at: '2026-11-01T00:00:00Z' })
+              )
+            )
+          : served(url, init)
+      );
+      const view = await show();
+      await view.findByText('Add pull request cards');
+      await click(view.getByRole('tab', { name: 'Code' }));
+      expect(
+        await view.findByText('1000', { selector: '[data-testid="code-truncated"]' })
+      ).toBeTruthy();
+    });
+
+    it('tells the Code tab when GitHub listed fewer commits than the pull request has', async () => {
+      serve(withHead({ commits: 300 }), { commits: COMMITS });
+      const view = await show();
+      await view.findByText('Add pull request cards');
+      await click(view.getByRole('tab', { name: 'Code' }));
+      expect(
+        await view.findByText('2', { selector: '[data-testid="code-truncated-commits"]' })
+      ).toBeTruthy();
+    });
+
+    it('tells the Code tab nothing is cut when every commit came', async () => {
+      serve(withHead({ commits: 2 }), { commits: COMMITS });
+      const view = await show();
+      await view.findByText('Add pull request cards');
+      await click(view.getByRole('tab', { name: 'Code' }));
+      await view.findByText('abcdef1234,bcdef12345');
+      expect(view.getByTestId('code-truncated-commits').textContent).toBe('whole');
+    });
+
+    it('reads the reviews for the Summary tab, and the files only for the Code tab', async () => {
+      serve(withHead());
+      const view = await show();
+      await view.findByText('Add pull request cards');
+      await vi.waitFor(() =>
+        expect(fetchMock.mock.calls.some(([url]) => url.includes('/pulls/200/reviews'))).toBe(true)
+      );
+      expect(filesRequests()).toHaveLength(0);
+    });
+
+    it('offers one token form under the rate limit, and each failed part its own Retry', async () => {
+      const limited = () =>
+        new Response('{}', { status: 403, headers: { 'x-ratelimit-remaining': '0' } });
+      let limit = true;
+      serve(withHead());
+      const served = fetchMock.getMockImplementation()!;
+      // The pull request came before the limit; everything after it is refused while it lasts.
+      fetchMock.mockImplementation(async (url, init) =>
+        limit && !url.endsWith('/pulls/200') ? limited() : served(url, init)
+      );
+      const retries = () => view.queryAllByRole('button', { name: 'Try again' });
+      const view = await show();
+      await view.findByText('Add pull request cards');
+      // The reviewers, the conversation comments and the review comments each failed.
+      await waitUntil(() => expect(retries()).toHaveLength(3));
+      expect(view.getAllByText("GitHub's rate limit was reached.")).toHaveLength(3);
+      expect(view.getByText('Checks unavailable')).toBeTruthy();
+      await waitUntil(() => expect(view.getAllByLabelText('GitHub token')).toHaveLength(1));
+      expect(view.getByText('A token raises the limit.')).toBeTruthy();
+
+      const adds = view.getAllByRole('button', { name: 'Add a GitHub token' });
+      expect(adds).toHaveLength(3);
+      await click(adds[1]!);
+      expect(document.activeElement).toBe(view.getByLabelText('GitHub token'));
+
+      limit = false;
+      const reviewRequests = () =>
+        fetchMock.mock.calls.filter(([url]) => url.includes('/pulls/200/reviews')).length;
+      const before = reviewRequests();
+      await click(retries()[0]!);
+      await waitUntil(() => expect(retries()).toHaveLength(2));
+      expect(reviewRequests()).toBe(before + 1);
+      // The form stays while any part still needs it.
+      expect(view.getAllByLabelText('GitHub token')).toHaveLength(1);
+      for (const retry of retries()) await click(retry);
+      expect(await view.findByText('No comments yet.')).toBeTruthy();
+      expect(view.getByLabelText('GitHub token')).toBeTruthy();
+      await click(view.getByRole('button', { name: 'Retry' }));
+      await waitUntil(() => expect(view.queryByLabelText('GitHub token')).toBeNull());
+      expect(retries()).toHaveLength(0);
+    });
+
+    it('leaves the header whole when the checks do not load', async () => {
+      const limited = () =>
+        new Response('{}', { status: 403, headers: { 'x-ratelimit-remaining': '0' } });
+      serve(withHead(), { checks: limited(), statuses: limited() });
+      const view = await show();
+      expect(await view.findByText('Checks unavailable')).toBeTruthy();
+      expect(view.getByText('Add pull request cards')).toBeTruthy();
+      expect(view.getByRole('button', { name: 'Retry' })).toBeTruthy();
+    });
   });
 });

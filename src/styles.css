@@ -122,6 +122,30 @@
   display: flex;
   gap: 6px;
 }
+/* The panel's one token form, between the header and the tabs. */
+.mrpr-panel-token {
+  flex-shrink: 0;
+  padding-block: 0 12px;
+  padding-inline: 16px;
+}
+.mrpr-panel-token .mrpr-token {
+  margin-block-start: 0;
+}
+
+/* A part of a tab that did not load: the reason, Retry and the way to the token form, in a row. */
+.mrpr-error-compact {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin-block-start: 8px;
+}
+.mrpr-error-compact .mrpr-status {
+  margin: 0;
+}
+.mrpr-error-compact .mrpr-link-button {
+  font-size: 12px;
+}
 .mrpr-input {
   min-width: 0;
   flex: 1;
@@ -293,6 +317,312 @@
   overflow-wrap: anywhere;
 }
 
+/* The toolbar's start: the commit selector, then the file count. */
+.mrpr-code-toolbar-start {
+  display: flex;
+  flex: 1;
+  min-inline-size: 0;
+  align-items: center;
+  gap: 12px;
+}
+
+.mrpr-commit-trigger {
+  display: inline-flex;
+  min-inline-size: 0;
+  max-inline-size: 256px;
+  align-items: center;
+  gap: 4px;
+  padding-block: 3px;
+  padding-inline: 8px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--pr-hover);
+  color: var(--pr-fg);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.mrpr-commit-trigger .mrpr-icon {
+  opacity: 0.7;
+}
+
+.mrpr-commit-menu {
+  box-sizing: border-box;
+  display: flex;
+  min-inline-size: 240px;
+  max-inline-size: min(28rem, calc(100vw - 2rem));
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+}
+.mrpr-commit-option {
+  display: flex;
+  min-inline-size: 0;
+  align-items: center;
+  gap: 8px;
+  padding-block: 6px;
+  padding-inline: 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--pr-fg);
+  font: inherit;
+  font-size: 12px;
+  text-align: start;
+  cursor: pointer;
+}
+.mrpr-commit-option:hover,
+.mrpr-commit-option:focus-visible {
+  background: var(--pr-hover);
+}
+.mrpr-commit-sha {
+  flex-shrink: 0;
+  margin-inline-start: auto;
+  color: var(--pr-muted);
+  font-family: var(--pr-font-mono);
+  font-size: 11px;
+}
+.mrpr-commit-more {
+  /* Its text lines up with the commits', past the check mark's place. */
+  padding-inline-start: 28px;
+  color: var(--pr-muted);
+}
+.mrpr-invisible {
+  visibility: hidden;
+}
+
+/* The toolbar's end: the display controls, then the file tree's toggle. The diff options are
+   buttons of their own in a toolbar at least 512 px wide, else they sit in a menu. */
+.mrpr-code-toolbar-end {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 2px;
+}
+.mrpr-code-options {
+  display: none;
+  align-items: center;
+  gap: 2px;
+}
+@container (min-inline-size: 512px) {
+  .mrpr-code-options {
+    display: flex;
+  }
+  .mrpr-code-options-menu {
+    display: none;
+  }
+}
+.mrpr-segmented {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px;
+  border: 1px solid var(--pr-border);
+  border-radius: 8px;
+}
+.mrpr-options-menu {
+  min-inline-size: 200px;
+}
+.mrpr-menu-separator {
+  block-size: 1px;
+  margin-block: 4px;
+  background: var(--pr-border);
+}
+.mrpr-link-button {
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--pr-primary);
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.mrpr-link-button:hover {
+  text-decoration: underline;
+}
+
+/* A file's header: the fold chevron before the name; after it, GitHub's line counts and the
+   viewed mark, whose label keeps one width so the marks line up from file to file. */
+.mrpr-fold-toggle {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  inline-size: 20px;
+  block-size: 20px;
+  margin-inline-end: 4px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--pr-muted);
+  cursor: pointer;
+}
+.mrpr-fold-toggle:hover {
+  background: var(--pr-hover);
+  color: var(--pr-fg);
+}
+.mrpr-file-meta {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 12px;
+  font-size: 11px;
+}
+.mrpr-file-meta .mrpr-diffstat {
+  font-family: var(--pr-font-mono);
+}
+.mrpr-viewed {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  min-inline-size: 4.5rem;
+  color: var(--pr-muted);
+  font-family: var(--pr-font-sans);
+  font-size: 11px;
+  cursor: pointer;
+  user-select: none;
+}
+.mrpr-viewed input {
+  margin: 0;
+  accent-color: var(--pr-primary);
+  cursor: pointer;
+}
+.mrpr-no-diff-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* What did not load of the threads or the commits, above the diffs. */
+.mrpr-code-notices {
+  flex-shrink: 0;
+  padding-block: 0 12px;
+  padding-inline: 16px;
+  border-block-end: 1px solid var(--pr-border);
+}
+
+/* The conversations not on the current diff: a bar above the diffs that opens downwards. */
+.mrpr-off-diff {
+  flex-shrink: 0;
+  border-block-end: 1px solid var(--pr-border);
+}
+.mrpr-off-diff-toggle {
+  display: flex;
+  inline-size: 100%;
+  align-items: center;
+  gap: 6px;
+  padding-block: 8px;
+  padding-inline: 16px;
+  border: 0;
+  background: transparent;
+  color: var(--pr-muted);
+  font: inherit;
+  font-size: 12px;
+  text-align: start;
+  cursor: pointer;
+}
+.mrpr-off-diff-toggle:hover {
+  color: var(--pr-fg);
+}
+.mrpr-off-diff-body {
+  display: flex;
+  max-block-size: 256px;
+  flex-direction: column;
+  gap: 12px;
+  overflow: auto;
+  padding-block: 0 12px;
+  padding-inline: 16px;
+}
+.mrpr-off-diff-file {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.mrpr-off-diff-path,
+.mrpr-off-diff-line {
+  margin: 0;
+  padding-inline: 12px;
+  color: var(--pr-muted);
+  font-size: 12px;
+}
+.mrpr-off-diff-file .mrpr-thread-card {
+  margin-block: 4px;
+}
+
+/* A review thread's card, at its line in a diff or in the bar. Pierre's view draws the lines in
+   the code font from left to right; the card reads as the panel does. */
+.mrpr-annotation {
+  padding-block: 4px;
+  color: var(--pr-fg);
+  font-family: var(--pr-font-sans);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.mrpr-annotation:dir(rtl) {
+  direction: rtl;
+}
+.mrpr-thread-card {
+  margin-block: 8px;
+  margin-inline: 12px;
+  padding: 12px;
+  border: 1px solid var(--pr-border);
+  border-radius: 12px;
+  background: var(--pr-surface);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
+  font-size: 13px;
+}
+.mrpr-thread-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--pr-muted);
+  font-size: 12px;
+}
+.mrpr-thread-card-toggle {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.mrpr-thread-card-toggle:hover {
+  color: var(--pr-fg);
+}
+.mrpr-thread-card-comments {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-block-start: 8px;
+}
+.mrpr-thread-comment {
+  min-inline-size: 0;
+}
+.mrpr-thread-comment-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: var(--pr-muted);
+  font-size: 12px;
+}
+.mrpr-thread-comment-head .mrpr-reactions {
+  margin-inline-start: auto;
+}
+.mrpr-thread-comment .mrpr-comment-body {
+  margin-block-start: 4px;
+}
+/* The body's first and last paragraphs keep no margin outside it, so the card's padding is all. */
+.mrpr-thread-comment .mrpr-markdown > :first-child {
+  margin-block-start: 0;
+}
+.mrpr-thread-comment .mrpr-markdown > :last-child {
+  margin-block-end: 0;
+}
+
 /* The side panel: a column as tall as the panel. The header and tab bar keep their height; the
    tab's area takes the rest, so the Code tab scrolls inside itself and the Summary as a whole. */
 .mrpr-panel {
@@ -382,7 +712,9 @@
   flex-shrink: 0;
 }
 
-/* The arrow points from the head branch to the base branch, which sits on the other side in right-to-left. */
+/* An arrow that points along the line turns around in right-to-left: the one from the head branch
+   to the base branch, and a folded file's chevron, which Pierre's header (laid out left to right)
+   holds in a page that reads right to left. */
 .mrpr-arrow-back:dir(rtl) {
   transform: scaleX(-1);
 }
@@ -497,4 +829,630 @@
 }
 .mrpr-description a {
   color: var(--pr-primary);
+}
+
+.mrpr-tone-success {
+  color: var(--pr-added);
+}
+.mrpr-tone-failure {
+  color: var(--pr-removed);
+}
+.mrpr-tone-warning {
+  color: var(--pr-warning);
+}
+.mrpr-tone-muted {
+  color: var(--pr-muted);
+}
+
+.mrpr-spin {
+  animation: mrpr-spin 1s linear infinite;
+}
+@keyframes mrpr-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mrpr-spin {
+    animation: none;
+  }
+}
+
+.mrpr-sr-only {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.mrpr-tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+.mrpr-button-quiet {
+  border-color: transparent;
+  color: var(--pr-muted);
+  font-size: 11px;
+}
+
+/* The checks popover and the header's line that opens it. */
+.mrpr-popover {
+  box-sizing: border-box;
+  inline-size: 360px;
+  max-inline-size: calc(100vw - 2rem);
+  padding: 12px;
+}
+.mrpr-popover-fit {
+  inline-size: auto;
+}
+.mrpr-popover-line {
+  margin: 0;
+  font-size: 12px;
+  line-height: 16px;
+}
+.mrpr-popover-line + .mrpr-popover-line {
+  margin-block-start: 2px;
+}
+.mrpr-breakdown {
+  display: grid;
+  grid-template-columns: auto auto auto;
+  justify-content: start;
+  gap: 4px 16px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.mrpr-breakdown > .mrpr-added,
+.mrpr-breakdown > .mrpr-removed {
+  text-align: end;
+  font-family: var(--pr-font-mono);
+}
+.mrpr-breakdown-rule {
+  grid-column: 1 / -1;
+  border-block-start: 1px solid var(--pr-border);
+}
+.mrpr-checks-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.mrpr-checks-line .mrpr-status {
+  margin: 0;
+}
+.mrpr-checks-button {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--pr-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.mrpr-checks-button:hover {
+  background: var(--pr-hover);
+  color: var(--pr-fg);
+}
+.mrpr-checks-heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+}
+.mrpr-checks {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 4px 8px;
+  max-block-size: 256px;
+  margin: 8px 0 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  font-size: 12px;
+}
+.mrpr-checks-with-details {
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+}
+.mrpr-check {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
+}
+.mrpr-check-status {
+  justify-self: end;
+  white-space: nowrap;
+  color: var(--pr-muted);
+}
+
+/* Review verdicts: a ring around the avatar, a glyph on its corner and a badge. */
+.mrpr-ring-approved {
+  --ring: var(--pr-added);
+}
+.mrpr-ring-changes-requested {
+  --ring: var(--pr-removed);
+}
+.mrpr-ring-dismissed {
+  --ring: var(--pr-muted);
+}
+[class*='mrpr-ring-'] {
+  box-shadow: 0 0 0 2px var(--ring);
+}
+/* A verdict on an earlier commit mixes with the surface, which also keeps overlapping avatars from
+   showing through each other. */
+.mrpr-ring-stale {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ring) 35%, var(--pr-surface));
+}
+.mrpr-outcome-badge {
+  position: absolute;
+  inset-inline-end: -4px;
+  inset-block-end: -4px;
+  inline-size: 12px;
+  block-size: 12px;
+  border-radius: 9999px;
+  background: var(--pr-surface);
+}
+.mrpr-outcome-badge-stale {
+  opacity: 0.5;
+}
+.mrpr-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border: 1px solid var(--pr-border);
+  border-radius: 9999px;
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+.mrpr-badge-success {
+  border-color: var(--pr-added);
+  color: var(--pr-added);
+}
+.mrpr-badge-error {
+  border-color: var(--pr-removed);
+  color: var(--pr-removed);
+}
+.mrpr-badge-outline {
+  color: var(--pr-muted);
+}
+
+.mrpr-label {
+  --label: var(--pr-muted);
+  display: inline-flex;
+  min-width: 0;
+  max-inline-size: 10rem;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border: 1px solid color-mix(in srgb, var(--label) 50%, transparent);
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--label) 18%, transparent);
+  color: var(--pr-fg);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.mrpr-actor {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  color: inherit;
+  text-decoration: none;
+}
+.mrpr-actor-login {
+  font-weight: 500;
+  color: var(--pr-fg);
+}
+.mrpr-actor-link:hover .mrpr-actor-login {
+  text-decoration: underline;
+}
+
+.mrpr-reactions {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+.mrpr-reaction {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  block-size: 24px;
+  padding-inline: 8px;
+  border: 1px solid var(--pr-border);
+  border-radius: 9999px;
+  color: var(--pr-muted);
+  font-size: 12px;
+}
+
+.mrpr-comment-body {
+  min-width: 0;
+}
+.mrpr-comment-clip {
+  position: relative;
+}
+.mrpr-comment-clamped {
+  max-block-size: 240px;
+  overflow: hidden;
+}
+.mrpr-comment-fade {
+  position: absolute;
+  inset-inline: 0;
+  inset-block-end: 0;
+  block-size: 40px;
+  pointer-events: none;
+  background: linear-gradient(to top, var(--pr-surface), transparent);
+}
+.mrpr-comment-body .mrpr-button {
+  margin-block-start: 8px;
+}
+.mrpr-markdown {
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.mrpr-markdown img {
+  max-inline-size: 100%;
+}
+.mrpr-markdown pre {
+  overflow-x: auto;
+}
+.mrpr-comment-plain {
+  white-space: pre-wrap;
+}
+
+/* The header's links, badges and the two buttons that open popovers. */
+.mrpr-crumb-link {
+  color: inherit;
+  text-decoration: none;
+}
+.mrpr-crumb-link:hover {
+  text-decoration: underline;
+}
+.mrpr-badges {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  margin-inline-start: auto;
+}
+.mrpr-badge-state {
+  border-color: currentColor;
+}
+.mrpr-panel-meta {
+  justify-content: space-between;
+  gap: 8px;
+}
+.mrpr-base-plain,
+.mrpr-base-warning {
+  display: inline-flex;
+  min-inline-size: 0;
+  align-items: center;
+  gap: 4px;
+}
+.mrpr-base-warning {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: help;
+}
+.mrpr-stat-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: help;
+}
+
+/* The end of the tab bar: the checks line on Summary, the counts and the order on Timeline. */
+.mrpr-tabbar {
+  justify-content: space-between;
+  gap: 8px;
+}
+.mrpr-tabbar-end {
+  display: flex;
+  min-inline-size: 0;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--pr-muted);
+}
+.mrpr-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The Summary tab: the reviewers and labels, its collapsible sections and the conversation. */
+.mrpr-summary {
+  display: flex;
+  flex-direction: column;
+  min-inline-size: 0;
+}
+.mrpr-summary-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-block-end: 4px;
+}
+.mrpr-meta-row {
+  display: grid;
+  grid-template-columns: 6rem minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  min-block-size: 24px;
+  font-size: 12px;
+}
+.mrpr-meta-row-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-block-size: 24px;
+  color: var(--pr-muted);
+}
+.mrpr-meta-row-value {
+  display: flex;
+  min-inline-size: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.mrpr-reviewers,
+.mrpr-labels {
+  display: flex;
+  min-inline-size: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.mrpr-avatars {
+  display: flex;
+  align-items: center;
+}
+.mrpr-reviewer {
+  position: relative;
+  display: inline-flex;
+  border-radius: 9999px;
+}
+.mrpr-avatars > .mrpr-reviewer + .mrpr-reviewer {
+  margin-inline-start: -4px;
+}
+.mrpr-reviewer:hover {
+  z-index: 1;
+}
+.mrpr-note {
+  flex-basis: 100%;
+}
+
+.mrpr-section-heading {
+  position: sticky;
+  inset-block-start: -12px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-inline: -16px;
+  padding-inline: 16px;
+  background: var(--pr-surface);
+}
+.mrpr-section-toggle {
+  display: inline-flex;
+  min-inline-size: 0;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  padding-block: 10px;
+  border: 0;
+  background: transparent;
+  color: var(--pr-muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  text-align: start;
+  cursor: pointer;
+}
+.mrpr-section-toggle:hover {
+  color: var(--pr-fg);
+}
+.mrpr-chevron {
+  transition: transform 0.15s;
+}
+.mrpr-chevron-open {
+  transform: rotate(90deg);
+}
+.mrpr-chevron:dir(rtl) {
+  scale: -1 1;
+}
+.mrpr-section-body {
+  padding-block-end: 12px;
+}
+.mrpr-section-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+}
+.mrpr-section-actions .mrpr-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.mrpr-button-wide {
+  inline-size: 100%;
+}
+
+.mrpr-conversations {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.mrpr-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.mrpr-replies {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-inline-start: 16px;
+  padding-inline-start: 12px;
+  border-inline-start: 2px solid var(--pr-border);
+}
+.mrpr-comment-card {
+  min-inline-size: 0;
+  border: 1px solid var(--pr-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.mrpr-comment-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+}
+.mrpr-comment-head .mrpr-reactions {
+  margin-inline-start: auto;
+}
+.mrpr-time-link {
+  color: var(--pr-muted);
+  text-decoration: none;
+}
+a.mrpr-time-link:hover {
+  color: var(--pr-fg);
+  text-decoration: underline;
+}
+.mrpr-comment-location {
+  display: flex;
+  min-inline-size: 0;
+  align-items: center;
+  gap: 8px;
+  margin-block-start: 8px;
+  color: var(--pr-muted);
+  font-size: 12px;
+}
+.mrpr-mono {
+  font-family: var(--pr-font-mono);
+}
+.mrpr-comment-card .mrpr-comment-body {
+  margin-block-start: 8px;
+}
+
+.mrpr-timeline {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+/* The connector line runs behind the markers, which cover it with the panel's background. */
+.mrpr-timeline::before {
+  content: '';
+  position: absolute;
+  inset-block: 16px;
+  inset-inline-start: 11px;
+  inline-size: 1px;
+  background: var(--pr-border);
+}
+.mrpr-timeline-event {
+  position: relative;
+  min-inline-size: 0;
+  padding-inline-start: 36px;
+}
+.mrpr-timeline-marker {
+  position: absolute;
+  inset-inline-start: 0;
+  inset-block-start: 6px;
+  z-index: 1;
+  display: flex;
+  inline-size: 24px;
+  block-size: 24px;
+  align-items: center;
+  justify-content: center;
+  background: var(--pr-surface);
+  color: var(--pr-muted);
+}
+.mrpr-timeline-marker .mrpr-avatar {
+  inline-size: 20px;
+  block-size: 20px;
+}
+.mrpr-timeline-marker-muted {
+  opacity: 0.55;
+}
+.mrpr-timeline-row {
+  display: flex;
+  inline-size: 100%;
+  min-inline-size: 0;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+}
+button.mrpr-timeline-row {
+  cursor: pointer;
+}
+button.mrpr-timeline-row:hover .mrpr-timeline-title {
+  color: var(--pr-primary);
+}
+.mrpr-timeline-title {
+  min-inline-size: 0;
+  font-weight: 600;
+}
+.mrpr-timeline-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  color: var(--pr-muted);
+  font-size: 11px;
+}
+.mrpr-timeline-group-toggle {
+  display: flex;
+  inline-size: 100%;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border: 0;
+  background: none;
+  color: var(--pr-muted);
+  font: inherit;
+  font-size: 12px;
+  text-align: start;
+  cursor: pointer;
+}
+.mrpr-timeline-group-toggle[aria-expanded='true'] {
+  color: var(--pr-fg);
+}
+.mrpr-timeline-group-items {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-block-end: 4px;
+}
+.mrpr-timeline-stale {
+  color: var(--pr-muted);
+  opacity: 0.7;
 }

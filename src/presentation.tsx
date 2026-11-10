@@ -1,14 +1,22 @@
 // Ported from T3 Code (https://github.com/pingdotgg/t3code, apps/web/src/components/pullRequest/pullRequestIcons.tsx and pullRequestPresentation.tsx at 8ab427c6), MIT, Copyright (c) 2026 T3 Tools Inc. See NOTICE.
 // How a pull request's state, author, diff counts and age look, shared by the card and the panel.
-import { Children, isValidElement, useState, type ReactNode } from 'react';
+import { Children, isValidElement, useState, type CSSProperties, type ReactNode } from 'react';
+import { usePluginTranslation } from '@mindroom/client-sdk/core';
 import {
+  CircleCheck,
+  CircleDashed,
+  CircleDot,
+  CircleSlash,
+  CircleX,
   GitMerge,
   GitPullRequestArrow,
   GitPullRequestClosed,
   GitPullRequestDraft,
+  LoaderCircle,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import type { PullRequest } from './github';
+import { isWorkflowApprovalCheck, type ChecksState, type Outcome } from './detail/detail.logic';
+import type { Actor, CheckStatus, PullRequest, PullRequestCheck } from './github';
 
 export const PULL_REQUEST_STATE_PRESENTATION = {
   open: {
@@ -157,5 +165,211 @@ export function RelativeTime({
     <time dateTime={timestamp} title={new Date(timestamp).toLocaleString(language)}>
       {label ? label(relative) : relative}
     </time>
+  );
+}
+
+const CHECK_STATUS_PRESENTATION = {
+  pending: { key: 'pending', Icon: LoaderCircle, toneClassName: 'mrpr-tone-warning mrpr-spin' },
+  'action-required': {
+    key: 'actionRequired',
+    Icon: CircleDot,
+    toneClassName: 'mrpr-tone-warning',
+  },
+  success: { key: 'success', Icon: CircleCheck, toneClassName: 'mrpr-tone-success' },
+  failure: { key: 'failure', Icon: CircleX, toneClassName: 'mrpr-tone-failure' },
+  cancelled: { key: 'cancelled', Icon: CircleX, toneClassName: 'mrpr-tone-failure' },
+  skipped: { key: 'skipped', Icon: CircleSlash, toneClassName: 'mrpr-tone-muted' },
+  neutral: { key: 'neutral', Icon: CircleDashed, toneClassName: 'mrpr-tone-muted' },
+} as const satisfies Record<CheckStatus, { key: string; Icon: unknown; toneClassName: string }>;
+
+export function PullRequestCheckStatusIcon({ status }: { status: CheckStatus }) {
+  const presentation = CHECK_STATUS_PRESENTATION[status];
+  return (
+    <presentation.Icon
+      aria-hidden
+      data-check-status={status}
+      className={`mrpr-icon ${presentation.toneClassName}`}
+    />
+  );
+}
+
+/** What a check is doing, in words; a workflow run that waits for a click asks for approval. */
+export function PullRequestCheckStatusLabel({
+  check,
+}: {
+  check: Pick<PullRequestCheck, 'status' | 'url'>;
+}) {
+  const t = usePluginTranslation('pull-requests');
+  const key = isWorkflowApprovalCheck(check)
+    ? 'awaitingApproval'
+    : CHECK_STATUS_PRESENTATION[check.status].key;
+  return <>{t(`checkStatus.${key}`)}</>;
+}
+
+const CHECKS_STATE_PRESENTATION = {
+  passing: { Icon: CircleCheck, toneClassName: 'mrpr-tone-success' },
+  failing: { Icon: CircleX, toneClassName: 'mrpr-tone-failure' },
+  pending: { Icon: CircleDot, toneClassName: 'mrpr-tone-warning' },
+} as const satisfies Record<Exclude<ChecksState, 'none'>, unknown>;
+
+/** The icon and tone of the checks taken together; the words are `checksState.<state>`. */
+export function pullRequestChecksStatePresentation(state: Exclude<ChecksState, 'none'>) {
+  return CHECKS_STATE_PRESENTATION[state];
+}
+
+const REVIEW_OUTCOME_PRESENTATION = {
+  approved: {
+    key: 'approved',
+    Icon: CircleCheck,
+    toneClassName: 'mrpr-tone-success',
+    ringClassName: 'mrpr-ring-approved',
+    badgeClassName: 'mrpr-badge-success',
+  },
+  'changes-requested': {
+    key: 'changesRequested',
+    Icon: CircleX,
+    toneClassName: 'mrpr-tone-failure',
+    ringClassName: 'mrpr-ring-changes-requested',
+    badgeClassName: 'mrpr-badge-error',
+  },
+  dismissed: {
+    key: 'dismissed',
+    Icon: CircleDashed,
+    toneClassName: 'mrpr-tone-muted',
+    ringClassName: 'mrpr-ring-dismissed',
+    badgeClassName: 'mrpr-badge-outline',
+  },
+} as const satisfies Record<Outcome, unknown>;
+
+export function pullRequestReviewOutcomeToneClassName(outcome: Outcome): string {
+  return REVIEW_OUTCOME_PRESENTATION[outcome].toneClassName;
+}
+
+/** The ring around a reviewer's avatar; a verdict on an earlier commit is a fainter mix. */
+export function pullRequestReviewOutcomeRingClassName(outcome: Outcome, stale = false): string {
+  const { ringClassName } = REVIEW_OUTCOME_PRESENTATION[outcome];
+  return stale ? `${ringClassName} mrpr-ring-stale` : ringClassName;
+}
+
+/** "Approved" and the like, or for a verdict on an earlier commit, "Approved earlier changes". */
+export function usePullRequestReviewOutcomeLabel(): (outcome: Outcome, stale?: boolean) => string {
+  const t = usePluginTranslation('pull-requests');
+  return (outcome, stale = false) =>
+    t(
+      `${stale ? 'reviewOutcomeStale' : 'reviewOutcome'}.${
+        REVIEW_OUTCOME_PRESENTATION[outcome].key
+      }`
+    );
+}
+
+export function PullRequestReviewOutcomeIcon({
+  outcome,
+  className = '',
+}: {
+  outcome: Outcome;
+  className?: string;
+}) {
+  const presentation = REVIEW_OUTCOME_PRESENTATION[outcome];
+  return (
+    <presentation.Icon
+      aria-hidden
+      className={`mrpr-icon ${presentation.toneClassName} ${className}`.trim()}
+    />
+  );
+}
+
+/** A glyph on the avatar's corner: a ring's color alone blends into a colorful bot's avatar. */
+export function PullRequestReviewOutcomeAvatarBadge({
+  outcome,
+  stale = false,
+}: {
+  outcome: Outcome;
+  stale?: boolean;
+}) {
+  const presentation = REVIEW_OUTCOME_PRESENTATION[outcome];
+  return (
+    <presentation.Icon
+      aria-hidden
+      strokeWidth={3}
+      className={`mrpr-outcome-badge ${presentation.toneClassName}${
+        stale ? ' mrpr-outcome-badge-stale' : ''
+      }`}
+    />
+  );
+}
+
+export function PullRequestReviewOutcomeBadge({ outcome }: { outcome: Outcome }) {
+  const label = usePullRequestReviewOutcomeLabel();
+  const presentation = REVIEW_OUTCOME_PRESENTATION[outcome];
+  return (
+    <span className={`mrpr-badge ${presentation.badgeClassName}`}>
+      <presentation.Icon aria-hidden className="mrpr-icon" />
+      <span>{label(outcome)}</span>
+    </span>
+  );
+}
+
+/** `#rrggbb` for the six hex digits of GitHub's label color, with or without a hash. */
+export function pullRequestLabelColor(color: string | null): string | null {
+  const hex = color?.trim().replace(/^#/, '') ?? '';
+  return /^[0-9a-fA-F]{6}$/.test(hex) ? `#${hex}` : null;
+}
+
+export function PullRequestLabelChip({
+  label,
+  children,
+}: {
+  label: { name: string; color: string | null };
+  children?: ReactNode;
+}) {
+  const color = pullRequestLabelColor(label.color);
+  return (
+    <span
+      className="mrpr-label"
+      style={color ? ({ '--label': color } as CSSProperties) : undefined}
+    >
+      <span className="mrpr-truncate">{label.name}</span>
+      {children}
+    </span>
+  );
+}
+
+/** A person as their avatar and login; with a `profileUrl` it links to GitHub's page for them. */
+export function PullRequestActorLabel({
+  actor,
+  profileUrl,
+  variant = 'label',
+}: {
+  actor: Actor | null;
+  profileUrl?: string | null;
+  variant?: 'label' | 'avatar';
+}) {
+  const t = usePluginTranslation('pull-requests');
+  const login = actor?.login ?? t('ghost');
+  const name =
+    actor?.name && actor.name !== login ? t('actor.tooltip', { name: actor.name, login }) : login;
+  const content = (
+    <>
+      <PullRequestActorAvatar actor={actor} />
+      <span className={variant === 'label' ? 'mrpr-truncate mrpr-actor-login' : 'mrpr-sr-only'}>
+        {login}
+      </span>
+    </>
+  );
+  return profileUrl ? (
+    <a
+      className="mrpr-actor mrpr-actor-link"
+      href={profileUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label={t('actor.profile', { login })}
+      title={t('actor.tooltipProfile', { tooltip: name })}
+    >
+      {content}
+    </a>
+  ) : (
+    <span className="mrpr-actor" title={name}>
+      {content}
+    </span>
   );
 }

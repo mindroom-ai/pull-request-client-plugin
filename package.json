@@ -19,6 +19,7 @@
   },
   "peerDependencies": {
     "@tanstack/react-query": "*",
+    "focus-trap-react": "*",
     "folds": "*",
     "react": "*",
     "react-dom": "*",

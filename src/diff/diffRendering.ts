@@ -1,6 +1,7 @@
 // Ported from T3 Code (https://github.com/pingdotgg/t3code, apps/web/src/lib/diffRendering.ts at 8ab427c6), MIT, Copyright (c) 2026 T3 Tools Inc. See NOTICE.
-// Patch parsing and the diff surface's theme, the part of T3 Code's diff rendering the Code tab uses.
-import { parsePatchFiles, type FileDiffMetadata } from '@pierre/diffs';
+// Patch parsing, whitespace hiding and the diff surface's theme, the part of T3 Code's diff
+// rendering the Code tab uses.
+import { parseDiffFromFile, parsePatchFiles, type FileDiffMetadata } from '@pierre/diffs';
 
 export const DIFF_THEME_NAMES = {
   light: 'pierre-light',
@@ -61,9 +62,67 @@ export function getDiffLineStat(files: ReadonlyArray<FileDiffMetadata>): DiffLin
   );
 }
 
+interface RenderablePatchOptions {
+  ignoreWhitespace?: boolean;
+}
+
+function hideWhitespaceChanges(file: FileDiffMetadata): FileDiffMetadata {
+  let splitDelta = 0;
+  let unifiedDelta = 0;
+  const hunks = file.hunks.map((hunk) => {
+    const oldContents = file.deletionLines
+      .slice(hunk.deletionLineIndex, hunk.deletionLineIndex + hunk.deletionCount)
+      .map((line) => `${line.replace(/\s/g, '')}\n`)
+      .join('');
+    const newContents = file.additionLines
+      .slice(hunk.additionLineIndex, hunk.additionLineIndex + hunk.additionCount)
+      .map((line) => `${line.replace(/\s/g, '')}\n`)
+      .join('');
+    const filtered = parseDiffFromFile(
+      { name: file.name, contents: oldContents },
+      { name: file.name, contents: newContents },
+      { context: Infinity }
+    ).hunks[0];
+    const next = {
+      ...hunk,
+      additionLines: filtered?.additionLines ?? 0,
+      deletionLines: filtered?.deletionLines ?? 0,
+      hunkContent: filtered
+        ? filtered.hunkContent.map((content) => ({
+            ...content,
+            additionLineIndex: content.additionLineIndex + hunk.additionLineIndex,
+            deletionLineIndex: content.deletionLineIndex + hunk.deletionLineIndex,
+          }))
+        : [
+            {
+              type: 'context' as const,
+              lines: hunk.additionCount,
+              additionLineIndex: hunk.additionLineIndex,
+              deletionLineIndex: hunk.deletionLineIndex,
+            },
+          ],
+      splitLineStart: hunk.splitLineStart + splitDelta,
+      unifiedLineStart: hunk.unifiedLineStart + unifiedDelta,
+      splitLineCount: filtered?.splitLineCount ?? hunk.additionCount,
+      unifiedLineCount: filtered?.unifiedLineCount ?? hunk.additionCount,
+    };
+    splitDelta += next.splitLineCount - hunk.splitLineCount;
+    unifiedDelta += next.unifiedLineCount - hunk.unifiedLineCount;
+    return next;
+  });
+  return {
+    ...file,
+    hunks,
+    splitLineCount: file.splitLineCount + splitDelta,
+    unifiedLineCount: file.unifiedLineCount + unifiedDelta,
+    ...(file.cacheKey ? { cacheKey: `${file.cacheKey}:ignore-whitespace` } : {}),
+  };
+}
+
 export function getRenderablePatch(
   patch: string | undefined,
-  cacheScope = 'diff-panel'
+  cacheScope = 'diff-panel',
+  options: RenderablePatchOptions = {}
 ): RenderablePatch | null {
   if (!patch?.trim()) return null;
 
@@ -71,7 +130,8 @@ export function getRenderablePatch(
     const parsedPatches = parsePatchFiles(patch, {
       cacheKeyPrefix: buildPatchCacheKey(patch, cacheScope),
     });
-    const files = parsedPatches.flatMap((parsedPatch) => parsedPatch.files);
+    const sourceFiles = parsedPatches.flatMap((parsedPatch) => parsedPatch.files);
+    const files = options.ignoreWhitespace ? sourceFiles.map(hideWhitespaceChanges) : sourceFiles;
     if (files.length > 0) {
       return { kind: 'files', files };
     }

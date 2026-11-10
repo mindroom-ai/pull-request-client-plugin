@@ -2,8 +2,15 @@ import { parsePatchFiles } from '@pierre/diffs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   GitHubError,
+  fetchBehindBy,
+  fetchChecks,
+  fetchCommitFiles,
+  fetchCommits,
+  fetchConversationComments,
   fetchPullRequest,
   fetchPullRequestFiles,
+  fetchReviewComments,
+  fetchReviews,
   filePatch,
   parsePullRequestUrl,
   pullRequestUrl,
@@ -101,7 +108,26 @@ describe('fetchPullRequest', () => {
       state: 'open',
       draft: false,
       body: '',
-      author: { login: 'u', avatarUrl: 'https://a/u.png', url: 'https://github.com/u' },
+      author: {
+        login: 'u',
+        name: null,
+        avatarUrl: 'https://a/u.png',
+        url: 'https://github.com/u',
+        isBot: false,
+      },
+      labels: [],
+      requestedReviewers: [],
+      requestedTeams: [],
+      mergeableState: null,
+      autoMerge: null,
+      headSha: '',
+      headRepo: null,
+      baseRepo: 'a/b',
+      mergedAt: null,
+      closedAt: null,
+      commentCount: 0,
+      reviewCommentCount: 0,
+      commitCount: 0,
       createdAt: '2026-01-01T00:00:00Z',
       updatedAt: '2026-01-02T00:00:00Z',
       baseRef: 'main',
@@ -163,6 +189,7 @@ describe('fetchPullRequestFiles', () => {
             additions: 2,
             deletions: 1,
             patch: '@@ -1 +1 @@\n-a\n+b',
+            sha: 'b10b5a',
           },
         ])
       )
@@ -175,6 +202,7 @@ describe('fetchPullRequestFiles', () => {
         additions: 2,
         deletions: 1,
         patch: '@@ -1 +1 @@\n-a\n+b',
+        sha: 'b10b5a',
         url: 'https://github.com/a/b/pull/1/files',
       },
     ]);
@@ -226,6 +254,7 @@ const file = (over: Partial<PullRequestFile>): PullRequestFile => ({
   additions: 1,
   deletions: 1,
   patch: '@@ -1 +1 @@\n-a\n+b',
+  sha: null,
   url: 'https://github.com/a/b/pull/1/files',
   ...over,
 });
@@ -297,5 +326,439 @@ describe('filePatch', () => {
       ['gone.ts', undefined, 'deleted', 1],
       ['n.ts', 'o.ts', 'rename-changed', 1],
     ]);
+  });
+});
+
+const stubRoutes = (routes: Record<string, unknown>) => {
+  const fetchMock = vi.fn((url: string) => {
+    const hit = Object.keys(routes).find((key) => url.includes(key));
+    if (hit === undefined) return Promise.resolve(new Response('', { status: 404 }));
+    const body = routes[hit];
+    return Promise.resolve(body instanceof Response ? body : json(body));
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  return fetchMock;
+};
+
+describe('the new pull request fields', () => {
+  it('maps the new pull request fields', async () => {
+    vi.stubGlobal('fetch', () =>
+      Promise.resolve(
+        json({
+          ...apiPull,
+          labels: [{ name: 'bug', color: 'd73a4a' }, { color: 'x' }],
+          requested_reviewers: [{ login: 'r', avatar_url: 'https://a/r.png' }],
+          requested_teams: [{ name: 'core' }],
+          mergeable_state: 'behind',
+          auto_merge: { merge_method: 'squash' },
+          head: { ref: 'topic', sha: 'abc', repo: { full_name: 'fork/b' } },
+          base: { ref: 'main', repo: { full_name: 'a/b' } },
+          merged_at: null,
+          closed_at: '2026-01-04T00:00:00Z',
+          comments: 2,
+          review_comments: 3,
+          commits: 4,
+        })
+      )
+    );
+    const pull = await fetchPullRequest(ref, undefined);
+    expect(pull).toMatchObject({
+      labels: [{ name: 'bug', color: 'd73a4a' }],
+      requestedReviewers: [{ login: 'r', name: null, avatarUrl: 'https://a/r.png' }],
+      requestedTeams: ['core'],
+      mergeableState: 'behind',
+      autoMerge: { method: 'squash' },
+      headSha: 'abc',
+      headRepo: 'fork/b',
+      baseRepo: 'a/b',
+      mergedAt: null,
+      closedAt: '2026-01-04T00:00:00Z',
+      commentCount: 2,
+      reviewCommentCount: 3,
+      commitCount: 4,
+    });
+  });
+
+  it('has no head repository for a deleted fork', async () => {
+    vi.stubGlobal('fetch', () =>
+      Promise.resolve(json({ ...apiPull, head: { ref: 't', sha: 's', repo: null } }))
+    );
+    expect((await fetchPullRequest(ref, undefined)).headRepo).toBeNull();
+  });
+
+  it('marks bots', async () => {
+    const author = async (user: object) => {
+      vi.stubGlobal('fetch', () => Promise.resolve(json({ ...apiPull, user })));
+      return (await fetchPullRequest(ref, undefined)).author?.isBot;
+    };
+    expect(await author({ login: 'x', type: 'Bot' })).toBe(true);
+    expect(await author({ login: 'dependabot[bot]', type: 'User' })).toBe(true);
+    expect(await author({ login: 'x', type: 'User' })).toBe(false);
+  });
+});
+
+describe('fetchChecks', () => {
+  const run = (status: string, conclusion: string | null, extra = {}) => ({
+    name: `${status}/${conclusion}`,
+    status,
+    conclusion,
+    html_url: 'https://github.com/a/b/runs/1',
+    output: { title: 'Title' },
+    started_at: '2026-01-01T00:00:00Z',
+    completed_at: null,
+    ...extra,
+  });
+
+  it.each([
+    ['queued', null, 'pending'],
+    ['in_progress', null, 'pending'],
+    ['waiting', null, 'pending'],
+    ['requested', null, 'pending'],
+    ['pending', null, 'pending'],
+    ['completed', 'action_required', 'action-required'],
+    ['completed', 'success', 'success'],
+    ['completed', 'failure', 'failure'],
+    ['completed', 'timed_out', 'failure'],
+    ['completed', 'startup_failure', 'failure'],
+    ['completed', 'cancelled', 'cancelled'],
+    ['completed', 'skipped', 'skipped'],
+    ['completed', 'neutral', 'neutral'],
+    ['completed', 'stale', 'neutral'],
+  ])('maps check runs: %s %s is %s', async (status, conclusion, expected) => {
+    stubRoutes({ '/check-runs': { check_runs: [run(status, conclusion)] }, '/status': {} });
+    expect((await fetchChecks(ref, 'sha', undefined)).items).toEqual([
+      {
+        name: `${status}/${conclusion}`,
+        status: expected,
+        description: 'Title',
+        url: 'https://github.com/a/b/runs/1',
+        updatedAt: '2026-01-01T00:00:00Z',
+      },
+    ]);
+  });
+
+  it.each([
+    ['pending', 'pending'],
+    ['success', 'success'],
+    ['failure', 'failure'],
+    ['error', 'failure'],
+  ])('maps commit statuses: %s is %s', async (state, expected) => {
+    stubRoutes({
+      '/check-runs': {},
+      '/status': {
+        statuses: [
+          {
+            context: 'ci/x',
+            state,
+            description: 'D',
+            target_url: 'https://ci/x',
+            updated_at: '2026-01-02T00:00:00Z',
+          },
+        ],
+      },
+    });
+    expect((await fetchChecks(ref, 'sha', undefined)).items).toEqual([
+      {
+        name: 'ci/x',
+        status: expected,
+        description: 'D',
+        url: 'https://ci/x',
+        updatedAt: '2026-01-02T00:00:00Z',
+      },
+    ]);
+  });
+
+  it('keeps the newer of a run and a status with one name', async () => {
+    const status = (updated_at: string) => ({
+      statuses: [{ context: 'ci', state: 'failure', updated_at }],
+    });
+    const runs = {
+      check_runs: [
+        run('completed', 'success', { name: 'ci', completed_at: '2026-01-02T00:00:00Z' }),
+      ],
+    };
+    stubRoutes({ '/check-runs': runs, '/status': status('2026-01-03T00:00:00Z') });
+    const statuses = async () =>
+      (await fetchChecks(ref, 'sha', undefined)).items.map((c) => c.status);
+    expect(await statuses()).toEqual(['failure']);
+    stubRoutes({ '/check-runs': runs, '/status': status('2026-01-01T00:00:00Z') });
+    expect(await statuses()).toEqual(['success']);
+  });
+
+  it('keeps only http and https links', async () => {
+    stubRoutes({
+      '/check-runs': {
+        check_runs: [
+          run('completed', 'success', {
+            name: 'a',
+            html_url: 'javascript:alert(1)',
+            details_url: 'javascript:alert(1)',
+          }),
+          run('completed', 'success', {
+            name: 'b',
+            html_url: null,
+            details_url: 'http://ci.example/b',
+          }),
+          run('completed', 'success', { name: 'c', html_url: ' JavaScript:alert(1)' }),
+        ],
+      },
+      '/status': {
+        statuses: [
+          { context: 'd', state: 'success', target_url: 'javascript:alert(1)' },
+          { context: 'e', state: 'success', target_url: 'data:text/html,x' },
+          { context: 'f', state: 'success', target_url: '/relative' },
+          { context: 'g', state: 'success', target_url: 'https://ci.example/g' },
+        ],
+      },
+    });
+    const { items } = await fetchChecks(ref, 'sha', undefined);
+    expect(items.map((check) => [check.name, check.url])).toEqual([
+      ['a', null],
+      ['b', 'http://ci.example/b'],
+      ['c', null],
+      ['d', null],
+      ['e', null],
+      ['f', null],
+      ['g', 'https://ci.example/g'],
+    ]);
+  });
+
+  it('checks 404 is no checks', async () => {
+    stubRoutes({});
+    expect(await fetchChecks(ref, 'sha', undefined)).toEqual({ items: [], truncated: false });
+  });
+
+  it('shows the statuses when the check runs fail', async () => {
+    stubRoutes({
+      '/check-runs': new Response('{}', { status: 403 }),
+      '/status': { statuses: [{ context: 'ci/x', state: 'failure', target_url: null }] },
+    });
+    const { items } = await fetchChecks(ref, 'sha', undefined);
+    expect(items.map((check) => [check.name, check.status])).toEqual([['ci/x', 'failure']]);
+  });
+
+  it('shows the check runs when the statuses fail', async () => {
+    stubRoutes({
+      '/check-runs': { check_runs: [run('completed', 'success', { name: 'build' })] },
+      '/status': new Response('', { status: 500 }),
+    });
+    const { items } = await fetchChecks(ref, 'sha', undefined);
+    expect(items.map((check) => check.name)).toEqual(['build']);
+  });
+
+  it('counts a 404 of one as none beside the failure of the other', async () => {
+    stubRoutes({ '/check-runs': new Response('', { status: 500 }) });
+    expect(await fetchChecks(ref, 'sha', undefined)).toEqual({ items: [], truncated: false });
+  });
+
+  it('fails when both fail', async () => {
+    stubRoutes({
+      '/check-runs': new Response('', { status: 500 }),
+      '/status': new Response('', { status: 502 }),
+    });
+    await expect(fetchChecks(ref, 'sha', undefined)).rejects.toEqual(
+      new GitHubError('failed', 500)
+    );
+  });
+
+  it('marks the checks cut when GitHub has more check runs than it sent', async () => {
+    const hundred = Array.from({ length: 100 }, (_, index) =>
+      run('completed', 'success', { name: `job ${index}` })
+    );
+    stubRoutes({ '/check-runs': { total_count: 150, check_runs: hundred }, '/status': {} });
+    const cut = await fetchChecks(ref, 'sha', undefined);
+    expect(cut.items).toHaveLength(100);
+    expect(cut.truncated).toBe(true);
+    stubRoutes({ '/check-runs': { total_count: 100, check_runs: hundred }, '/status': {} });
+    expect((await fetchChecks(ref, 'sha', undefined)).truncated).toBe(false);
+  });
+
+  it('marks the checks cut when GitHub has more statuses than it sent', async () => {
+    const statuses = Array.from({ length: 100 }, (_, index) => ({
+      context: `ci/${index}`,
+      state: 'success',
+    }));
+    stubRoutes({ '/check-runs': {}, '/status': { total_count: 120, statuses } });
+    expect((await fetchChecks(ref, 'sha', undefined)).truncated).toBe(true);
+  });
+});
+
+describe('fetchBehindBy', () => {
+  it('compares by head sha', async () => {
+    const fetchMock = stubRoutes({ '/compare/': { behind_by: 5, files: [] } });
+    expect(await fetchBehindBy(ref, 'main', 'abc123', undefined)).toBe(5);
+    expect(String(fetchMock.mock.calls[0]![0]).endsWith('/compare/main...abc123')).toBe(true);
+  });
+});
+
+describe('commit paths', () => {
+  it('encodes the head sha and a commit sha like the base branch', async () => {
+    const fetchMock = stubRoutes({ '/compare/': { behind_by: 0 }, '/commits/': { files: [] } });
+    await fetchChecks(ref, 'a/b?c', undefined);
+    await fetchBehindBy(ref, 'x/y', 'a/b?c', undefined);
+    await fetchCommitFiles(ref, 'a/b?c', undefined);
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
+      'https://api.github.com/repos/a/b/commits/a%2Fb%3Fc/check-runs?per_page=100',
+      'https://api.github.com/repos/a/b/commits/a%2Fb%3Fc/status?per_page=100',
+      'https://api.github.com/repos/a/b/compare/x%2Fy...a%2Fb%3Fc',
+      'https://api.github.com/repos/a/b/commits/a%2Fb%3Fc',
+    ]);
+  });
+});
+
+describe('the lists', () => {
+  it('drops pending reviews', async () => {
+    const review = (id: number, state: string) => ({
+      id,
+      state,
+      user: { login: 'r' },
+      body: 'b',
+      commit_id: 'c',
+      submitted_at: '2026-01-01T00:00:00Z',
+      html_url: 'https://github.com/a/b/pull/1#r',
+    });
+    stubRoutes({
+      '/pulls/1/reviews': [review(1, 'PENDING'), review(2, 'APPROVED'), review(3, 'DISMISSED')],
+    });
+    const { items, truncated } = await fetchReviews(ref, undefined);
+    expect(items.map((r) => [r.id, r.state])).toEqual([
+      [2, 'APPROVED'],
+      [3, 'DISMISSED'],
+    ]);
+    expect(truncated).toBe(false);
+    expect(items[0]).toMatchObject({ author: { login: 'r' }, body: 'b', commitId: 'c' });
+  });
+
+  it('maps reactions in order without zeros', async () => {
+    stubRoutes({
+      '/issues/1/comments': [
+        {
+          id: 7,
+          user: { login: 'c' },
+          body: 'hi',
+          created_at: '2026-01-01T00:00:00Z',
+          html_url: 'u',
+          reactions: { eyes: 1, '+1': 2, heart: 0, rocket: 3, total_count: 6, url: 'x' },
+        },
+      ],
+    });
+    const { items } = await fetchConversationComments(ref, undefined);
+    expect(items[0]!.reactions).toEqual([
+      { content: '+1', count: 2 },
+      { content: 'rocket', count: 3 },
+      { content: 'eyes', count: 1 },
+    ]);
+  });
+
+  it('marks outdated review comments', async () => {
+    const base = { user: { login: 'c' }, path: 'a.ts', side: 'RIGHT', commit_id: 'c' };
+    stubRoutes({
+      '/pulls/1/comments': [
+        { ...base, id: 1, line: 4, original_line: 4, position: 2, pull_request_review_id: 9 },
+        { ...base, id: 2, line: null, original_line: 3, position: null, in_reply_to_id: 1 },
+      ],
+    });
+    const { items } = await fetchReviewComments(ref, undefined);
+    expect(items.map((c) => [c.id, c.outdated, c.line, c.originalLine, c.inReplyToId])).toEqual([
+      [1, false, 4, 4, null],
+      [2, true, null, 3, 1],
+    ]);
+    expect(items[0]).toMatchObject({ reviewId: 9, path: 'a.ts', side: 'RIGHT', commitId: 'c' });
+  });
+
+  it('maps commits', async () => {
+    stubRoutes({
+      '/pulls/1/commits': [
+        {
+          sha: 's1',
+          html_url: 'https://github.com/a/b/commit/s1',
+          commit: {
+            message: 'Head line\n\nBody',
+            author: { name: 'Ann', date: '2026-01-01T00:00:00Z' },
+            committer: { date: '2026-01-02T00:00:00Z' },
+          },
+          author: { login: 'ann' },
+        },
+      ],
+    });
+    const { items } = await fetchCommits(ref, undefined);
+    expect(items).toEqual([
+      {
+        sha: 's1',
+        headline: 'Head line',
+        author: expect.objectContaining({ login: 'ann' }),
+        authorName: 'Ann',
+        committedAt: '2026-01-02T00:00:00Z',
+        url: 'https://github.com/a/b/commit/s1',
+      },
+    ]);
+  });
+
+  it('pages lists and stops at ten pages with truncated', async () => {
+    const fetchMock = vi.fn(() =>
+      Promise.resolve(json(Array.from({ length: 100 }, (_, i) => ({ id: i, state: 'APPROVED' }))))
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const { items, truncated } = await fetchReviews(ref, undefined);
+    expect(fetchMock).toHaveBeenCalledTimes(10);
+    expect(items).toHaveLength(1000);
+    expect(truncated).toBe(true);
+  });
+
+  it('is not truncated when the tenth page is short', async () => {
+    const fetchMock = vi.fn((url: string) =>
+      Promise.resolve(
+        json(
+          Array.from(
+            { length: Number(new URL(url).searchParams.get('page')) < 10 ? 100 : 5 },
+            () => ({
+              id: 1,
+              state: 'APPROVED',
+            })
+          )
+        )
+      )
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    expect((await fetchReviews(ref, undefined)).truncated).toBe(false);
+  });
+});
+
+describe('fetchCommitFiles', () => {
+  it("maps one commit's files", async () => {
+    const fetchMock = stubRoutes({
+      '/commits/abc': {
+        files: [
+          { filename: 'a.ts', status: 'added', additions: 1, deletions: 0, patch: '@@', sha: 'c0' },
+          // A file without a blob SHA.
+          { filename: 'lib', status: 'modified', additions: 0, deletions: 0 },
+        ],
+      },
+    });
+    expect(await fetchCommitFiles(ref, 'abc', 'tok')).toEqual([
+      {
+        path: 'a.ts',
+        previousPath: null,
+        status: 'added',
+        additions: 1,
+        deletions: 0,
+        patch: '@@',
+        sha: 'c0',
+        url: 'https://github.com/a/b/commit/abc',
+      },
+      {
+        path: 'lib',
+        previousPath: null,
+        status: 'modified',
+        additions: 0,
+        deletions: 0,
+        patch: null,
+        sha: null,
+        url: 'https://github.com/a/b/commit/abc',
+      },
+    ]);
+    expect(String(fetchMock.mock.calls[0]![0])).toBe(
+      'https://api.github.com/repos/a/b/commits/abc'
+    );
   });
 });
