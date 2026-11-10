@@ -6,16 +6,36 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import plugin from './index';
 import PullRequestPanel from './PullRequestPanel';
 
-// The Code tab's diff libraries need a browser; the tab stands in as its file paths.
-vi.mock('./CodeTab', () => ({
-  CodeTab: ({ files }: { files: { path: string }[] }) => (
-    <ul aria-label="Changed files">
-      {files.map((file) => (
-        <li key={file.path}>{file.path}</li>
-      ))}
-    </ul>
-  ),
-}));
+// The Code tab's diff libraries need a browser; the tab stands in as its file paths, what it was
+// given of the threads, the commits and the chosen commit, and a button that chooses All commits.
+vi.mock('./CodeTab', () => {
+  type List = { status: string; items?: { id?: number; sha?: string }[] };
+  const listed = (list: List, key: 'id' | 'sha') =>
+    list.items ? list.items.map((item) => item[key]).join(',') : list.status;
+  return {
+    CodeTab: (props: {
+      files: { path: string }[];
+      threads: List;
+      commits: List;
+      commit?: string;
+      onCommitChange: (sha: string | undefined) => void;
+    }) => (
+      <div>
+        <ul aria-label="Changed files">
+          {props.files.map((file) => (
+            <li key={file.path}>{file.path}</li>
+          ))}
+        </ul>
+        <p data-testid="code-threads">{listed(props.threads, 'id')}</p>
+        <p data-testid="code-commits">{listed(props.commits, 'sha')}</p>
+        <p data-testid="code-commit">{props.commit ?? 'all'}</p>
+        <button type="button" onClick={() => props.onCommitChange(undefined)}>
+          Choose All commits
+        </button>
+      </div>
+    ),
+  };
+});
 
 // The app's Markdown renderer loads on demand and cannot load here; this one renders bold text.
 vi.mock('@mindroom/client-sdk/ui', async (importOriginal) => {
@@ -211,6 +231,7 @@ describe('PullRequestPanel', () => {
         behind?: number;
         reviews?: unknown[];
         commits?: unknown[];
+        reviewComments?: unknown[] | Response;
         checks?: Response;
       } = {}
     ) =>
@@ -219,6 +240,10 @@ describe('PullRequestPanel', () => {
         if (url.endsWith('/status')) return respond({ statuses: [] });
         if (url.includes('/compare/')) return respond({ behind_by: parts.behind ?? 0 });
         if (url.includes('/commits')) return respond(parts.commits ?? []);
+        if (url.includes('/pulls/200/comments')) {
+          const answer = parts.reviewComments ?? [];
+          return answer instanceof Response ? answer : respond(answer);
+        }
         if (url.includes('/reviews')) return respond(parts.reviews ?? []);
         if (url.includes('/files')) return respond(parts.files ?? []);
         return respond(pr);
@@ -369,26 +394,90 @@ describe('PullRequestPanel', () => {
       expect(view.queryByRole('button', { name: 'Oldest first' })).toBeNull();
     });
 
+    const commitEntry = (sha: string, message: string, date: string) => ({
+      sha,
+      html_url: 'x',
+      author: null,
+      commit: { message, author: { name: 'Ann' }, committer: { date } },
+    });
+    const COMMITS = [
+      commitEntry('abcdef1234', 'Add cards', '2026-11-01T00:05:00Z'),
+      commitEntry('bcdef12345', 'Fix cards', '2026-11-01T00:06:00Z'),
+    ];
+    const reviewComment = (id: number, over: Record<string, unknown> = {}) => ({
+      id,
+      user: { login: 'ann' },
+      body: `Thread ${id}`,
+      created_at: `2026-11-01T00:0${id}:00Z`,
+      html_url: 'x',
+      path: 'src/a.ts',
+      line: 1,
+      side: 'RIGHT',
+      position: 1,
+      commit_id: SHA,
+      ...over,
+    });
+    const commitsRequests = () =>
+      fetchMock.mock.calls.filter(([url]) => url.includes('/pulls/200/commits'));
+
     it('opens the Code tab from a commit of the Timeline', async () => {
-      serve(withHead(), {
-        commits: [
-          {
-            sha: 'abcdef1234',
-            html_url: 'x',
-            author: null,
-            commit: {
-              message: 'Add cards',
-              author: { name: 'Ann' },
-              committer: { date: '2026-11-01T00:05:00Z' },
-            },
-          },
-        ],
-      });
+      serve(withHead(), { commits: COMMITS });
       const view = await show();
       await view.findByText('Add pull request cards');
       await click(view.getByRole('tab', { name: 'Timeline' }));
       await click(await view.findByRole('button', { name: 'View commit abcdef1' }));
       expect(view.getByRole('tab', { name: 'Code' }).getAttribute('aria-selected')).toBe('true');
+      expect((await view.findByTestId('code-commit')).textContent).toBe('abcdef1234');
+      await click(view.getByRole('button', { name: 'Choose All commits' }));
+      expect(view.getByTestId('code-commit').textContent).toBe('all');
+    });
+
+    it('gives the Code tab the review threads and the commits, which it loads', async () => {
+      serve(withHead(), {
+        commits: COMMITS,
+        reviewComments: [
+          reviewComment(1),
+          reviewComment(2, { in_reply_to_id: 1 }),
+          reviewComment(3),
+        ],
+      });
+      const view = await show();
+      await view.findByText('Add pull request cards');
+      expect(commitsRequests()).toHaveLength(0);
+      await click(view.getByRole('tab', { name: 'Code' }));
+      expect(await view.findByText('abcdef1234,bcdef12345')).toBeTruthy();
+      expect((await view.findByTestId('code-threads')).textContent).toBe('1,3');
+      expect(view.getByTestId('code-commit').textContent).toBe('all');
+      expect(commitsRequests()).toHaveLength(1);
+    });
+
+    it('tells the Code tab when the review comments do not load', async () => {
+      serve(withHead(), {
+        files: [{ filename: 'src/a.ts', status: 'modified', additions: 1, deletions: 1 }],
+        reviewComments: respond({}, 404),
+      });
+      const view = await show();
+      await view.findByText('Add pull request cards');
+      await click(view.getByRole('tab', { name: 'Code' }));
+      expect(await view.findByText('error')).toBeTruthy();
+      expect(view.getByText('src/a.ts')).toBeTruthy();
+    });
+
+    it('forgets the chosen commit when the panel shows another pull request', async () => {
+      serve(withHead(), { commits: COMMITS });
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      const panel = (number: number) => (
+        <QueryClientProvider client={client}>
+          <PullRequestPanel roomId="!room:example.org" request={{ ...REQUEST, number }} />
+        </QueryClientProvider>
+      );
+      const view = await renderPluginComponent(panel(200), { id: 'pull-requests', plugin });
+      await view.findByText('Add pull request cards');
+      await click(view.getByRole('tab', { name: 'Timeline' }));
+      await click(await view.findByRole('button', { name: 'View commit abcdef1' }));
+      expect((await view.findByTestId('code-commit')).textContent).toBe('abcdef1234');
+      view.rerender(panel(201));
+      expect((await view.findByTestId('code-commit')).textContent).toBe('all');
     });
 
     it('reads the reviews for the Summary tab, and the files only for the Code tab', async () => {

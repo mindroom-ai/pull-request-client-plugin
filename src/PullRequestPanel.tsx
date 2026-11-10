@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import { usePluginTranslation } from '@mindroom/client-sdk/core';
 import { IconButton, IconTooltip } from '@mindroom/client-sdk/ui';
-import { CodeTab } from './CodeTab';
+import { CodeTab, type ListState } from './CodeTab';
 import { BaseBranch } from './detail/BaseBranch';
 import { ChangeBreakdownStat } from './detail/ChangeBreakdownStat';
 import { ChecksStatusLine } from './detail/ChecksStatusLine';
@@ -32,7 +32,15 @@ import {
   RelativeTime,
   resolvePullRequestState,
 } from './presentation';
-import { useBehindBy, usePullRequest, usePullRequestFiles, useReviews } from './queries';
+import {
+  useBehindBy,
+  useCommits,
+  usePullRequest,
+  usePullRequestFiles,
+  useReviewComments,
+  useReviews,
+} from './queries';
+import { buildReviewThreads } from './reviewThreads';
 import { pluginRootStyle } from './theme';
 import { useGitHubToken } from './token';
 
@@ -207,10 +215,48 @@ function CopyCheckoutButton({ command }: { command: string }) {
   );
 }
 
-function Files({ pullRequest }: { pullRequest: PullRequestRef }) {
+/** What the Code tab is told of a list a query loads: its items, else its error and a retry. */
+function listState<T>(
+  items: T[] | undefined,
+  query: { isError: boolean; error: unknown; refetch: () => Promise<unknown> }
+): ListState<T> {
+  if (items) return { status: 'success', items };
+  if (query.isError) {
+    return { status: 'error', error: query.error, retry: () => void query.refetch() };
+  }
+  return { status: 'pending' };
+}
+
+/** The Code tab with what it shows: the files, the review threads and the commits. */
+function Files({
+  pullRequest,
+  commit,
+  onCommitChange,
+}: {
+  pullRequest: PullRequestRef;
+  commit: string | undefined;
+  onCommitChange: (sha: string | undefined) => void;
+}) {
   const t = usePluginTranslation('pull-requests');
   const query = usePullRequestFiles(pullRequest, true);
-  if (query.data) return <CodeTab pullRequest={pullRequest} files={query.data} />;
+  const reviewComments = useReviewComments(pullRequest, true);
+  const commits = useCommits(pullRequest, true);
+  const threads = useMemo(
+    () => reviewComments.data && buildReviewThreads(reviewComments.data.items),
+    [reviewComments.data]
+  );
+  if (query.data) {
+    return (
+      <CodeTab
+        pullRequest={pullRequest}
+        files={query.data}
+        threads={listState(threads, reviewComments)}
+        commits={listState(commits.data?.items, commits)}
+        commit={commit}
+        onCommitChange={onCommitChange}
+      />
+    );
+  }
   return (
     <div className="mrpr-panel-note">
       {query.isError ? (
@@ -228,9 +274,17 @@ export default function PullRequestPanel({ request }: { roomId: string; request?
   const query = usePullRequest(ref);
   const { token, forget } = useGitHubToken();
   const [tab, setTab] = useState<Tab>('summary');
-  // The Timeline tab's order and its chosen commit; the Timeline and Code tabs read them.
+  // The Timeline tab's order, which the tab bar's toggle sets.
   const [order, setOrder] = useState<Order>('newest');
-  const [, setSelectedCommit] = useState<string | undefined>(undefined);
+  // The commit the Code tab shows, chosen there or from the Timeline. It belongs to the pull
+  // request it was chosen in: another one opens on All commits.
+  const pullRequestKey = ref ? pullRequestUrl(ref) : '';
+  const [commitScope, setCommitScope] = useState<{ pullRequestKey: string; sha?: string }>({
+    pullRequestKey,
+  });
+  const selectedCommit =
+    commitScope.pullRequestKey === pullRequestKey ? commitScope.sha : undefined;
+  const selectCommit = (sha: string | undefined) => setCommitScope({ pullRequestKey, sha });
   const pr = query.data;
   const state = pr && resolvePullRequestState(pr);
   // A branch is out of date only while the pull request can still merge.
@@ -362,12 +416,12 @@ export default function PullRequestPanel({ request }: { roomId: string; request?
                 pullRequest={pr}
                 order={order}
                 onOpenCommit={(sha) => {
-                  setSelectedCommit(sha);
+                  selectCommit(sha);
                   setTab('code');
                 }}
               />
             ) : (
-              <Files pullRequest={ref} />
+              <Files pullRequest={ref} commit={selectedCommit} onCommitChange={selectCommit} />
             )}
           </div>
         </>

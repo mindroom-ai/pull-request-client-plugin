@@ -293,6 +293,207 @@
   overflow-wrap: anywhere;
 }
 
+/* The toolbar's start: the commit selector, then the file count. */
+.mrpr-code-toolbar-start {
+  display: flex;
+  flex: 1;
+  min-inline-size: 0;
+  align-items: center;
+  gap: 12px;
+}
+
+.mrpr-commit-trigger {
+  display: inline-flex;
+  min-inline-size: 0;
+  max-inline-size: 256px;
+  align-items: center;
+  gap: 4px;
+  padding-block: 3px;
+  padding-inline: 8px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--pr-hover);
+  color: var(--pr-fg);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.mrpr-commit-trigger .mrpr-icon {
+  opacity: 0.7;
+}
+
+.mrpr-commit-menu {
+  box-sizing: border-box;
+  display: flex;
+  min-inline-size: 240px;
+  max-inline-size: min(28rem, calc(100vw - 2rem));
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+}
+.mrpr-commit-option {
+  display: flex;
+  min-inline-size: 0;
+  align-items: center;
+  gap: 8px;
+  padding-block: 6px;
+  padding-inline: 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--pr-fg);
+  font: inherit;
+  font-size: 12px;
+  text-align: start;
+  cursor: pointer;
+}
+.mrpr-commit-option:hover,
+.mrpr-commit-option:focus-visible {
+  background: var(--pr-hover);
+}
+.mrpr-commit-sha {
+  flex-shrink: 0;
+  margin-inline-start: auto;
+  color: var(--pr-muted);
+  font-family: var(--pr-font-mono);
+  font-size: 11px;
+}
+.mrpr-commit-more {
+  /* Its text lines up with the commits', past the check mark's place. */
+  padding-inline-start: 28px;
+  color: var(--pr-muted);
+}
+.mrpr-invisible {
+  visibility: hidden;
+}
+
+/* What did not load of the threads or the commits, above the diffs. */
+.mrpr-code-notices {
+  flex-shrink: 0;
+  padding-block: 0 12px;
+  padding-inline: 16px;
+  border-block-end: 1px solid var(--pr-border);
+}
+
+/* The conversations not on the current diff: a bar above the diffs that opens downwards. */
+.mrpr-off-diff {
+  flex-shrink: 0;
+  border-block-end: 1px solid var(--pr-border);
+}
+.mrpr-off-diff-toggle {
+  display: flex;
+  inline-size: 100%;
+  align-items: center;
+  gap: 6px;
+  padding-block: 8px;
+  padding-inline: 16px;
+  border: 0;
+  background: transparent;
+  color: var(--pr-muted);
+  font: inherit;
+  font-size: 12px;
+  text-align: start;
+  cursor: pointer;
+}
+.mrpr-off-diff-toggle:hover {
+  color: var(--pr-fg);
+}
+.mrpr-off-diff-body {
+  display: flex;
+  max-block-size: 256px;
+  flex-direction: column;
+  gap: 12px;
+  overflow: auto;
+  padding-block: 0 12px;
+  padding-inline: 16px;
+}
+.mrpr-off-diff-file {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.mrpr-off-diff-path,
+.mrpr-off-diff-line {
+  margin: 0;
+  padding-inline: 12px;
+  color: var(--pr-muted);
+  font-size: 12px;
+}
+.mrpr-off-diff-file .mrpr-thread-card {
+  margin-block: 4px;
+}
+
+/* A review thread's card, at its line in a diff or in the bar. Pierre's view draws the lines in
+   the code font from left to right; the card reads as the panel does. */
+.mrpr-annotation {
+  padding-block: 4px;
+  color: var(--pr-fg);
+  font-family: var(--pr-font-sans);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.mrpr-annotation:dir(rtl) {
+  direction: rtl;
+}
+.mrpr-thread-card {
+  margin-block: 8px;
+  margin-inline: 12px;
+  padding: 12px;
+  border: 1px solid var(--pr-border);
+  border-radius: 12px;
+  background: var(--pr-surface);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
+  font-size: 13px;
+}
+.mrpr-thread-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--pr-muted);
+  font-size: 12px;
+}
+.mrpr-thread-card-toggle {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.mrpr-thread-card-toggle:hover {
+  color: var(--pr-fg);
+}
+.mrpr-thread-card-comments {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-block-start: 8px;
+}
+.mrpr-thread-comment {
+  min-inline-size: 0;
+}
+.mrpr-thread-comment-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: var(--pr-muted);
+  font-size: 12px;
+}
+.mrpr-thread-comment-head .mrpr-reactions {
+  margin-inline-start: auto;
+}
+.mrpr-thread-comment .mrpr-comment-body {
+  margin-block-start: 4px;
+}
+/* The body's first and last paragraphs keep no margin outside it, so the card's padding is all. */
+.mrpr-thread-comment .mrpr-markdown > :first-child {
+  margin-block-start: 0;
+}
+.mrpr-thread-comment .mrpr-markdown > :last-child {
+  margin-block-end: 0;
+}
+
 /* The side panel: a column as tall as the panel. The header and tab bar keep their height; the
    tab's area takes the rest, so the Code tab scrolls inside itself and the Summary as a whole. */
 .mrpr-panel {
