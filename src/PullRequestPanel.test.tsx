@@ -7,33 +7,42 @@ import plugin from './index';
 import PullRequestPanel from './PullRequestPanel';
 
 // The Code tab's diff libraries need a browser; the tab stands in as its file paths, what it was
-// given of the threads, the commits and the chosen commit, and a button that chooses All commits.
-vi.mock('./CodeTab', () => {
+// given of the threads, the commits and the chosen commit, how many review comments loaded of a
+// list cut short, which mount of the tab it is, and a button that chooses All commits.
+vi.mock('./CodeTab', async () => {
+  const { useState } = await import('react');
   type List = { status: string; items?: { id?: number; sha?: string }[] };
   const listed = (list: List, key: 'id' | 'sha') =>
     list.items ? list.items.map((item) => item[key]).join(',') : list.status;
+  let mounts = 0;
   return {
-    CodeTab: (props: {
+    CodeTab: function CodeTab(props: {
       files: { path: string }[];
       threads: List;
       commits: List;
       commit?: string;
       onCommitChange: (sha: string | undefined) => void;
-    }) => (
-      <div>
-        <ul aria-label="Changed files">
-          {props.files.map((file) => (
-            <li key={file.path}>{file.path}</li>
-          ))}
-        </ul>
-        <p data-testid="code-threads">{listed(props.threads, 'id')}</p>
-        <p data-testid="code-commits">{listed(props.commits, 'sha')}</p>
-        <p data-testid="code-commit">{props.commit ?? 'all'}</p>
-        <button type="button" onClick={() => props.onCommitChange(undefined)}>
-          Choose All commits
-        </button>
-      </div>
-    ),
+      truncatedReviewComments?: number;
+    }) {
+      const [mount] = useState(() => (mounts += 1));
+      return (
+        <div>
+          <ul aria-label="Changed files">
+            {props.files.map((file) => (
+              <li key={file.path}>{file.path}</li>
+            ))}
+          </ul>
+          <p data-testid="code-threads">{listed(props.threads, 'id')}</p>
+          <p data-testid="code-commits">{listed(props.commits, 'sha')}</p>
+          <p data-testid="code-commit">{props.commit ?? 'all'}</p>
+          <p data-testid="code-truncated">{props.truncatedReviewComments ?? 'whole'}</p>
+          <p data-testid="code-mount">{mount}</p>
+          <button type="button" onClick={() => props.onCommitChange(undefined)}>
+            Choose All commits
+          </button>
+        </div>
+      );
+    },
   };
 });
 
@@ -478,6 +487,49 @@ describe('PullRequestPanel', () => {
       expect((await view.findByTestId('code-commit')).textContent).toBe('abcdef1234');
       view.rerender(panel(201));
       expect((await view.findByTestId('code-commit')).textContent).toBe('all');
+    });
+
+    it('starts the Code tab afresh for another pull request', async () => {
+      serve(withHead(), { commits: COMMITS });
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      const panel = (number: number) => (
+        <QueryClientProvider client={client}>
+          <PullRequestPanel roomId="!room:example.org" request={{ ...REQUEST, number }} />
+        </QueryClientProvider>
+      );
+      // Both pull requests load once, so that showing either again finds its files at once.
+      const view = await renderPluginComponent(panel(201), { id: 'pull-requests', plugin });
+      await view.findByText('Add pull request cards');
+      await click(view.getByRole('tab', { name: 'Code' }));
+      await view.findByTestId('code-mount');
+      view.rerender(panel(200));
+      const mount = Number((await view.findByTestId('code-mount')).textContent);
+      view.rerender(panel(201));
+      // The tab's own state, such as the open bar or the folded files, is the other pull request's.
+      expect(
+        await view.findByText(String(mount + 1), { selector: '[data-testid="code-mount"]' })
+      ).toBeTruthy();
+    });
+
+    it('tells the Code tab when GitHub cut the review comments short', async () => {
+      let next = 0;
+      serve(withHead());
+      const served = fetchMock.getMockImplementation()!;
+      fetchMock.mockImplementation(async (url, init) =>
+        url.includes('/pulls/200/comments')
+          ? respond(
+              Array.from({ length: 100 }, () =>
+                reviewComment((next += 1), { created_at: '2026-11-01T00:00:00Z' })
+              )
+            )
+          : served(url, init)
+      );
+      const view = await show();
+      await view.findByText('Add pull request cards');
+      await click(view.getByRole('tab', { name: 'Code' }));
+      expect(
+        await view.findByText('1000', { selector: '[data-testid="code-truncated"]' })
+      ).toBeTruthy();
     });
 
     it('reads the reviews for the Summary tab, and the files only for the Code tab', async () => {

@@ -248,12 +248,17 @@ function Files({
   if (query.data) {
     return (
       <CodeTab
+        // The tab's own state, such as its open bar, folds and selector, is one pull request's.
+        key={pullRequestUrl(pullRequest)}
         pullRequest={pullRequest}
         files={query.data}
         threads={listState(threads, reviewComments)}
         commits={listState(commits.data?.items, commits)}
         commit={commit}
         onCommitChange={onCommitChange}
+        truncatedReviewComments={
+          reviewComments.data?.truncated ? reviewComments.data.items.length : undefined
+        }
       />
     );
   }

@@ -89,11 +89,11 @@ export function CommitSelector({
           >
             <Menu ref={menuRef} aria-label={t('code.commitsLabel')}>
               <div className="mrpr-root mrpr-commit-menu" style={pluginRootStyle()}>
-                <CommitOption checked={selected === undefined} onSelect={() => choose(undefined)}>
+                <MenuOption checked={selected === undefined} onSelect={() => choose(undefined)}>
                   <span className="mrpr-truncate">{t('code.allCommits')}</span>
-                </CommitOption>
+                </MenuOption>
                 {ordered.slice(0, visibleCount).map((entry) => (
-                  <CommitOption
+                  <MenuOption
                     key={entry.sha}
                     checked={entry === selected}
                     title={headline(entry)}
@@ -101,7 +101,7 @@ export function CommitSelector({
                   >
                     <span className="mrpr-truncate">{headline(entry)}</span>
                     <code className="mrpr-commit-sha">{entry.sha.slice(0, 7)}</code>
-                  </CommitOption>
+                  </MenuOption>
                 ))}
                 {left > 0 ? (
                   <button
@@ -126,12 +126,15 @@ export function CommitSelector({
   );
 }
 
-function CommitOption({
+/** A menu row with a check mark while it is chosen: one of a choice, or one that turns on and off. */
+export function MenuOption({
+  role = 'menuitemradio',
   checked,
   title,
   onSelect,
   children,
 }: {
+  role?: 'menuitemradio' | 'menuitemcheckbox';
   checked: boolean;
   title?: string;
   onSelect: () => void;
@@ -140,7 +143,7 @@ function CommitOption({
   return (
     <button
       type="button"
-      role="menuitemradio"
+      role={role}
       aria-checked={checked}
       className="mrpr-commit-option"
       title={title}

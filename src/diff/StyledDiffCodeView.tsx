@@ -211,12 +211,15 @@ type StyledDiffCodeViewProps<LAnnotation> = Omit<
 > & {
   readonly options?: StyledDiffCodeViewOptions<LAnnotation>;
   readonly viewerRef?: Ref<CodeViewHandle<LAnnotation, undefined>>;
+  /** Styles of the caller's own, after the view's. */
+  readonly unsafeCSSExtra?: string;
 };
 
 export function StyledDiffCodeView<LAnnotation = undefined>({
   options,
   viewerRef,
   className,
+  unsafeCSSExtra,
   ...props
 }: StyledDiffCodeViewProps<LAnnotation>) {
   return (
@@ -227,7 +230,9 @@ export function StyledDiffCodeView<LAnnotation = undefined>({
       className={className ? `mrpr-diff-view ${className}` : 'mrpr-diff-view'}
       options={{
         ...options,
-        unsafeCSS: DIFF_VIEW_UNSAFE_CSS,
+        unsafeCSS: unsafeCSSExtra
+          ? `${DIFF_VIEW_UNSAFE_CSS}\n${unsafeCSSExtra}`
+          : DIFF_VIEW_UNSAFE_CSS,
         itemMetrics: {
           diffHeaderHeight: 32,
           hunkSeparatorHeight: 24,

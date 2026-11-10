@@ -367,6 +367,111 @@
   visibility: hidden;
 }
 
+/* The toolbar's end: the display controls, then the file tree's toggle. The diff options are
+   buttons of their own in a toolbar at least 512 px wide, else they sit in a menu. */
+.mrpr-code-toolbar-end {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 2px;
+}
+.mrpr-code-options {
+  display: none;
+  align-items: center;
+  gap: 2px;
+}
+@container (min-inline-size: 512px) {
+  .mrpr-code-options {
+    display: flex;
+  }
+  .mrpr-code-options-menu {
+    display: none;
+  }
+}
+.mrpr-segmented {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px;
+  border: 1px solid var(--pr-border);
+  border-radius: 8px;
+}
+.mrpr-options-menu {
+  min-inline-size: 200px;
+}
+.mrpr-menu-separator {
+  block-size: 1px;
+  margin-block: 4px;
+  background: var(--pr-border);
+}
+.mrpr-link-button {
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--pr-primary);
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.mrpr-link-button:hover {
+  text-decoration: underline;
+}
+
+/* A file's header: the fold chevron before the name; after it, GitHub's line counts and the
+   viewed mark, whose label keeps one width so the marks line up from file to file. */
+.mrpr-fold-toggle {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  inline-size: 20px;
+  block-size: 20px;
+  margin-inline-end: 4px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--pr-muted);
+  cursor: pointer;
+}
+.mrpr-fold-toggle:hover {
+  background: var(--pr-hover);
+  color: var(--pr-fg);
+}
+.mrpr-file-meta {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 12px;
+  font-size: 11px;
+}
+.mrpr-file-meta .mrpr-diffstat {
+  font-family: var(--pr-font-mono);
+}
+.mrpr-viewed {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  min-inline-size: 4.5rem;
+  color: var(--pr-muted);
+  font-family: var(--pr-font-sans);
+  font-size: 11px;
+  cursor: pointer;
+  user-select: none;
+}
+.mrpr-viewed input {
+  margin: 0;
+  accent-color: var(--pr-primary);
+  cursor: pointer;
+}
+.mrpr-no-diff-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 /* What did not load of the threads or the commits, above the diffs. */
 .mrpr-code-notices {
   flex-shrink: 0;
