@@ -1,0 +1,27 @@
+{
+  "name": "pull-request-client-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A MindRoom Chat client plugin: GitHub pull request cards and a side panel with the changed files and their diffs, ported from T3 Code.",
+  "license": "MIT",
+  "mindroomClientPlugin": {
+    "id": "pull-requests",
+    "apiVersion": 43,
+    "entry": "./src/index.tsx"
+  },
+  "scripts": {
+    "typecheck": "./.mindroom-chat/node_modules/.bin/tsc --noEmit"
+  },
+  "dependencies": {
+    "@pierre/diffs": "1.6.4",
+    "@pierre/trees": "1.0.0-beta.6",
+    "lucide-react": "^1.70.0"
+  },
+  "peerDependencies": {
+    "@tanstack/react-query": "*",
+    "folds": "*",
+    "react": "*",
+    "react-dom": "*",
+    "react-i18next": "*"
+  }
+}
