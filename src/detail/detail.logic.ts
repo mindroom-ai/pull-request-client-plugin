@@ -18,7 +18,7 @@ function instant(iso: string): number {
   return Date.parse(iso);
 }
 
-type Outcome = 'approved' | 'changes-requested' | 'dismissed';
+export type Outcome = 'approved' | 'changes-requested' | 'dismissed';
 
 // The reviews that are verdicts; a comment-only review is none.
 const REVIEW_OUTCOMES: Record<ReviewState, Outcome | null> = {
@@ -87,7 +87,7 @@ export function checksState(checks: PullRequestCheck[]): ChecksState {
   return 'passing';
 }
 
-function isWorkflowApprovalCheck(check: PullRequestCheck): boolean {
+export function isWorkflowApprovalCheck(check: Pick<PullRequestCheck, 'status' | 'url'>): boolean {
   return (
     check.status === 'action-required' &&
     check.url !== null &&
@@ -303,4 +303,9 @@ export function baseFreshness(
   const behind = behindBy ?? 0;
   const conflicts = mergeableState === 'dirty';
   return behind > 0 || conflicts ? { behind, conflicts } : undefined;
+}
+
+/** A body that is only HTML comments (a bot's markers) and whitespace is empty; any other is kept. */
+export function visibleBody(body: string): string | null {
+  return body.replace(/<!--[\s\S]*?-->/gu, '').trim().length === 0 ? null : body.trim();
 }

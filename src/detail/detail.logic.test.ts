@@ -21,6 +21,7 @@ import {
   groupChecks,
   latestReviewOutcomes,
   summarizeChecks,
+  visibleBody,
   type ConversationItem,
   type TimelineEvent,
 } from './detail.logic';
@@ -492,5 +493,20 @@ describe('baseFreshness', () => {
   it('baseFreshness with conflicts and no lag', () => {
     expect(baseFreshness(0, 'dirty')).toEqual({ behind: 0, conflicts: true });
     expect(baseFreshness(undefined, 'dirty')).toEqual({ behind: 0, conflicts: true });
+  });
+});
+
+describe('visibleBody', () => {
+  it('drops a body that is nothing but a bot marker, and keeps one that says more', () => {
+    expect(visibleBody('<!-- MURMUR_IGNORE -->')).toBeNull();
+    expect(visibleBody('  <!-- a -->\n<!-- b -->\n ')).toBeNull();
+    expect(visibleBody('')).toBeNull();
+    expect(visibleBody('<!-- summarize by coderabbit.ai -->\nNeeds a test.')).toBe(
+      '<!-- summarize by coderabbit.ai -->\nNeeds a test.'
+    );
+  });
+
+  it('keeps a fenced HTML comment, which is text', () => {
+    expect(visibleBody('```html\n<!-- kept -->\n```')).toBe('```html\n<!-- kept -->\n```');
   });
 });

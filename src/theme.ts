@@ -14,6 +14,7 @@ export function pluginRootStyle(): CSSProperties {
     '--pr-hover': color.Surface.ContainerHover,
     '--pr-added': color.Success.Main,
     '--pr-removed': color.Critical.Main,
+    '--pr-warning': color.Warning.Main,
     '--pr-open': color.Success.Main,
     '--pr-closed': color.Critical.Main,
     '--pr-merged': color.Primary.Main,
