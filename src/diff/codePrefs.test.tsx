@@ -12,6 +12,12 @@ function Probe() {
   prefs = useCodePrefs();
   return null;
 }
+// A second reader of the same choices, as another open Code tab is.
+let other: ReturnType<typeof useCodePrefs>;
+function OtherProbe() {
+  other = useCodePrefs();
+  return null;
+}
 const mount = () => renderPluginComponent(<Probe />, { id: 'pull-requests', plugin });
 const values = () => ({
   hideTests: prefs.hideTests,
@@ -55,6 +61,20 @@ describe('useCodePrefs', () => {
       diffStyle: 'split',
       wrap: false,
     });
+  });
+
+  it('one change reaches every mounted reader', async () => {
+    await renderPluginComponent(
+      <>
+        <Probe />
+        <OtherProbe />
+      </>,
+      { id: 'pull-requests', plugin }
+    );
+    act(() => prefs.update({ diffStyle: 'split' }));
+    expect(other.diffStyle).toBe('split');
+    act(() => other.update({ hideTests: true }));
+    expect(values()).toMatchObject({ diffStyle: 'split', hideTests: true });
   });
 
   it('takes each stored value it can read and the default for the rest', async () => {

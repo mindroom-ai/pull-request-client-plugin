@@ -8,9 +8,10 @@ import { GitHubError, type Commit, type PullRequestFile, type ReviewComment } fr
 import plugin from './index';
 import type { ReviewThread } from './reviewThreads';
 import { CodeTab, type ListState } from './CodeTab';
+import { trapOptions } from './testing/focusTrapStandIn';
 
-vi.mock('focus-trap-react', () => ({
-  default: ({ children }: { children: ReactNode }) => children,
+vi.mock('focus-trap-react', async () => ({
+  default: (await import('./testing/focusTrapStandIn')).FocusTrapStandIn,
 }));
 
 vi.mock('@mindroom/client-sdk/ui', async (importOriginal) => {
@@ -145,6 +146,7 @@ const file = (over: Partial<PullRequestFile> & Pick<PullRequestFile, 'path'>): P
   additions: 1,
   deletions: 1,
   patch: '@@ -1 +1 @@\n-old\n+new',
+  sha: null,
   url: FILES_URL,
   ...over,
 });
@@ -317,6 +319,13 @@ const viewedBox = (tab: TabView, path: string) => {
 };
 const viewedPaths = (tab: TabView, paths: string[]) =>
   paths.filter((path) => viewedBox(tab, path).checked);
+const foldToggle = (tab: TabView, path: string) => {
+  const button = tab
+    .getByTestId(`header:${path}`)
+    .querySelector<HTMLButtonElement>('button[aria-expanded]');
+  if (!button) throw new Error(`No fold toggle for ${path}`);
+  return button;
+};
 
 const chooseCommit = async (tabView: Awaited<ReturnType<typeof show>>, name: RegExp | string) => {
   await click(tabView.getByRole('button', { name: /^Diff scope:/ }));
@@ -624,6 +633,47 @@ describe('CodeTab', () => {
       expect(tab.queryByText('Changed')).toBeNull();
     });
 
+    it('a file without a patch shows Changed once its blob changed', async () => {
+      const withLogo = (sha: string) =>
+        FILES.map((entry) => (entry.path === 'logo.png' ? { ...entry, sha } : entry));
+      const first = await show({ files: withLogo('b10b1') });
+      await click(viewedBox(first, 'logo.png'));
+      first.unmount();
+
+      const pushed = await show({ files: withLogo('b10b2') });
+      expect(viewedBox(pushed, 'logo.png').getAttribute('aria-label')).toBe('Changed');
+      expect(viewedBox(pushed, 'logo.png').checked).toBe(false);
+      pushed.unmount();
+
+      const same = await show({ files: withLogo('b10b1') });
+      expect(viewedBox(same, 'logo.png').checked).toBe(true);
+    });
+
+    it('viewed files start folded when a view starts', async () => {
+      const first = await show();
+      await click(viewedBox(first, 'src/app.ts'));
+      expect(itemOf('src/app.ts')?.collapsed).toBe(true);
+      first.unmount();
+
+      const tab = await show();
+      expect(itemOf('src/app.ts')?.collapsed).toBe(true);
+      expect(itemOf('README.md')?.collapsed).toBe(false);
+      // Unfolding it afterwards keeps it viewed.
+      await click(foldToggle(tab, 'src/app.ts'));
+      expect(itemOf('src/app.ts')?.collapsed).toBe(false);
+      expect(viewedBox(tab, 'src/app.ts').checked).toBe(true);
+
+      // A commit's view starts again, and so does All commits after it.
+      await chooseCommit(tab, /^Commit 2/);
+      expect(await tab.findByText('2 files')).toBeTruthy();
+      expect(itemOf('src/app.ts')?.collapsed).toBe(true);
+      expect(itemOf('src/extra.ts')?.collapsed).toBe(false);
+      await click(foldToggle(tab, 'src/app.ts'));
+      expect(itemOf('src/app.ts')?.collapsed).toBe(false);
+      await chooseCommit(tab, 'All commits');
+      expect(itemOf('src/app.ts')?.collapsed).toBe(true);
+    });
+
     it('Shift-click marks a range', async () => {
       const tab = await show();
       const order = [
@@ -765,11 +815,26 @@ describe('CodeTab', () => {
       expect(tab.getByRole('menuitemradio', { name: 'Stacked' }).getAttribute('aria-checked')).toBe(
         'true'
       );
-      await click(tab.getByRole('menuitemradio', { name: 'Split' }));
+      // A click focuses the row it chooses, inside the menu's focus trap.
+      const split = tab.getByRole('menuitemradio', { name: 'Split' });
+      act(() => split.focus());
+      await click(split);
       expect(options()).toMatchObject({ diffStyle: 'split' });
       // Choosing a layout closes the menu and gives the focus back to its button.
       expect(tab.queryByRole('menuitemradio', { name: 'Split' })).toBeNull();
       expect(document.activeElement).toBe(tab.getByRole('button', { name: 'Diff options' }));
+    });
+
+    it('Escape closes the diff options menu and gives the focus back to its button', async () => {
+      const tab = await show();
+      const button = tab.getByRole('button', { name: 'Diff options' });
+      await click(button);
+      act(() => tab.getByRole('menuitemcheckbox', { name: 'Wrap lines' }).focus());
+      await act(async () => {
+        trapOptions().escapeDeactivates?.();
+      });
+      expect(tab.queryByRole('menu')).toBeNull();
+      expect(document.activeElement).toBe(button);
     });
 
     it('prefs persist across mounts', async () => {
@@ -802,6 +867,8 @@ describe('CodeTab', () => {
         .getByTestId('header:README.md')
         .querySelector<HTMLButtonElement>('[aria-label="Expand diff"]');
       expect(chevron?.getAttribute('aria-expanded')).toBe('false');
+      // The chevron of a folded file points the way the text runs.
+      expect(chevron?.querySelector('svg')?.classList.contains('mrpr-arrow-back')).toBe(true);
       await click(chevron!);
       expect(itemOf('README.md')?.collapsed).toBe(false);
       expect(itemOf('old.ts')?.collapsed).toBe(true);

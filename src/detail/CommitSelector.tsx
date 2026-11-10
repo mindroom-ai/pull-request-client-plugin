@@ -27,6 +27,15 @@ export function CommitSelector({
   const [visibleCount, setVisibleCount] = useState(COMMIT_PAGE_SIZE);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  // Set when a choice or Escape closes the menu, which then gives the focus back to the trigger.
+  // That waits until the menu is gone: while its focus trap is active, the trap takes the focus
+  // back. A click outside leaves the focus where it went.
+  const refocus = useRef(false);
+  useEffect(() => {
+    if (anchor !== undefined || !refocus.current) return;
+    refocus.current = false;
+    triggerRef.current?.focus();
+  }, [anchor]);
   // The first row "Show more" brought in, which takes the focus from it.
   const focusRow = useRef<number>();
   useEffect(() => {
@@ -52,9 +61,9 @@ export function CommitSelector({
     return true;
   };
   const choose = (sha: string | undefined) => {
+    refocus.current = true;
     setAnchor(undefined);
     onCommitChange(sha);
-    triggerRef.current?.focus();
   };
 
   return (
@@ -84,7 +93,10 @@ export function CommitSelector({
               initialFocus: false,
               returnFocusOnDeactivate: false,
               clickOutsideDeactivates: close,
-              escapeDeactivates: close,
+              escapeDeactivates: () => {
+                refocus.current = true;
+                return close();
+              },
             }}
           >
             <Menu ref={menuRef} aria-label={t('code.commitsLabel')}>

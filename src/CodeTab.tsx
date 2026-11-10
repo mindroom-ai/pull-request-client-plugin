@@ -125,7 +125,7 @@ function FoldToggle({ path }: { path: string }) {
       }}
     >
       {folded ? (
-        <ChevronRight aria-hidden className="mrpr-button-icon" />
+        <ChevronRight aria-hidden className="mrpr-button-icon mrpr-arrow-back" />
       ) : (
         <ChevronDown aria-hidden className="mrpr-button-icon" />
       )}
@@ -221,7 +221,7 @@ function ToolbarButton({
   );
 }
 
-/** The folds of one view: another commit's starts with every file open. */
+/** The folds of one view: the pull request as a whole, or one commit. */
 type Folds = {
   view: string;
   override: DiffFoldOverride;
@@ -229,13 +229,6 @@ type Folds = {
   /** The file last marked or unmarked, where a Shift-click's range starts. */
   anchor: string | null;
 };
-
-const unfolded = (view: string): Folds => ({
-  view,
-  override: null,
-  toggled: NO_PATHS,
-  anchor: null,
-});
 
 export function CodeTab({
   pullRequest,
@@ -276,9 +269,39 @@ export function CodeTab({
   const commitFiles = useCommitFiles(pullRequest, shownCommit ?? '', shownCommit !== undefined);
   const viewFiles = shownCommit === undefined ? files : commitFiles.data;
 
+  // Viewed marks belong to the pull request as a whole: a file keeps its mark, against its patch
+  // in the pull request, in a commit's view, and a file only a commit changes has none. A file
+  // GitHub sends no patch for is marked against its blob, which changes with its content.
+  const markTexts = useMemo(
+    () =>
+      new Map(
+        files.map((file) => [
+          file.path,
+          file.patch ?? (file.sha === null ? '' : `blob:${file.sha}`),
+        ])
+      ),
+    [files]
+  );
+
+  // A view starts, once its files are there, with its viewed files folded, as GitHub shows them;
+  // another commit, or All commits again, starts again.
   const view = shownCommit ?? '';
-  const [storedFolds, setFolds] = useState(() => unfolded(view));
-  const folds = storedFolds.view === view ? storedFolds : unfolded(view);
+  const startFolds = (): Folds => ({
+    view,
+    override: null,
+    toggled: new Set(
+      (viewFiles ?? [])
+        .map((file) => file.path)
+        .filter((path) => {
+          const text = markTexts.get(path);
+          return text !== undefined && viewed.stateOf(path, text) === 'viewed';
+        })
+    ),
+    anchor: null,
+  });
+  const [storedFolds, setFolds] = useState(() => (viewFiles ? startFolds() : undefined));
+  if (viewFiles && storedFolds?.view !== view) setFolds(startFolds());
+  const folds = storedFolds?.view === view ? storedFolds : startFolds();
 
   // The highlighted lines depend on the theme, so the parse that caches them carries it in its key.
   const scope = `pull-request:${pullRequest.owner}/${pullRequest.repo}#${pullRequest.number}:${themeKind}`;
@@ -355,15 +378,9 @@ export function CodeTab({
     [listed, statusByPath]
   );
 
-  // Viewed marks belong to the pull request as a whole: a file keeps its mark, against its patch
-  // in the pull request, in a commit's view, and a file only a commit changes has none.
-  const pullRequestPatches = useMemo(
-    () => new Map(files.map((file) => [file.path, file.patch ?? ''])),
-    [files]
-  );
   const marked = listed
-    .filter((path) => pullRequestPatches.has(path))
-    .map((path) => ({ fileKey: path, path, patch: pullRequestPatches.get(path) ?? '' }));
+    .filter((path) => markTexts.has(path))
+    .map((path) => ({ fileKey: path, path, patch: markTexts.get(path) ?? '' }));
   const stats = useMemo(
     () =>
       new Map(
@@ -377,7 +394,7 @@ export function CodeTab({
 
   const updateFolds = (change: (current: Folds) => Partial<Folds>) =>
     setFolds((stored) => {
-      const current = stored.view === view ? stored : unfolded(view);
+      const current = stored?.view === view ? stored : folds;
       return { ...current, ...change(current) };
     });
   const toggleFolded = (path: string) =>
@@ -390,7 +407,7 @@ export function CodeTab({
   // Marking a file viewed folds it and unmarking it unfolds it; Shift-click does so from the
   // file last marked to this one, as the list shows them.
   const setViewed = (path: string, extendRange: boolean) => {
-    const patch = pullRequestPatches.get(path) ?? '';
+    const patch = markTexts.get(path) ?? '';
     const mark = viewed.stateOf(path, patch) !== 'viewed';
     const range = getFileViewedRange(marked, path, extendRange ? folds.anchor : null);
     if (extendRange) {
@@ -413,7 +430,7 @@ export function CodeTab({
   const header: FileHeaderState = {
     statOf: (path) => stats.get(path),
     viewedOf: (path) => {
-      const patch = pullRequestPatches.get(path);
+      const patch = markTexts.get(path);
       return patch === undefined ? undefined : viewed.stateOf(path, patch);
     },
     setViewed,

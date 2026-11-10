@@ -1,14 +1,14 @@
 // @vitest-environment jsdom
-import type { ReactNode } from 'react';
 import { act } from 'react-dom/test-utils';
 import { renderPluginComponent } from '@mindroom/client-sdk/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Commit } from '../github';
 import plugin from '../index';
+import { trapOptions } from '../testing/focusTrapStandIn';
 import { CommitSelector } from './CommitSelector';
 
-vi.mock('focus-trap-react', () => ({
-  default: ({ children }: { children: ReactNode }) => children,
+vi.mock('focus-trap-react', async () => ({
+  default: (await import('../testing/focusTrapStandIn')).FocusTrapStandIn,
 }));
 
 // Commit n was made at minute n, so the highest number is the newest.
@@ -84,6 +84,28 @@ describe('CommitSelector', () => {
     await click(view.getByRole('button', { name: 'Diff scope: All commits' }));
     await click(view.getByRole('menuitemradio', { name: 'All commits' }));
     expect(onCommitChange).toHaveBeenLastCalledWith(undefined);
+  });
+
+  it('choosing gives the focus back to the trigger', async () => {
+    const view = await show(undefined);
+    await click(view.getByRole('button', { name: 'Diff scope: All commits' }));
+    // A click focuses the row it chooses, inside the menu's focus trap.
+    const row = view.getByRole('menuitemradio', { name: /^Commit 12/ });
+    act(() => row.focus());
+    await click(row);
+    expect(document.activeElement).toBe(view.getByRole('button', { name: /^Diff scope:/ }));
+  });
+
+  it('Escape closes the menu and gives the focus back to the trigger', async () => {
+    const view = await show(undefined);
+    const trigger = view.getByRole('button', { name: 'Diff scope: All commits' });
+    await click(trigger);
+    act(() => view.getByRole('menuitemradio', { name: 'All commits' }).focus());
+    await act(async () => {
+      trapOptions().escapeDeactivates?.();
+    });
+    expect(view.queryByRole('menu')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
   });
 
   it('gives a commit without a headline a name', async () => {

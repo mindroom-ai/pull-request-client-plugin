@@ -1,7 +1,7 @@
 // How the Code tab shows the diffs, kept in the plugin's storage across panels and visits: test
 // files hidden or shown, whitespace changes hidden or shown, a unified or split layout, and long
-// lines wrapped or scrolled.
-import { useMemo, useState } from 'react';
+// lines wrapped or scrolled. Every open Code tab shows the same choices.
+import { useMemo, useSyncExternalStore } from 'react';
 import { usePluginStorage } from '@mindroom/client-sdk/core';
 
 export type CodePrefs = {
@@ -45,18 +45,31 @@ function readCodePrefs(raw: string | null): CodePrefs {
   };
 }
 
+// Every Code tab reads the choices from storage; this set tells all of them when one changes them.
+const listeners = new Set<() => void>();
+const subscribe = (listener: () => void) => {
+  listeners.add(listener);
+  // Another tab of the same account changes them too.
+  window.addEventListener('storage', listener);
+  return () => {
+    listeners.delete(listener);
+    window.removeEventListener('storage', listener);
+  };
+};
+
 export function useCodePrefs(): CodePrefs & { update(change: Partial<CodePrefs>): void } {
   const storage = usePluginStorage('pull-requests');
-  const [prefs, setPrefs] = useState(() => readCodePrefs(storage.getItem(KEY)));
+  const raw = useSyncExternalStore(subscribe, () => storage.getItem(KEY));
   return useMemo(
     () => ({
-      ...prefs,
+      ...readCodePrefs(raw),
       update: (change: Partial<CodePrefs>) => {
-        const next = { ...prefs, ...change };
-        setPrefs(next);
+        // From what is stored now, which another tab may have changed since this render read it.
+        const next = { ...readCodePrefs(storage.getItem(KEY)), ...change };
         storage.setItem(KEY, JSON.stringify(next));
+        listeners.forEach((listener) => listener());
       },
     }),
-    [prefs, storage]
+    [raw, storage]
   );
 }

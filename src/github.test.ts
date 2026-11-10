@@ -189,6 +189,7 @@ describe('fetchPullRequestFiles', () => {
             additions: 2,
             deletions: 1,
             patch: '@@ -1 +1 @@\n-a\n+b',
+            sha: 'b10b5a',
           },
         ])
       )
@@ -201,6 +202,7 @@ describe('fetchPullRequestFiles', () => {
         additions: 2,
         deletions: 1,
         patch: '@@ -1 +1 @@\n-a\n+b',
+        sha: 'b10b5a',
         url: 'https://github.com/a/b/pull/1/files',
       },
     ]);
@@ -252,6 +254,7 @@ const file = (over: Partial<PullRequestFile>): PullRequestFile => ({
   additions: 1,
   deletions: 1,
   patch: '@@ -1 +1 @@\n-a\n+b',
+  sha: null,
   url: 'https://github.com/a/b/pull/1/files',
   ...over,
 });
@@ -636,7 +639,11 @@ describe('fetchCommitFiles', () => {
   it("maps one commit's files", async () => {
     const fetchMock = stubRoutes({
       '/commits/abc': {
-        files: [{ filename: 'a.ts', status: 'added', additions: 1, deletions: 0, patch: '@@' }],
+        files: [
+          { filename: 'a.ts', status: 'added', additions: 1, deletions: 0, patch: '@@', sha: 'c0' },
+          // A file without a blob SHA.
+          { filename: 'lib', status: 'modified', additions: 0, deletions: 0 },
+        ],
       },
     });
     expect(await fetchCommitFiles(ref, 'abc', 'tok')).toEqual([
@@ -647,6 +654,17 @@ describe('fetchCommitFiles', () => {
         additions: 1,
         deletions: 0,
         patch: '@@',
+        sha: 'c0',
+        url: 'https://github.com/a/b/commit/abc',
+      },
+      {
+        path: 'lib',
+        previousPath: null,
+        status: 'modified',
+        additions: 0,
+        deletions: 0,
+        patch: null,
+        sha: null,
         url: 'https://github.com/a/b/commit/abc',
       },
     ]);

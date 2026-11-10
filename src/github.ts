@@ -48,6 +48,8 @@ export type PullRequestFile = {
   additions: number;
   deletions: number;
   patch: string | null;
+  /** The SHA of the file's blob, which changes with its content, patch or not. */
+  sha: string | null;
   url: string;
 };
 
@@ -232,6 +234,7 @@ function mapFiles(raw: unknown, url: string): PullRequestFile[] {
       additions: count(entry.additions),
       deletions: count(entry.deletions),
       patch: textOrNull(entry.patch),
+      sha: textOrNull(entry.sha),
       url,
     };
   });

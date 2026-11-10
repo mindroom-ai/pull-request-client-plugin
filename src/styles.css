@@ -688,7 +688,9 @@
   flex-shrink: 0;
 }
 
-/* The arrow points from the head branch to the base branch, which sits on the other side in right-to-left. */
+/* An arrow that points along the line turns around in right-to-left: the one from the head branch
+   to the base branch, and a folded file's chevron, which Pierre's header (laid out left to right)
+   holds in a page that reads right to left. */
 .mrpr-arrow-back:dir(rtl) {
   transform: scaleX(-1);
 }

@@ -21,8 +21,9 @@ export function DiffOptionsMenu({
   const t = usePluginTranslation('pull-requests');
   const [anchor, setAnchor] = useState<RectCords>();
   const buttonRef = useRef<HTMLButtonElement | null>(null);
-  // Set when a choice closes the menu, which then gives the focus back to its button. That waits
-  // until the menu is gone: while its focus trap is active, the trap takes the focus back.
+  // Set when a choice or Escape closes the menu, which then gives the focus back to its button.
+  // That waits until the menu is gone: while its focus trap is active, the trap takes the focus
+  // back. A click outside leaves the focus where it went.
   const refocus = useRef(false);
   useEffect(() => {
     if (anchor !== undefined || !refocus.current) return;
@@ -76,7 +77,10 @@ export function DiffOptionsMenu({
               initialFocus: false,
               returnFocusOnDeactivate: false,
               clickOutsideDeactivates: close,
-              escapeDeactivates: close,
+              escapeDeactivates: () => {
+                refocus.current = true;
+                return close();
+              },
             }}
           >
             <Menu aria-label={label}>
