@@ -242,11 +242,12 @@ describe('PullRequestPanel', () => {
         commits?: unknown[];
         reviewComments?: unknown[] | Response;
         checks?: Response;
+        statuses?: Response;
       } = {}
     ) =>
       fetchMock.mockImplementation(async (url) => {
         if (url.includes('/check-runs')) return parts.checks ?? respond({ check_runs: [] });
-        if (url.endsWith('/status')) return respond({ statuses: [] });
+        if (url.includes('/status?')) return parts.statuses ?? respond({ statuses: [] });
         if (url.includes('/compare/')) return respond({ behind_by: parts.behind ?? 0 });
         if (url.includes('/commits')) return respond(parts.commits ?? []);
         if (url.includes('/pulls/200/comments')) {
@@ -310,9 +311,13 @@ describe('PullRequestPanel', () => {
     it('shows behind and conflicts', async () => {
       serve(withHead({ mergeable_state: 'dirty' }), { behind: 3 });
       const view = await show();
-      await click(await view.findByRole('button', { name: 'Warnings for main' }));
+      const button = await view.findByRole('button', { name: 'Warnings for main' });
+      expect(button.getAttribute('aria-haspopup')).toBe('dialog');
+      await click(button);
       expect(await view.findByText('feature is 3 commits behind main')).toBeTruthy();
       expect(view.getByText('This branch has conflicts that must be resolved')).toBeTruthy();
+      expect(view.getByRole('dialog', { name: 'Warnings for main' })).toBeTruthy();
+      expect(view.queryByRole('menu')).toBeNull();
     });
 
     it('closes the base warning with a second click', async () => {
@@ -364,8 +369,14 @@ describe('PullRequestPanel', () => {
       const view = await show();
       await view.findByText('Add pull request cards');
       expect(filesRequests()).toHaveLength(0);
-      await act(async () => view.getByRole('button', { name: /^Lines changed/ }).focus());
+      const stat = view.getByRole('button', { name: /^Lines changed/ });
+      expect(stat.getAttribute('aria-haspopup')).toBe('dialog');
+      expect(stat.getAttribute('aria-expanded')).toBe('false');
+      await act(async () => stat.focus());
       await view.findByText('Total');
+      expect(stat.getAttribute('aria-expanded')).toBe('true');
+      expect(view.getByRole('dialog', { name: 'Lines changed: +20 -13' })).toBeTruthy();
+      expect(view.queryByRole('menu')).toBeNull();
       expect(document.querySelector('.mrpr-breakdown')?.textContent).toBe(
         'Code+5-1Tests+3-0Generated+10-10Docs+2-2Total+20-13'
       );
@@ -543,9 +554,9 @@ describe('PullRequestPanel', () => {
     });
 
     it('leaves the header whole when the checks do not load', async () => {
-      serve(withHead(), {
-        checks: new Response('{}', { status: 403, headers: { 'x-ratelimit-remaining': '0' } }),
-      });
+      const limited = () =>
+        new Response('{}', { status: 403, headers: { 'x-ratelimit-remaining': '0' } });
+      serve(withHead(), { checks: limited(), statuses: limited() });
       const view = await show();
       expect(await view.findByText('Checks unavailable')).toBeTruthy();
       expect(view.getByText('Add pull request cards')).toBeTruthy();

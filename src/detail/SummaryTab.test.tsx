@@ -1,15 +1,15 @@
 // @vitest-environment jsdom
-import type { ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act } from 'react-dom/test-utils';
 import { renderPluginComponent } from '@mindroom/client-sdk/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PullRequest, PullRequestRef } from '../github';
 import plugin from '../index';
+import { trapOptions } from '../testing/focusTrapStandIn';
 import { SummaryTab } from './SummaryTab';
 
-vi.mock('focus-trap-react', () => ({
-  default: ({ children }: { children: ReactNode }) => children,
+vi.mock('focus-trap-react', async () => ({
+  default: (await import('../testing/focusTrapStandIn')).FocusTrapStandIn,
 }));
 
 // The app's Markdown renderer loads on demand and cannot load here; this one renders bold text.
@@ -101,6 +101,7 @@ type Parts = {
   comments?: unknown[] | Response;
   reviewComments?: unknown[] | Response;
   checks?: unknown[];
+  checksTotal?: number;
 };
 
 const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>();
@@ -108,8 +109,10 @@ const serve = (parts: Parts = {}) =>
   fetchMock.mockImplementation(async (url) => {
     const answer = (part: unknown[] | Response | undefined) =>
       part instanceof Response ? part : respond(part ?? []);
-    if (url.includes('/check-runs')) return respond({ check_runs: parts.checks ?? [] });
-    if (url.endsWith('/status')) return respond({ statuses: [] });
+    if (url.includes('/check-runs')) {
+      return respond({ check_runs: parts.checks ?? [], total_count: parts.checksTotal });
+    }
+    if (url.includes('/status?')) return respond({ statuses: [] });
     if (url.includes('/pulls/200/reviews')) return answer(parts.reviews);
     if (url.includes('/pulls/200/comments')) return answer(parts.reviewComments);
     if (url.includes('/issues/200/comments')) return answer(parts.comments);
@@ -266,6 +269,20 @@ describe('SummaryTab', () => {
     );
   });
 
+  it('says so when GitHub has more check runs than it sent', async () => {
+    serve({
+      checks: [{ name: 'lint', status: 'completed', conclusion: 'success' }],
+      checksTotal: 101,
+    });
+    const view = await show();
+    await click(view.getByRole('button', { name: 'Checks' }));
+    const note = await view.findByRole('link', {
+      name: 'Showing the first 1; see the rest on GitHub',
+    });
+    expect(note.getAttribute('href')).toBe(`${PR_URL}/checks`);
+    expect(view.getByText('lint')).toBeTruthy();
+  });
+
   describe('comments', () => {
     const texts = (view: Awaited<ReturnType<typeof show>>) =>
       [...view.container.querySelectorAll('.mrpr-comment-card')].map(
@@ -310,8 +327,13 @@ describe('SummaryTab', () => {
       expect(view.queryByText('Bot remark')).toBeNull();
       const filter = view.getByRole('button', { name: 'Filter comments' });
       expect(filter.textContent).toContain('1 hidden');
+      expect(filter.getAttribute('aria-haspopup')).toBe('menu');
       await click(filter);
-      await click(view.getByRole('checkbox', { name: 'Show bots' }));
+      expect(view.getByRole('menu', { name: 'Filter comments' })).toBeTruthy();
+      const showBots = view.getByRole('menuitemcheckbox', { name: 'Show bots' });
+      expect(showBots.getAttribute('aria-checked')).toBe('false');
+      await click(showBots);
+      expect(showBots.getAttribute('aria-checked')).toBe('true');
       expect(view.getByText('Bot remark')).toBeTruthy();
       expect(view.getByRole('button', { name: 'Filter comments' }).textContent).not.toContain(
         'hidden'
@@ -323,6 +345,36 @@ describe('SummaryTab', () => {
       ).toBe(true);
     });
 
+    it('Escape closes the filter menu and gives the focus back to its button', async () => {
+      const view = await show();
+      const filter = await view.findByRole('button', { name: 'Filter comments' });
+      await click(filter);
+      act(() => view.getByRole('menuitemcheckbox', { name: 'Show bots' }).focus());
+      await act(async () => {
+        trapOptions().escapeDeactivates?.();
+      });
+      expect(view.queryByRole('menu')).toBeNull();
+      expect(document.activeElement).toBe(filter);
+    });
+
+    it("shows a bot's thread with a human reply while bots are hidden", async () => {
+      const bot = user('robo[bot]', 'Bot');
+      serve({
+        reviewComments: [
+          reviewComment(1, { user: bot, body: 'Bot finding' }),
+          reviewComment(2, { in_reply_to_id: 1, body: 'Human reply' }),
+          reviewComment(3, { user: bot, body: 'Bot alone' }),
+        ],
+      });
+      const view = await show();
+      expect(await view.findByText('Bot finding')).toBeTruthy();
+      expect(view.getByText('Human reply')).toBeTruthy();
+      expect(view.queryByText('Bot alone')).toBeNull();
+      expect(view.getByRole('button', { name: 'Filter comments' }).textContent).toContain(
+        '1 hidden'
+      );
+    });
+
     it('starts with the bots shown when the stored choice says so', async () => {
       serve({
         comments: [
@@ -332,7 +384,7 @@ describe('SummaryTab', () => {
       const first = await show();
       await first.findByRole('button', { name: 'Filter comments' });
       await click(first.getByRole('button', { name: 'Filter comments' }));
-      await click(first.getByRole('checkbox', { name: 'Show bots' }));
+      await click(first.getByRole('menuitemcheckbox', { name: 'Show bots' }));
       first.unmount();
       const view = await show();
       expect(await view.findByText('Bot remark')).toBeTruthy();
@@ -398,7 +450,7 @@ describe('SummaryTab', () => {
           );
         }
         if (url.includes('/check-runs')) return respond({ check_runs: [] });
-        if (url.endsWith('/status')) return respond({ statuses: [] });
+        if (url.includes('/status?')) return respond({ statuses: [] });
         return respond([]);
       });
       const view = await show();

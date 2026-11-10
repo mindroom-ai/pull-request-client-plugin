@@ -11,8 +11,16 @@ import {
   pullRequestChecksStatePresentation,
 } from '../presentation';
 import { checksState, groupChecks, summarizeChecks } from './detail.logic';
+import { TruncatedNote } from './TruncatedNote';
 
-export function ChecksPopover({ checks }: { checks: PullRequestCheck[] }) {
+export function ChecksPopover({
+  checks,
+  truncatedUrl,
+}: {
+  checks: PullRequestCheck[];
+  /** Where every check shows, when GitHub listed only some of them. */
+  truncatedUrl?: string;
+}) {
   const t = usePluginTranslation('pull-requests');
   const [showAll, setShowAll] = useState(false);
   if (checks.length === 0) return <p className="mrpr-status">{t('checksPopover.none')}</p>;
@@ -62,6 +70,12 @@ export function ChecksPopover({ checks }: { checks: PullRequestCheck[] }) {
           {showAll ? t('checksPopover.showLess') : t('checksPopover.showAll')}
         </button>
       ) : null}
+      {truncatedUrl === undefined ? null : (
+        <TruncatedNote
+          label={t('summary.truncated', { count: checks.length })}
+          href={truncatedUrl}
+        />
+      )}
     </div>
   );
 }

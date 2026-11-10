@@ -343,6 +343,20 @@ const STATE_STATUSES: Record<string, CheckStatus> = {
   error: 'failure',
 };
 
+/**
+ * A link a check's integration set, kept only when it is a web address: any other scheme, such as
+ * `javascript:`, must not reach a link's href.
+ */
+function webUrl(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
 function checkRun(run: Json): PullRequestCheck {
   const output = record(run.output);
   return {
@@ -350,7 +364,7 @@ function checkRun(run: Json): PullRequestCheck {
     // A run that is not completed (queued, in_progress, waiting, requested, pending) is pending.
     status: run.status === 'completed' ? CONCLUSIONS[text(run.conclusion)] ?? 'neutral' : 'pending',
     description: textOrNull(output?.title) || null,
-    url: textOrNull(run.html_url) ?? textOrNull(run.details_url),
+    url: webUrl(run.html_url) ?? webUrl(run.details_url),
     updatedAt: textOrNull(run.completed_at) ?? textOrNull(run.started_at),
   };
 }
@@ -360,7 +374,7 @@ function commitStatus(entry: Json): PullRequestCheck {
     name: text(entry.context),
     status: STATE_STATUSES[text(entry.state)] ?? 'neutral',
     description: textOrNull(entry.description) || null,
-    url: textOrNull(entry.target_url),
+    url: webUrl(entry.target_url),
     updatedAt: textOrNull(entry.updated_at),
   };
 }
@@ -379,28 +393,47 @@ async function getOrNothing(
   }
 }
 
-/** The check runs and commit statuses of a commit as one list; of two with a name, the newer. */
+/** The checks of one of the two lists, and whether GitHub has more of them than it sent. */
+function checksOf(
+  answer: PromiseSettledResult<Json>,
+  key: 'check_runs' | 'statuses',
+  map: (item: Json) => PullRequestCheck
+): Paged<PullRequestCheck> {
+  if (answer.status === 'rejected') return { items: [], truncated: false };
+  const items = list(answer.value[key]).map(map);
+  const total = answer.value.total_count;
+  return { items, truncated: typeof total === 'number' && total > items.length };
+}
+
+/**
+ * The check runs and commit statuses of a commit as one list; of two with a name, the newer.
+ * Each list is asked for on its own, so one that fails leaves the other's checks; only when both
+ * fail is the answer an error. Each comes as one page of 100, and the list is cut short when
+ * GitHub counts more.
+ */
 export async function fetchChecks(
   ref: PullRequestRef,
   headSha: string,
   token: string | undefined,
   signal?: AbortSignal
-): Promise<PullRequestCheck[]> {
+): Promise<Paged<PullRequestCheck>> {
   const base = `${repoPath(ref)}/commits/${encodeURIComponent(headSha)}`;
-  const [runs, statuses] = await Promise.all([
+  const [runs, statuses] = await Promise.allSettled([
     getOrNothing(`${base}/check-runs?per_page=${PAGE_SIZE}`, token, signal),
-    getOrNothing(`${base}/status`, token, signal),
+    getOrNothing(`${base}/status?per_page=${PAGE_SIZE}`, token, signal),
   ]);
+  if (runs.status === 'rejected' && statuses.status === 'rejected') throw runs.reason;
+  const parts = [
+    checksOf(runs, 'check_runs', checkRun),
+    checksOf(statuses, 'statuses', commitStatus),
+  ];
   const byName = new Map<string, PullRequestCheck>();
-  for (const check of [
-    ...list(runs.check_runs).map(checkRun),
-    ...list(statuses.statuses).map(commitStatus),
-  ]) {
+  for (const check of parts.flatMap((part) => part.items)) {
     const kept = byName.get(check.name);
     // ISO timestamps in one format order as text; a check without one is the older.
     if (!kept || (check.updatedAt ?? '') > (kept.updatedAt ?? '')) byName.set(check.name, check);
   }
-  return [...byName.values()];
+  return { items: [...byName.values()], truncated: parts.some((part) => part.truncated) };
 }
 
 /** How many commits the pull request's base branch has that its head lacks. */

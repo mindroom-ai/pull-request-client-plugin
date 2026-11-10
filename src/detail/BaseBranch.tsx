@@ -29,6 +29,7 @@ export function BaseBranch({
   };
   const name = <span className="mrpr-truncate">{baseBranch}</span>;
   if (!freshness) return <span className="mrpr-base-ref mrpr-base-plain">{name}</span>;
+  const label = t('base.warning', { base: baseBranch });
   return (
     <>
       <button
@@ -36,7 +37,7 @@ export function BaseBranch({
         className="mrpr-base-ref mrpr-base-warning"
         aria-haspopup="dialog"
         aria-expanded={anchor !== undefined}
-        aria-label={t('base.warning', { base: baseBranch })}
+        aria-label={label}
         onClick={(event: MouseEvent<HTMLButtonElement>) =>
           setAnchor(anchor ? undefined : event.currentTarget.getBoundingClientRect())
         }
@@ -60,7 +61,7 @@ export function BaseBranch({
               escapeDeactivates: close,
             }}
           >
-            <Menu>
+            <Menu role="dialog" aria-label={label}>
               <div
                 ref={contentRef}
                 tabIndex={-1}

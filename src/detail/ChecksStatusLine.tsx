@@ -38,8 +38,10 @@ export function ChecksStatusLine({
       </span>
     );
   }
-  const checks = query.data;
-  if (checks === undefined) return <span className="mrpr-status">{t('checksLine.loading')}</span>;
+  if (query.data === undefined) {
+    return <span className="mrpr-status">{t('checksLine.loading')}</span>;
+  }
+  const checks = query.data.items;
   const state = checksState(checks);
   if (state === 'none') return <span className="mrpr-status">{t('checksLine.none')}</span>;
   const { key, ...values } = summarizeChecks(checks);
@@ -74,9 +76,12 @@ export function ChecksStatusLine({
               escapeDeactivates: close,
             }}
           >
-            <Menu>
+            <Menu role="dialog" aria-label={t('checksPopover.label')}>
               <div className="mrpr-root mrpr-popover" style={pluginRootStyle()}>
-                <ChecksPopover checks={checks} />
+                <ChecksPopover
+                  checks={checks}
+                  truncatedUrl={query.data.truncated ? `${pullRequest.url}/checks` : undefined}
+                />
               </div>
             </Menu>
           </FocusTrap>

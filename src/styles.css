@@ -1272,14 +1272,6 @@
 .mrpr-button-wide {
   inline-size: 100%;
 }
-.mrpr-menu-check {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  font-size: 12px;
-  cursor: pointer;
-}
 
 .mrpr-conversations {
   display: flex;

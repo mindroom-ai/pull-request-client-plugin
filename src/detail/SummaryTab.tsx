@@ -2,7 +2,15 @@
 // The Summary tab: who reviewed and what they decided, the labels, the description, the checks and
 // the conversation. Each list has its own query, so a failure shows in its own place and the rest
 // keeps working.
-import { useId, useMemo, useState, type MouseEvent, type ReactNode } from 'react';
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent,
+  type ReactNode,
+} from 'react';
 import FocusTrap from 'focus-trap-react';
 import type { RectCords } from 'folds';
 import { ArrowDownUp, ChevronRight, ListFilter, Tag, Users } from 'lucide-react';
@@ -22,9 +30,12 @@ import {
 import { useChecks, useConversationComments, useReviewComments, useReviews } from '../queries';
 import { buildReviewThreads } from '../reviewThreads';
 import { pluginRootStyle } from '../theme';
+import { MenuOption } from './CommitSelector';
 import { ConversationCard } from './ConversationCards';
+import { TruncatedNote } from './TruncatedNote';
 import {
   conversationItems,
+  filterConversationItems,
   latestReviewOutcomes,
   type ConversationItem,
   type Outcome,
@@ -96,18 +107,6 @@ function MetaRow({
       </span>
       <span className="mrpr-meta-row-value">{children}</span>
     </div>
-  );
-}
-
-/** What a list that GitHub gave in part says: how much is here, and where the rest is. */
-function TruncatedNote({ count, href }: { count: number; href: string }) {
-  const t = usePluginTranslation('pull-requests');
-  return (
-    <p className="mrpr-status mrpr-note">
-      <a className="mrpr-link" href={href} target="_blank" rel="noopener noreferrer">
-        {t('summary.truncated', { count })}
-      </a>
-    </p>
   );
 }
 
@@ -219,7 +218,10 @@ function ReviewersRow({
       </span>
       {error ? <GitHubErrorState error={error} onRetry={retry} /> : null}
       {reviews?.truncated ? (
-        <TruncatedNote count={reviews.items.length} href={pullRequest.url} />
+        <TruncatedNote
+          label={t('summary.truncated', { count: reviews.items.length })}
+          href={pullRequest.url}
+        />
       ) : null}
     </MetaRow>
   );
@@ -247,37 +249,39 @@ function ChecksList({
     return <GitHubErrorState error={query.error} onRetry={() => void query.refetch()} />;
   }
   if (!query.data) return <p className="mrpr-status">{t('summary.loadingChecks')}</p>;
-  if (query.data.length === 0) return <p className="mrpr-status">{t('summary.noChecks')}</p>;
+  const checks = query.data.items;
+  if (checks.length === 0) return <p className="mrpr-status">{t('summary.noChecks')}</p>;
   return (
-    <ul className="mrpr-checks mrpr-checks-with-details">
-      {query.data.map((check, index) => (
-        // Check names can repeat, and these rows hold no state of their own.
-        // eslint-disable-next-line react/no-array-index-key
-        <li key={`${index}:${check.name}`} className="mrpr-check">
-          <PullRequestCheckStatusIcon status={check.status} />
-          <span className="mrpr-check-name mrpr-truncate" title={check.description ?? check.name}>
-            {check.name}
-          </span>
-          <span className="mrpr-check-status">
-            <PullRequestCheckStatusLabel check={check} />
-          </span>
-          {check.url === null ? null : (
-            <a className="mrpr-link" href={check.url} target="_blank" rel="noopener noreferrer">
-              {t('checksPopover.details')}
-            </a>
-          )}
-        </li>
-      ))}
-    </ul>
+    <>
+      <ul className="mrpr-checks mrpr-checks-with-details">
+        {checks.map((check, index) => (
+          // Check names can repeat, and these rows hold no state of their own.
+          // eslint-disable-next-line react/no-array-index-key
+          <li key={`${index}:${check.name}`} className="mrpr-check">
+            <PullRequestCheckStatusIcon status={check.status} />
+            <span className="mrpr-check-name mrpr-truncate" title={check.description ?? check.name}>
+              {check.name}
+            </span>
+            <span className="mrpr-check-status">
+              <PullRequestCheckStatusLabel check={check} />
+            </span>
+            {check.url === null ? null : (
+              <a className="mrpr-link" href={check.url} target="_blank" rel="noopener noreferrer">
+                {t('checksPopover.details')}
+              </a>
+            )}
+          </li>
+        ))}
+      </ul>
+      {query.data.truncated ? (
+        <TruncatedNote
+          label={t('summary.truncated', { count: checks.length })}
+          href={`${pullRequest.url}/checks`}
+        />
+      ) : null}
+    </>
   );
 }
-
-const authorOf = (item: ConversationItem) =>
-  item.kind === 'comment'
-    ? item.comment.author
-    : item.kind === 'review'
-    ? item.review.author
-    : item.thread.comments[0]?.author ?? null;
 
 const commentsIn = (item: ConversationItem) =>
   item.kind === 'thread' ? item.thread.comments.length : 1;
@@ -294,6 +298,17 @@ function FilterMenu({
 }) {
   const t = usePluginTranslation('pull-requests');
   const [anchor, setAnchor] = useState<RectCords>();
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  // Set when Escape closes the menu, which then gives the focus back to its button. That waits
+  // until the menu is gone: while its focus trap is active, the trap takes the focus back. A click
+  // outside leaves the focus where it went.
+  const refocus = useRef(false);
+  useEffect(() => {
+    if (anchor !== undefined || !refocus.current) return;
+    refocus.current = false;
+    buttonRef.current?.focus();
+  }, [anchor]);
+  const label = t('summary.filterLabel');
   // Escape and a click outside close it, as the app's own menus do.
   const close = () => {
     setAnchor(undefined);
@@ -302,10 +317,11 @@ function FilterMenu({
   return (
     <>
       <button
+        ref={buttonRef}
         type="button"
         className="mrpr-button mrpr-button-quiet"
-        aria-label={t('summary.filterLabel')}
-        aria-haspopup="dialog"
+        aria-label={label}
+        aria-haspopup="menu"
         aria-expanded={anchor !== undefined}
         onClick={(event: MouseEvent<HTMLButtonElement>) =>
           setAnchor(anchor ? undefined : event.currentTarget.getBoundingClientRect())
@@ -325,19 +341,25 @@ function FilterMenu({
               initialFocus: false,
               returnFocusOnDeactivate: false,
               clickOutsideDeactivates: close,
-              escapeDeactivates: close,
+              escapeDeactivates: () => {
+                refocus.current = true;
+                return close();
+              },
             }}
           >
-            <Menu>
-              <div className="mrpr-root mrpr-popover" style={pluginRootStyle()}>
-                <label className="mrpr-menu-check">
-                  <input
-                    type="checkbox"
-                    checked={showBots}
-                    onChange={(event) => onShowBots(event.currentTarget.checked)}
-                  />
+            <Menu role="menu" aria-label={label}>
+              {/* A switch leaves the menu open, as the diff options' switches do. */}
+              <div
+                className="mrpr-root mrpr-commit-menu mrpr-options-menu"
+                style={pluginRootStyle()}
+              >
+                <MenuOption
+                  role="menuitemcheckbox"
+                  checked={showBots}
+                  onSelect={() => onShowBots(!showBots)}
+                >
                   {t('summary.showBots')}
-                </label>
+                </MenuOption>
               </div>
             </Menu>
           </FocusTrap>
@@ -373,7 +395,7 @@ export function SummaryTab({
       conversationItems(comments.data?.items ?? [], reviews.data?.items ?? [], threads, 'oldest'),
     [comments.data, reviews.data, threads]
   );
-  const visible = showBots ? items : items.filter((item) => !authorOf(item)?.isBot);
+  const visible = filterConversationItems(items, { bots: showBots });
   const total = items.reduce((sum, item) => sum + commentsIn(item), 0);
   const hiddenComments = total - visible.reduce((sum, item) => sum + commentsIn(item), 0);
   const recent = visible.slice(Math.max(0, visible.length - shown));
@@ -453,10 +475,16 @@ export function SummaryTab({
           />
         ) : null}
         {comments.data?.truncated ? (
-          <TruncatedNote count={comments.data.items.length} href={pullRequest.url} />
+          <TruncatedNote
+            label={t('summary.truncated', { count: comments.data.items.length })}
+            href={pullRequest.url}
+          />
         ) : null}
         {reviewComments.data?.truncated ? (
-          <TruncatedNote count={reviewComments.data.items.length} href={pullRequest.url} />
+          <TruncatedNote
+            label={t('summary.truncated', { count: reviewComments.data.items.length })}
+            href={pullRequest.url}
+          />
         ) : null}
         {loading ? (
           <p className="mrpr-status">{t('summary.loadingComments')}</p>

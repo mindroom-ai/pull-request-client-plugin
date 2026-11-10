@@ -426,7 +426,7 @@ describe('fetchChecks', () => {
     ['completed', 'stale', 'neutral'],
   ])('maps check runs: %s %s is %s', async (status, conclusion, expected) => {
     stubRoutes({ '/check-runs': { check_runs: [run(status, conclusion)] }, '/status': {} });
-    expect(await fetchChecks(ref, 'sha', undefined)).toEqual([
+    expect((await fetchChecks(ref, 'sha', undefined)).items).toEqual([
       {
         name: `${status}/${conclusion}`,
         status: expected,
@@ -457,7 +457,7 @@ describe('fetchChecks', () => {
         ],
       },
     });
-    expect(await fetchChecks(ref, 'sha', undefined)).toEqual([
+    expect((await fetchChecks(ref, 'sha', undefined)).items).toEqual([
       {
         name: 'ci/x',
         status: expected,
@@ -478,19 +478,108 @@ describe('fetchChecks', () => {
       ],
     };
     stubRoutes({ '/check-runs': runs, '/status': status('2026-01-03T00:00:00Z') });
-    expect((await fetchChecks(ref, 'sha', undefined)).map((c) => c.status)).toEqual(['failure']);
+    const statuses = async () =>
+      (await fetchChecks(ref, 'sha', undefined)).items.map((c) => c.status);
+    expect(await statuses()).toEqual(['failure']);
     stubRoutes({ '/check-runs': runs, '/status': status('2026-01-01T00:00:00Z') });
-    expect((await fetchChecks(ref, 'sha', undefined)).map((c) => c.status)).toEqual(['success']);
+    expect(await statuses()).toEqual(['success']);
+  });
+
+  it('keeps only http and https links', async () => {
+    stubRoutes({
+      '/check-runs': {
+        check_runs: [
+          run('completed', 'success', {
+            name: 'a',
+            html_url: 'javascript:alert(1)',
+            details_url: 'javascript:alert(1)',
+          }),
+          run('completed', 'success', {
+            name: 'b',
+            html_url: null,
+            details_url: 'http://ci.example/b',
+          }),
+          run('completed', 'success', { name: 'c', html_url: ' JavaScript:alert(1)' }),
+        ],
+      },
+      '/status': {
+        statuses: [
+          { context: 'd', state: 'success', target_url: 'javascript:alert(1)' },
+          { context: 'e', state: 'success', target_url: 'data:text/html,x' },
+          { context: 'f', state: 'success', target_url: '/relative' },
+          { context: 'g', state: 'success', target_url: 'https://ci.example/g' },
+        ],
+      },
+    });
+    const { items } = await fetchChecks(ref, 'sha', undefined);
+    expect(items.map((check) => [check.name, check.url])).toEqual([
+      ['a', null],
+      ['b', 'http://ci.example/b'],
+      ['c', null],
+      ['d', null],
+      ['e', null],
+      ['f', null],
+      ['g', 'https://ci.example/g'],
+    ]);
   });
 
   it('checks 404 is no checks', async () => {
     stubRoutes({});
-    expect(await fetchChecks(ref, 'sha', undefined)).toEqual([]);
+    expect(await fetchChecks(ref, 'sha', undefined)).toEqual({ items: [], truncated: false });
   });
 
-  it('still fails on other errors', async () => {
-    stubRoutes({ '/check-runs': new Response('', { status: 500 }), '/status': {} });
-    await expect(fetchChecks(ref, 'sha', undefined)).rejects.toBeInstanceOf(GitHubError);
+  it('shows the statuses when the check runs fail', async () => {
+    stubRoutes({
+      '/check-runs': new Response('{}', { status: 403 }),
+      '/status': { statuses: [{ context: 'ci/x', state: 'failure', target_url: null }] },
+    });
+    const { items } = await fetchChecks(ref, 'sha', undefined);
+    expect(items.map((check) => [check.name, check.status])).toEqual([['ci/x', 'failure']]);
+  });
+
+  it('shows the check runs when the statuses fail', async () => {
+    stubRoutes({
+      '/check-runs': { check_runs: [run('completed', 'success', { name: 'build' })] },
+      '/status': new Response('', { status: 500 }),
+    });
+    const { items } = await fetchChecks(ref, 'sha', undefined);
+    expect(items.map((check) => check.name)).toEqual(['build']);
+  });
+
+  it('counts a 404 of one as none beside the failure of the other', async () => {
+    stubRoutes({ '/check-runs': new Response('', { status: 500 }) });
+    expect(await fetchChecks(ref, 'sha', undefined)).toEqual({ items: [], truncated: false });
+  });
+
+  it('fails when both fail', async () => {
+    stubRoutes({
+      '/check-runs': new Response('', { status: 500 }),
+      '/status': new Response('', { status: 502 }),
+    });
+    await expect(fetchChecks(ref, 'sha', undefined)).rejects.toEqual(
+      new GitHubError('failed', 500)
+    );
+  });
+
+  it('marks the checks cut when GitHub has more check runs than it sent', async () => {
+    const hundred = Array.from({ length: 100 }, (_, index) =>
+      run('completed', 'success', { name: `job ${index}` })
+    );
+    stubRoutes({ '/check-runs': { total_count: 150, check_runs: hundred }, '/status': {} });
+    const cut = await fetchChecks(ref, 'sha', undefined);
+    expect(cut.items).toHaveLength(100);
+    expect(cut.truncated).toBe(true);
+    stubRoutes({ '/check-runs': { total_count: 100, check_runs: hundred }, '/status': {} });
+    expect((await fetchChecks(ref, 'sha', undefined)).truncated).toBe(false);
+  });
+
+  it('marks the checks cut when GitHub has more statuses than it sent', async () => {
+    const statuses = Array.from({ length: 100 }, (_, index) => ({
+      context: `ci/${index}`,
+      state: 'success',
+    }));
+    stubRoutes({ '/check-runs': {}, '/status': { total_count: 120, statuses } });
+    expect((await fetchChecks(ref, 'sha', undefined)).truncated).toBe(true);
   });
 });
 
@@ -510,7 +599,7 @@ describe('commit paths', () => {
     await fetchCommitFiles(ref, 'a/b?c', undefined);
     expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
       'https://api.github.com/repos/a/b/commits/a%2Fb%3Fc/check-runs?per_page=100',
-      'https://api.github.com/repos/a/b/commits/a%2Fb%3Fc/status',
+      'https://api.github.com/repos/a/b/commits/a%2Fb%3Fc/status?per_page=100',
       'https://api.github.com/repos/a/b/compare/x%2Fy...a%2Fb%3Fc',
       'https://api.github.com/repos/a/b/commits/a%2Fb%3Fc',
     ]);

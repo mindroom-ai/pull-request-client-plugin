@@ -133,6 +133,7 @@ export const en = {
     showLess: 'Show less',
     details: 'Details',
     open: 'Open checks: {{summary}}',
+    label: 'Checks',
   },
   checksLine: {
     none: 'No checks',

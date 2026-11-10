@@ -213,6 +213,28 @@ export function conversationItems(
   return order === 'newest' ? items.reverse() : items;
 }
 
+// A bot's approval or change request is a verdict, not chatter.
+const isVerdict = (state: ReviewState) => state === 'APPROVED' || state === 'CHANGES_REQUESTED';
+
+/**
+ * The conversations the Summary tab's filter keeps. With bots hidden, an item stays while any of
+ * its comments is a person's, so a bot's finding stays beside a human reply to it, and a bot's
+ * approval or change request stays as the verdict it is.
+ */
+export function filterConversationItems(
+  items: ConversationItem[],
+  filter: { bots: boolean }
+): ConversationItem[] {
+  if (filter.bots) return items;
+  return items.filter((item) => {
+    if (item.kind === 'review') {
+      return item.review.author?.isBot !== true || isVerdict(item.review.state);
+    }
+    const comments = item.kind === 'comment' ? [item.comment] : item.thread.comments;
+    return comments.some((comment) => comment.author?.isBot !== true);
+  });
+}
+
 export type TimelineEvent =
   | { kind: 'opened' | 'merged' | 'closed'; at: string; actor: Actor | null }
   | { kind: 'commit'; at: string; commit: Commit }

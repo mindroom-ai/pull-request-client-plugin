@@ -51,12 +51,15 @@ export function ChangeBreakdownStat({
     setAnchor(element.getBoundingClientRect());
   };
   const rows = query.data ? changeBreakdown(query.data) : undefined;
+  const label = t('breakdown.label', { additions, deletions });
   return (
     <>
       <button
         type="button"
         className="mrpr-stat-button"
-        aria-label={t('breakdown.label', { additions, deletions })}
+        aria-label={label}
+        aria-haspopup="dialog"
+        aria-expanded={anchor !== undefined && !query.isError}
         onFocus={(event) => open(event.currentTarget)}
         onBlur={() => setAnchor(undefined)}
         onPointerEnter={(event) => open(event.currentTarget)}
@@ -75,7 +78,7 @@ export function ChangeBreakdownStat({
           align="End"
           offset={4}
           content={
-            <Menu>
+            <Menu role="dialog" aria-label={label}>
               <div className="mrpr-root mrpr-popover mrpr-popover-fit" style={pluginRootStyle()}>
                 {rows ? (
                   <div className="mrpr-breakdown">

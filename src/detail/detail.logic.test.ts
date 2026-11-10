@@ -18,6 +18,7 @@ import {
   buildTimeline,
   checksState,
   conversationItems,
+  filterConversationItems,
   groupChecks,
   latestReviewOutcomes,
   summarizeChecks,
@@ -344,6 +345,42 @@ describe('conversationItems', () => {
   it('keeps the thread with its own comments, at its first comment', () => {
     const [item] = conversationItems([], [], [findingThread], 'newest');
     expect(item).toEqual({ kind: 'thread', thread: findingThread });
+  });
+});
+
+describe('filterConversationItems', () => {
+  const bot = actor('review[bot]', true);
+  const finding = reviewComment(10, '2026-07-02T12:00:00Z', { author: bot });
+  const reply = reviewComment(11, '2026-07-04T12:00:00Z', { inReplyToId: 10 });
+  const lastReply = reviewComment(12, '2026-07-06T12:00:00Z', { inReplyToId: 10 });
+  const botOnly = reviewComment(13, '2026-07-07T12:00:00Z', { author: bot });
+
+  it('filters whole conversations when any member matches', () => {
+    const items = conversationItems(
+      [comment(1, '2026-07-03T00:00:00Z'), comment(2, '2026-07-08T00:00:00Z', { author: bot })],
+      [],
+      [thread([finding, reply, lastReply]), thread([botOnly])],
+      'oldest'
+    );
+    const kept = filterConversationItems(items, { bots: false });
+    expect(kept.map(itemKey)).toEqual(['thread:10', 'comment:1']);
+    expect(kept[0]).toEqual({ kind: 'thread', thread: thread([finding, reply, lastReply]) });
+    expect(filterConversationItems(items, { bots: true })).toEqual(items);
+  });
+
+  it('keeps bot review verdicts when bot comments are hidden', () => {
+    const botReview = (id: number, state: ReviewState) =>
+      review(id, 'review[bot]', state, '2026-07-09T00:00:00Z', { author: bot, body: 'Verdict' });
+    const items = conversationItems(
+      [],
+      [botReview(1, 'APPROVED'), botReview(2, 'CHANGES_REQUESTED'), botReview(3, 'COMMENTED')],
+      [],
+      'oldest'
+    );
+    expect(filterConversationItems(items, { bots: false }).map(itemKey)).toEqual([
+      'review:1',
+      'review:2',
+    ]);
   });
 });
 

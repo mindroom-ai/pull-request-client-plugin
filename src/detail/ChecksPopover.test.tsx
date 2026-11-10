@@ -103,7 +103,7 @@ describe('ChecksPopover', () => {
 describe('ChecksStatusLine', () => {
   const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>();
   const ref = { owner: 'a', repo: 'b', number: 1 };
-  const pullRequest = { headSha: 'abc123' } as PullRequest;
+  const pullRequest = { headSha: 'abc123', url: 'https://github.com/a/b/pull/1' } as PullRequest;
   const respond = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), {
       status,
@@ -145,10 +145,42 @@ describe('ChecksStatusLine', () => {
     await click(button);
     expect(await view.findByText('Some checks were not successful')).toBeTruthy();
     expect(button.getAttribute('aria-expanded')).toBe('true');
+    expect(button.getAttribute('aria-haspopup')).toBe('dialog');
+    // The popover holds a list and links, not a menu of choices.
+    expect(view.getByRole('dialog', { name: 'Checks' })).toBeTruthy();
+    expect(view.queryByRole('menu')).toBeNull();
     expect(view.getByText('job 0')).toBeTruthy();
     act(() => void trap.options?.escapeDeactivates());
     expect(view.queryByText('Some checks were not successful')).toBeNull();
     expect(button.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('says so when GitHub has more check runs than it sent', async () => {
+    fetchMock.mockImplementation(async (url) =>
+      respond(
+        url.includes('/check-runs')
+          ? { ...runs(['failure', 'success']), total_count: 150 }
+          : { statuses: [] }
+      )
+    );
+    const view = await show();
+    await click(await view.findByRole('button', { name: /1 of 2 failing/ }));
+    const note = await view.findByRole('link', {
+      name: 'Showing the first 2; see the rest on GitHub',
+    });
+    expect(note.getAttribute('href')).toBe('https://github.com/a/b/pull/1/checks');
+  });
+
+  it('lists the statuses when the check runs are refused', async () => {
+    fetchMock.mockImplementation(async (url) =>
+      url.includes('/check-runs')
+        ? respond({ message: 'Resource not accessible by personal access token' }, 403)
+        : respond({ statuses: [{ context: 'ci/build', state: 'failure' }] })
+    );
+    const view = await show();
+    await click(await view.findByRole('button', { name: /1 of 1 failing/ }));
+    expect(await view.findByText('ci/build')).toBeTruthy();
+    expect(view.queryByText('Checks unavailable')).toBeNull();
   });
 
   it('closes the popover when its trigger is clicked again', async () => {
