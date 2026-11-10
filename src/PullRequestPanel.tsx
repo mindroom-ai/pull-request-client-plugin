@@ -18,6 +18,7 @@ import { ChangeBreakdownStat } from './detail/ChangeBreakdownStat';
 import { ChecksStatusLine } from './detail/ChecksStatusLine';
 import { baseFreshness, latestReviewOutcomes } from './detail/detail.logic';
 import { SummaryTab } from './detail/SummaryTab';
+import { TimelineTab } from './detail/TimelineTab';
 import {
   parsePullRequestUrl,
   pullRequestUrl,
@@ -356,7 +357,15 @@ export default function PullRequestPanel({ request }: { roomId: string; request?
             {tab === 'summary' ? (
               <SummaryTab pullRequest={pr} pullRequestRef={ref} />
             ) : tab === 'timeline' ? (
-              <p className="mrpr-status">{t('timeline.placeholder')}</p>
+              <TimelineTab
+                pullRequestRef={ref}
+                pullRequest={pr}
+                order={order}
+                onOpenCommit={(sha) => {
+                  setSelectedCommit(sha);
+                  setTab('code');
+                }}
+              />
             ) : (
               <Files pullRequest={ref} />
             )}

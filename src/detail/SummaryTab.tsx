@@ -8,32 +8,27 @@ import type { RectCords } from 'folds';
 import { ArrowDownUp, ChevronRight, ListFilter, Tag, Users } from 'lucide-react';
 import { usePluginStorage, usePluginTranslation } from '@mindroom/client-sdk/core';
 import { Menu, PopOut, useMarkdownHtml } from '@mindroom/client-sdk/ui';
-import type { Actor, Paged, PullRequest, PullRequestRef, Reaction, Review } from '../github';
+import type { Actor, Paged, PullRequest, PullRequestRef, Review } from '../github';
 import { GitHubErrorState } from '../GitHubErrorState';
 import {
   PullRequestActorAvatar,
-  PullRequestActorLabel,
   PullRequestCheckStatusIcon,
   PullRequestCheckStatusLabel,
   PullRequestLabelChip,
   PullRequestReviewOutcomeAvatarBadge,
-  PullRequestReviewOutcomeBadge,
   pullRequestReviewOutcomeRingClassName,
-  RelativeTime,
   usePullRequestReviewOutcomeLabel,
 } from '../presentation';
 import { useChecks, useConversationComments, useReviewComments, useReviews } from '../queries';
 import { buildReviewThreads } from '../reviewThreads';
 import { pluginRootStyle } from '../theme';
-import { CommentBody } from './CommentBody';
+import { ConversationCard } from './ConversationCards';
 import {
   conversationItems,
   latestReviewOutcomes,
-  reviewOutcome,
   type ConversationItem,
   type Outcome,
 } from './detail.logic';
-import { PullRequestReactions } from './Reactions';
 
 const PAGE = 10;
 const SHOW_BOTS_KEY = 'summary:showBots';
@@ -274,114 +269,6 @@ function ChecksList({
         </li>
       ))}
     </ul>
-  );
-}
-
-type CardData = {
-  author: Actor | null;
-  at: string;
-  url: string;
-  body: string;
-  reactions: Reaction[];
-  outcome: Outcome | null;
-};
-
-/** One comment: who and when (linking to it on GitHub), the verdict of a review, reactions, body. */
-function CommentCard({
-  card,
-  location,
-}: {
-  card: CardData;
-  location?: { path: string; line: number | null; outdated: boolean };
-}) {
-  const t = usePluginTranslation('pull-requests');
-  const time = <RelativeTime timestamp={card.at} />;
-  return (
-    <article className="mrpr-comment-card">
-      <div className="mrpr-comment-head">
-        <PullRequestActorLabel actor={card.author} profileUrl={card.author?.url} />
-        {card.url ? (
-          <a className="mrpr-time-link" href={card.url} target="_blank" rel="noopener noreferrer">
-            {time}
-          </a>
-        ) : (
-          <span className="mrpr-time-link">{time}</span>
-        )}
-        {card.outcome ? <PullRequestReviewOutcomeBadge outcome={card.outcome} /> : null}
-        <PullRequestReactions reactions={card.reactions} />
-      </div>
-      {location ? (
-        <div className="mrpr-comment-location">
-          <span className="mrpr-truncate mrpr-mono">
-            {location.path}
-            {location.line ? `:${location.line}` : ''}
-          </span>
-          {location.outdated ? (
-            <span className="mrpr-shrink-0">{t('summary.outdated')}</span>
-          ) : null}
-        </div>
-      ) : null}
-      <CommentBody body={card.body} />
-    </article>
-  );
-}
-
-function ConversationCard({ item }: { item: ConversationItem }) {
-  if (item.kind === 'comment') {
-    const { comment } = item;
-    return (
-      <CommentCard
-        card={{
-          author: comment.author,
-          at: comment.createdAt,
-          url: comment.url,
-          body: comment.body,
-          reactions: comment.reactions,
-          outcome: null,
-        }}
-      />
-    );
-  }
-  if (item.kind === 'review') {
-    const { review } = item;
-    return (
-      <CommentCard
-        card={{
-          author: review.author,
-          at: review.submittedAt,
-          url: review.url,
-          body: review.body,
-          reactions: [],
-          outcome: reviewOutcome(review.state),
-        }}
-      />
-    );
-  }
-  const { thread } = item;
-  const [root, ...replies] = thread.comments;
-  if (!root) return null;
-  const card = (comment: typeof root): CardData => ({
-    author: comment.author,
-    at: comment.createdAt,
-    url: comment.url,
-    body: comment.body,
-    reactions: comment.reactions,
-    outcome: null,
-  });
-  return (
-    <div className="mrpr-thread">
-      <CommentCard
-        card={card(root)}
-        location={{ path: thread.path, line: thread.line, outdated: thread.outdated }}
-      />
-      {replies.length > 0 ? (
-        <div className="mrpr-replies">
-          {replies.map((reply) => (
-            <CommentCard key={reply.id} card={card(reply)} />
-          ))}
-        </div>
-      ) : null}
-    </div>
   );
 }
 

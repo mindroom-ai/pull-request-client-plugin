@@ -206,12 +206,19 @@ describe('PullRequestPanel', () => {
     // Each endpoint the header reads answers with its own body; the rest gets the pull request.
     const serve = (
       pr: Record<string, unknown>,
-      parts: { files?: unknown[]; behind?: number; reviews?: unknown[]; checks?: Response } = {}
+      parts: {
+        files?: unknown[];
+        behind?: number;
+        reviews?: unknown[];
+        commits?: unknown[];
+        checks?: Response;
+      } = {}
     ) =>
       fetchMock.mockImplementation(async (url) => {
         if (url.includes('/check-runs')) return parts.checks ?? respond({ check_runs: [] });
         if (url.endsWith('/status')) return respond({ statuses: [] });
         if (url.includes('/compare/')) return respond({ behind_by: parts.behind ?? 0 });
+        if (url.includes('/commits')) return respond(parts.commits ?? []);
         if (url.includes('/reviews')) return respond(parts.reviews ?? []);
         if (url.includes('/files')) return respond(parts.files ?? []);
         return respond(pr);
@@ -360,6 +367,28 @@ describe('PullRequestPanel', () => {
       await click(view.getByRole('tab', { name: 'Summary' }));
       // The Summary tab's comments have an order of their own, still the newest first.
       expect(view.queryByRole('button', { name: 'Oldest first' })).toBeNull();
+    });
+
+    it('opens the Code tab from a commit of the Timeline', async () => {
+      serve(withHead(), {
+        commits: [
+          {
+            sha: 'abcdef1234',
+            html_url: 'x',
+            author: null,
+            commit: {
+              message: 'Add cards',
+              author: { name: 'Ann' },
+              committer: { date: '2026-11-01T00:05:00Z' },
+            },
+          },
+        ],
+      });
+      const view = await show();
+      await view.findByText('Add pull request cards');
+      await click(view.getByRole('tab', { name: 'Timeline' }));
+      await click(await view.findByRole('button', { name: 'View commit abcdef1' }));
+      expect(view.getByRole('tab', { name: 'Code' }).getAttribute('aria-selected')).toBe('true');
     });
 
     it('reads the reviews for the Summary tab, and the files only for the Code tab', async () => {

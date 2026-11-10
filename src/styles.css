@@ -1030,3 +1030,105 @@ a.mrpr-time-link:hover {
 .mrpr-comment-card .mrpr-comment-body {
   margin-block-start: 8px;
 }
+
+.mrpr-timeline {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+/* The connector line runs behind the markers, which cover it with the panel's background. */
+.mrpr-timeline::before {
+  content: '';
+  position: absolute;
+  inset-block: 16px;
+  inset-inline-start: 11px;
+  inline-size: 1px;
+  background: var(--pr-border);
+}
+.mrpr-timeline-event {
+  position: relative;
+  min-inline-size: 0;
+  padding-inline-start: 36px;
+}
+.mrpr-timeline-marker {
+  position: absolute;
+  inset-inline-start: 0;
+  inset-block-start: 6px;
+  z-index: 1;
+  display: flex;
+  inline-size: 24px;
+  block-size: 24px;
+  align-items: center;
+  justify-content: center;
+  background: var(--pr-surface);
+  color: var(--pr-muted);
+}
+.mrpr-timeline-marker .mrpr-avatar {
+  inline-size: 20px;
+  block-size: 20px;
+}
+.mrpr-timeline-marker-muted {
+  opacity: 0.55;
+}
+.mrpr-timeline-row {
+  display: flex;
+  inline-size: 100%;
+  min-inline-size: 0;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+}
+button.mrpr-timeline-row {
+  cursor: pointer;
+}
+button.mrpr-timeline-row:hover .mrpr-timeline-title {
+  color: var(--pr-primary);
+}
+.mrpr-timeline-title {
+  min-inline-size: 0;
+  font-weight: 600;
+}
+.mrpr-timeline-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  color: var(--pr-muted);
+  font-size: 11px;
+}
+.mrpr-timeline-group-toggle {
+  display: flex;
+  inline-size: 100%;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border: 0;
+  background: none;
+  color: var(--pr-muted);
+  font: inherit;
+  font-size: 12px;
+  text-align: start;
+  cursor: pointer;
+}
+.mrpr-timeline-group-toggle[aria-expanded='true'] {
+  color: var(--pr-fg);
+}
+.mrpr-timeline-group-items {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-block-end: 4px;
+}
+.mrpr-timeline-stale {
+  color: var(--pr-muted);
+  opacity: 0.7;
+}
