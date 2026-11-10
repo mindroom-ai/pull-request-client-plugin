@@ -1,24 +1,40 @@
 // Ported from T3 Code (https://github.com/pingdotgg/t3code, apps/web/src/components/pullRequest/PullRequestDetailLayout.tsx and PullRequestDetailCrumbs.tsx at 8ab427c6), MIT, Copyright (c) 2026 T3 Tools Inc. See NOTICE.
 // The side panel: the header of the pull request a link opened, then its Summary and its Code.
-import { useMemo, useRef, useState, type KeyboardEvent } from 'react';
-import { ArrowLeft, FileDiff } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import {
+  ArrowLeft,
+  Check,
+  CircleCheck,
+  Copy,
+  FileDiff,
+  GitCommitHorizontal,
+  MessageSquare,
+} from 'lucide-react';
 import { usePluginTranslation } from '@mindroom/client-sdk/core';
-import { useMarkdownHtml } from '@mindroom/client-sdk/ui';
+import { IconButton, IconTooltip, useMarkdownHtml } from '@mindroom/client-sdk/ui';
 import { CodeTab } from './CodeTab';
-import { parsePullRequestUrl, pullRequestUrl, type PullRequestRef } from './github';
+import { BaseBranch } from './detail/BaseBranch';
+import { ChangeBreakdownStat } from './detail/ChangeBreakdownStat';
+import { ChecksStatusLine } from './detail/ChecksStatusLine';
+import { baseFreshness, latestReviewOutcomes } from './detail/detail.logic';
+import {
+  parsePullRequestUrl,
+  pullRequestUrl,
+  type PullRequest,
+  type PullRequestRef,
+} from './github';
 import { GitHubErrorState } from './GitHubErrorState';
 import {
-  PullRequestActorAvatar,
-  PullRequestDiffStat,
+  PullRequestActorLabel,
   PullRequestMetaLine,
   RelativeTime,
   resolvePullRequestState,
 } from './presentation';
-import { usePullRequest, usePullRequestFiles } from './queries';
+import { useBehindBy, usePullRequest, usePullRequestFiles, useReviews } from './queries';
 import { pluginRootStyle } from './theme';
 import { useGitHubToken } from './token';
 
-const TABS = ['summary', 'code'] as const;
+const TABS = ['summary', 'timeline', 'code'] as const;
 type Tab = (typeof TABS)[number];
 
 /** The pull request a side panel request names, or undefined for anything that is not one. */
@@ -40,7 +56,18 @@ function readRequest(request: unknown): PullRequestRef | undefined {
   }
 }
 
-function TabBar({ value, onChange }: { value: Tab; onChange: (tab: Tab) => void }) {
+type Order = 'newest' | 'oldest';
+
+function TabBar({
+  value,
+  onChange,
+  end,
+}: {
+  value: Tab;
+  onChange: (tab: Tab) => void;
+  /** What the bar shows after the tabs, which depends on the tab. */
+  end: ReactNode;
+}) {
   const t = usePluginTranslation('pull-requests');
   const barRef = useRef<HTMLDivElement>(null);
   const onKeyDown = (event: KeyboardEvent) => {
@@ -73,7 +100,103 @@ function TabBar({ value, onChange }: { value: Tab; onChange: (tab: Tab) => void 
           </button>
         ))}
       </div>
+      <div className="mrpr-tabbar-end">{end}</div>
     </div>
+  );
+}
+
+function Count({ icon, count, label }: { icon: ReactNode; count: number; label: string }) {
+  return (
+    <span className="mrpr-count" title={label}>
+      {icon}
+      <span aria-hidden>{count}</span>
+      <span className="mrpr-sr-only">{label}</span>
+    </span>
+  );
+}
+
+/** What the Timeline tab's bar shows: the counts of the pull request and the order of the events. */
+function TimelineBarEnd({
+  pullRequest,
+  pullRequestRef,
+  order,
+  onOrder,
+}: {
+  pullRequest: PullRequest;
+  pullRequestRef: PullRequestRef;
+  order: Order;
+  onOrder: (order: Order) => void;
+}) {
+  const t = usePluginTranslation('pull-requests');
+  const reviews = useReviews(pullRequestRef, true);
+  const approvals = reviews.data
+    ? latestReviewOutcomes(reviews.data.items, pullRequest.headSha).filter(
+        (outcome) => outcome.verdict === 'approved' && !outcome.stale
+      ).length
+    : undefined;
+  return (
+    <>
+      <Count
+        icon={<MessageSquare aria-hidden className="mrpr-icon" />}
+        count={pullRequest.commentCount + pullRequest.reviewCommentCount}
+        label={t('timeline.comments', {
+          count: pullRequest.commentCount + pullRequest.reviewCommentCount,
+        })}
+      />
+      <Count
+        icon={<GitCommitHorizontal aria-hidden className="mrpr-icon" />}
+        count={pullRequest.commitCount}
+        label={t('timeline.commits', { count: pullRequest.commitCount })}
+      />
+      {approvals === undefined ? null : (
+        <Count
+          icon={<CircleCheck aria-hidden className="mrpr-icon mrpr-tone-success" />}
+          count={approvals}
+          label={t('timeline.approvals', { count: approvals })}
+        />
+      )}
+      <button
+        type="button"
+        className="mrpr-button"
+        onClick={() => onOrder(order === 'newest' ? 'oldest' : 'newest')}
+      >
+        {t(order === 'newest' ? 'timeline.newestFirst' : 'timeline.oldestFirst')}
+      </button>
+    </>
+  );
+}
+
+/** The button that copies the command to check the pull request out; it says so for a moment. */
+function CopyCheckoutButton({ command }: { command: string }) {
+  const t = usePluginTranslation('pull-requests');
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return undefined;
+    const timer = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(timer);
+  }, [copied]);
+  const label = copied ? t('copied') : t('copyCheckout');
+  const Icon = copied ? Check : Copy;
+  return (
+    <IconTooltip label={label}>
+      {(triggerRef) => (
+        <IconButton
+          ref={triggerRef}
+          size="300"
+          radii="300"
+          aria-label={label}
+          onClick={() => {
+            // A browser that refuses the clipboard leaves the button as it was.
+            navigator.clipboard.writeText(command).then(
+              () => setCopied(true),
+              () => undefined
+            );
+          }}
+        >
+          <Icon aria-hidden className="mrpr-button-icon" />
+        </IconButton>
+      )}
+    </IconTooltip>
   );
 }
 
@@ -106,8 +229,17 @@ export default function PullRequestPanel({ request }: { roomId: string; request?
   const query = usePullRequest(ref);
   const { token, forget } = useGitHubToken();
   const [tab, setTab] = useState<Tab>('summary');
+  // The Timeline tab's order and its chosen commit; the Timeline and Code tabs read them.
+  const [order, setOrder] = useState<Order>('newest');
+  const [, setSelectedCommit] = useState<string | undefined>(undefined);
   const pr = query.data;
   const state = pr && resolvePullRequestState(pr);
+  // A branch is out of date only while the pull request can still merge.
+  const behind = useBehindBy(ref, pr?.baseRef ?? '', pr?.headSha ?? '', pr?.state === 'open');
+  const freshness =
+    pr?.state === 'open' ? baseFreshness(behind.data, pr.mergeableState) : undefined;
+  const forkOwner =
+    pr?.headRepo && pr.headRepo !== pr.baseRepo ? pr.headRepo.split('/')[0] : undefined;
 
   return (
     <div className="mrpr-root mrpr-panel" style={pluginRootStyle()}>
@@ -125,43 +257,69 @@ export default function PullRequestPanel({ request }: { roomId: string; request?
         <>
           <div className="mrpr-header">
             <div className="mrpr-crumbs">
-              <span className="mrpr-truncate">
+              <state.Icon aria-hidden className={`mrpr-icon ${state.toneClassName}`} />
+              <a
+                className="mrpr-crumb-link mrpr-truncate"
+                href={`https://github.com/${ref.owner}/${ref.repo}`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
                 {ref.owner}/{ref.repo}
-              </span>
-              <span className="mrpr-shrink-0">#{ref.number}</span>
-              <span aria-hidden>·</span>
-              <span className="mrpr-state">
-                <state.Icon aria-hidden className={`mrpr-icon ${state.toneClassName}`} />
-                {t(`state.${state.key}`)}
+              </a>
+              <a
+                className={`mrpr-crumb-link mrpr-shrink-0 ${state.toneClassName}`}
+                href={pr.url}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                #{ref.number}
+              </a>
+              <span className="mrpr-badges">
+                {state.key === 'open' ? null : (
+                  <span className={`mrpr-badge mrpr-badge-state ${state.toneClassName}`}>
+                    {t(`state.${state.key}`)}
+                  </span>
+                )}
+                {pr.autoMerge ? (
+                  <span className="mrpr-badge mrpr-badge-outline">
+                    {t('badge.autoMerge', { method: pr.autoMerge.method })}
+                  </span>
+                ) : null}
               </span>
             </div>
             <p className="mrpr-panel-title">{pr.title}</p>
             <div className="mrpr-panel-meta">
               <PullRequestMetaLine>
-                <span key="author" className="mrpr-author-name">
-                  <PullRequestActorAvatar actor={pr.author} />
-                  <span className="mrpr-truncate">{pr.author?.login ?? t('ghost')}</span>
-                </span>
+                <PullRequestActorLabel key="author" actor={pr.author} profileUrl={pr.author?.url} />
                 <span key="updated" className="mrpr-shrink-0">
                   <RelativeTime timestamp={pr.updatedAt} label={(time) => t('updated', { time })} />
                 </span>
               </PullRequestMetaLine>
+              <CopyCheckoutButton
+                command={`gh pr checkout ${ref.number} -R ${ref.owner}/${ref.repo}`}
+              />
             </div>
             <div className="mrpr-branches">
               <span className="mrpr-refs">
-                <span className="mrpr-truncate mrpr-base-ref">{pr.baseRef}</span>
+                <BaseBranch baseBranch={pr.baseRef} headBranch={pr.headRef} freshness={freshness} />
                 <ArrowLeft
                   aria-label={t('receivesChanges')}
                   className="mrpr-arrow mrpr-arrow-back"
                 />
-                <span className="mrpr-truncate">{pr.headRef}</span>
+                <span className="mrpr-truncate">
+                  {forkOwner ? `${forkOwner}:${pr.headRef}` : pr.headRef}
+                </span>
               </span>
               <span className="mrpr-counts">
                 <span className="mrpr-file-count">
                   <FileDiff aria-hidden className="mrpr-arrow mrpr-file-icon" />
                   {t('code.fileCount', { count: pr.changedFiles })}
                 </span>
-                <PullRequestDiffStat additions={pr.additions} deletions={pr.deletions} />
+                <ChangeBreakdownStat
+                  pullRequestRef={ref}
+                  additions={pr.additions}
+                  deletions={pr.deletions}
+                />
               </span>
             </div>
             <div className="mrpr-header-actions">
@@ -175,14 +333,35 @@ export default function PullRequestPanel({ request }: { roomId: string; request?
               ) : null}
             </div>
           </div>
-          <TabBar value={tab} onChange={setTab} />
+          <TabBar
+            value={tab}
+            onChange={setTab}
+            end={
+              tab === 'summary' ? (
+                <ChecksStatusLine pullRequest={pr} pullRequestRef={ref} />
+              ) : tab === 'timeline' ? (
+                <TimelineBarEnd
+                  pullRequest={pr}
+                  pullRequestRef={ref}
+                  order={order}
+                  onOrder={setOrder}
+                />
+              ) : null
+            }
+          />
           <div
             className={tab === 'code' ? 'mrpr-tabpanel mrpr-tabpanel-code' : 'mrpr-tabpanel'}
             role="tabpanel"
             id={`mrpr-tabpanel-${tab}`}
             aria-labelledby={`mrpr-tab-${tab}`}
           >
-            {tab === 'summary' ? <Description body={pr.body} /> : <Files pullRequest={ref} />}
+            {tab === 'summary' ? (
+              <Description body={pr.body} />
+            ) : tab === 'timeline' ? (
+              <p className="mrpr-status">{t('timeline.placeholder')}</p>
+            ) : (
+              <Files pullRequest={ref} />
+            )}
           </div>
         </>
       )}

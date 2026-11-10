@@ -54,7 +54,7 @@ export function ChecksStatusLine({
         aria-expanded={anchor !== undefined}
         aria-label={t('checksPopover.open', { summary })}
         onClick={(event: MouseEvent<HTMLButtonElement>) =>
-          setAnchor(event.currentTarget.getBoundingClientRect())
+          setAnchor(anchor ? undefined : event.currentTarget.getBoundingClientRect())
         }
       >
         <presentation.Icon aria-hidden className={`mrpr-icon ${presentation.toneClassName}`} />

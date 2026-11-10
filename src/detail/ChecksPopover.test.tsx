@@ -151,6 +151,19 @@ describe('ChecksStatusLine', () => {
     expect(button.getAttribute('aria-expanded')).toBe('false');
   });
 
+  it('closes the popover when its trigger is clicked again', async () => {
+    fetchMock.mockImplementation(async (url) =>
+      respond(url.includes('/check-runs') ? runs(['failure']) : { statuses: [] })
+    );
+    const view = await show();
+    const button = await view.findByRole('button', { name: /1 of 1 failing/ });
+    await click(button);
+    expect(await view.findByText('Some checks were not successful')).toBeTruthy();
+    await click(button);
+    expect(view.queryByText('Some checks were not successful')).toBeNull();
+    expect(button.getAttribute('aria-expanded')).toBe('false');
+  });
+
   it('closes on a click outside too', async () => {
     fetchMock.mockImplementation(async (url) =>
       respond(url.includes('/check-runs') ? runs(['success']) : { statuses: [] })

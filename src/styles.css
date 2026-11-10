@@ -552,6 +552,34 @@
   max-inline-size: calc(100vw - 2rem);
   padding: 12px;
 }
+.mrpr-popover-fit {
+  inline-size: auto;
+}
+.mrpr-popover-line {
+  margin: 0;
+  font-size: 12px;
+  line-height: 16px;
+}
+.mrpr-popover-line + .mrpr-popover-line {
+  margin-block-start: 2px;
+}
+.mrpr-breakdown {
+  display: grid;
+  grid-template-columns: auto auto auto;
+  justify-content: start;
+  gap: 4px 16px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.mrpr-breakdown > .mrpr-added,
+.mrpr-breakdown > .mrpr-removed {
+  text-align: end;
+  font-family: var(--pr-font-mono);
+}
+.mrpr-breakdown-rule {
+  grid-column: 1 / -1;
+  border-block-start: 1px solid var(--pr-border);
+}
 .mrpr-checks-line {
   display: inline-flex;
   align-items: center;
@@ -750,4 +778,70 @@
 }
 .mrpr-comment-plain {
   white-space: pre-wrap;
+}
+
+/* The header's links, badges and the two buttons that open popovers. */
+.mrpr-crumb-link {
+  color: inherit;
+  text-decoration: none;
+}
+.mrpr-crumb-link:hover {
+  text-decoration: underline;
+}
+.mrpr-badges {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  margin-inline-start: auto;
+}
+.mrpr-badge-state {
+  border-color: currentColor;
+}
+.mrpr-panel-meta {
+  justify-content: space-between;
+  gap: 8px;
+}
+.mrpr-base-plain,
+.mrpr-base-warning {
+  display: inline-flex;
+  min-inline-size: 0;
+  align-items: center;
+  gap: 4px;
+}
+.mrpr-base-warning {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: help;
+}
+.mrpr-stat-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: help;
+}
+
+/* The end of the tab bar: the checks line on Summary, the counts and the order on Timeline. */
+.mrpr-tabbar {
+  justify-content: space-between;
+  gap: 8px;
+}
+.mrpr-tabbar-end {
+  display: flex;
+  min-inline-size: 0;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--pr-muted);
+}
+.mrpr-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-variant-numeric: tabular-nums;
 }

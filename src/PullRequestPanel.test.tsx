@@ -150,10 +150,10 @@ describe('PullRequestPanel', () => {
     await act(async () => {
       summary.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
     });
-    expect(view.getByRole('tab', { name: 'Code' }).getAttribute('aria-selected')).toBe('true');
+    expect(view.getByRole('tab', { name: 'Timeline' }).getAttribute('aria-selected')).toBe('true');
     await act(async () => {
       view
-        .getByRole('tab', { name: 'Code' })
+        .getByRole('tab', { name: 'Timeline' })
         .dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
     });
     expect(view.getByRole('tab', { name: 'Summary' }).getAttribute('aria-selected')).toBe('true');
@@ -193,5 +193,181 @@ describe('PullRequestPanel', () => {
     await view.findByText('Add pull request cards');
     await click(view.getByRole('button', { name: 'Forget token' }));
     await vi.waitFor(() => expect(view.queryByRole('button', { name: 'Forget token' })).toBeNull());
+  });
+
+  describe('header', () => {
+    const SHA = 'abc123';
+    const withHead = (over: Record<string, unknown> = {}) =>
+      pull({
+        head: { ref: 'feature', sha: SHA, repo: { full_name: 'mindroom-ai/mindroom-chat' } },
+        base: { ref: 'main', repo: { full_name: 'mindroom-ai/mindroom-chat' } },
+        ...over,
+      });
+    // Each endpoint the header reads answers with its own body; the rest gets the pull request.
+    const serve = (
+      pr: Record<string, unknown>,
+      parts: { files?: unknown[]; behind?: number; reviews?: unknown[]; checks?: Response } = {}
+    ) =>
+      fetchMock.mockImplementation(async (url) => {
+        if (url.includes('/check-runs')) return parts.checks ?? respond({ check_runs: [] });
+        if (url.endsWith('/status')) return respond({ statuses: [] });
+        if (url.includes('/compare/')) return respond({ behind_by: parts.behind ?? 0 });
+        if (url.includes('/reviews')) return respond(parts.reviews ?? []);
+        if (url.includes('/files')) return respond(parts.files ?? []);
+        return respond(pr);
+      });
+    const comparisons = () => fetchMock.mock.calls.filter(([url]) => url.includes('/compare/'));
+
+    it('links the repository and number', async () => {
+      const view = await show();
+      expect(await view.findByRole('link', { name: 'mindroom-ai/mindroom-chat' })).toBeTruthy();
+      expect(
+        view.getByRole('link', { name: 'mindroom-ai/mindroom-chat' }).getAttribute('href')
+      ).toBe('https://github.com/mindroom-ai/mindroom-chat');
+      expect(view.getByRole('link', { name: '#200' }).getAttribute('href')).toBe(
+        'https://github.com/mindroom-ai/mindroom-chat/pull/200'
+      );
+    });
+
+    it("opens the author's profile", async () => {
+      serve(withHead({ user: { login: 'basnijholt', html_url: 'https://github.com/basnijholt' } }));
+      const view = await show();
+      const link = await view.findByRole('link', { name: "Open basnijholt's profile" });
+      expect(link.getAttribute('href')).toBe('https://github.com/basnijholt');
+    });
+
+    it('copies the checkout command', async () => {
+      const writeText = vi.fn(async () => undefined);
+      vi.stubGlobal('navigator', { clipboard: { writeText } });
+      const view = await show();
+      await click(await view.findByRole('button', { name: 'Copy checkout command' }));
+      expect(writeText).toHaveBeenCalledWith('gh pr checkout 200 -R mindroom-ai/mindroom-chat');
+      expect(view.getByRole('button', { name: 'Copied' })).toBeTruthy();
+    });
+
+    it('names the owner of a fork head', async () => {
+      serve(withHead({ head: { ref: 'feature', sha: SHA, repo: { full_name: 'octo/chat' } } }));
+      const view = await show();
+      expect(await view.findByText('octo:feature')).toBeTruthy();
+    });
+
+    it('shows the head branch plain when it is in the same repository', async () => {
+      serve(withHead());
+      const view = await show();
+      expect(await view.findByText('feature')).toBeTruthy();
+      expect(view.queryByText(/:feature/)).toBeNull();
+    });
+
+    it('shows behind and conflicts', async () => {
+      serve(withHead({ mergeable_state: 'dirty' }), { behind: 3 });
+      const view = await show();
+      await click(await view.findByRole('button', { name: 'Warnings for main' }));
+      expect(await view.findByText('feature is 3 commits behind main')).toBeTruthy();
+      expect(view.getByText('This branch has conflicts that must be resolved')).toBeTruthy();
+    });
+
+    it('closes the base warning with a second click', async () => {
+      serve(withHead(), { behind: 1 });
+      const view = await show();
+      const button = await view.findByRole('button', { name: 'Warnings for main' });
+      await click(button);
+      expect(await view.findByText('feature is 1 commit behind main')).toBeTruthy();
+      await click(button);
+      expect(view.queryByText('feature is 1 commit behind main')).toBeNull();
+    });
+
+    it('shows no warning for a branch that is current, and asks nothing of a merged pull request', async () => {
+      serve(withHead({ merged_at: '2026-11-02T00:00:00Z', state: 'closed' }), { behind: 5 });
+      const view = await show();
+      await view.findByText('Add pull request cards');
+      expect(view.queryByRole('button', { name: 'Warnings for main' })).toBeNull();
+      expect(comparisons()).toHaveLength(0);
+    });
+
+    it.each([
+      ['Draft', { draft: true }],
+      ['Merged', { state: 'closed', merged_at: '2026-11-02T00:00:00Z' }],
+      ['Closed', { state: 'closed' }],
+      ['Auto-merge (squash)', { auto_merge: { merge_method: 'squash' } }],
+    ])('badge: %s', async (label, over) => {
+      serve(withHead(over));
+      const view = await show();
+      expect(await view.findByText(label)).toBeTruthy();
+    });
+
+    it('has no badge for an open pull request', async () => {
+      serve(withHead());
+      const view = await show();
+      await view.findByText('Add pull request cards');
+      for (const label of ['Draft', 'Merged', 'Closed']) expect(view.queryByText(label)).toBeNull();
+      expect(view.queryByText(/Auto-merge/)).toBeNull();
+    });
+
+    it('splits the line breakdown by kind in a tooltip', async () => {
+      serve(withHead({ additions: 20, deletions: 13 }), {
+        files: [
+          { filename: 'src/a.ts', status: 'modified', additions: 5, deletions: 1 },
+          { filename: 'src/a.test.ts', status: 'added', additions: 3, deletions: 0 },
+          { filename: 'package-lock.json', status: 'modified', additions: 10, deletions: 10 },
+          { filename: 'README.md', status: 'modified', additions: 2, deletions: 2 },
+        ],
+      });
+      const view = await show();
+      await view.findByText('Add pull request cards');
+      expect(filesRequests()).toHaveLength(0);
+      await act(async () => view.getByRole('button', { name: /^Lines changed/ }).focus());
+      await view.findByText('Total');
+      expect(document.querySelector('.mrpr-breakdown')?.textContent).toBe(
+        'Code+5-1Tests+3-0Generated+10-10Docs+2-2Total+20-13'
+      );
+      expect(filesRequests()).toHaveLength(1);
+    });
+
+    it('shows the counts and the order toggle on Timeline, with approvals of the head only', async () => {
+      const review = (id: number, login: string, state: string, commit: string) => ({
+        id,
+        state,
+        user: { login },
+        body: '',
+        commit_id: commit,
+        submitted_at: `2026-11-0${id}T00:00:00Z`,
+        html_url: 'x',
+      });
+      serve(withHead({ comments: 4, review_comments: 3, commits: 5 }), {
+        reviews: [
+          review(1, 'ann', 'APPROVED', SHA),
+          review(2, 'bob', 'APPROVED', 'old'),
+          review(3, 'cy', 'CHANGES_REQUESTED', SHA),
+        ],
+      });
+      const view = await show();
+      await view.findByText('Add pull request cards');
+      await click(view.getByRole('tab', { name: 'Timeline' }));
+      expect(view.getByText('7 comments')).toBeTruthy();
+      expect(view.getByText('5 commits')).toBeTruthy();
+      expect(await view.findByText('1 approval')).toBeTruthy();
+      const toggle = view.getByRole('button', { name: 'Newest first' });
+      await click(toggle);
+      expect(view.getByRole('button', { name: 'Oldest first' })).toBeTruthy();
+      await click(view.getByRole('tab', { name: 'Summary' }));
+      expect(view.queryByRole('button', { name: /first$/ })).toBeNull();
+    });
+
+    it('does not read reviews before Timeline shows', async () => {
+      serve(withHead());
+      const view = await show();
+      await view.findByText('Add pull request cards');
+      expect(fetchMock.mock.calls.some(([url]) => url.includes('/reviews'))).toBe(false);
+    });
+
+    it('leaves the header whole when the checks do not load', async () => {
+      serve(withHead(), {
+        checks: new Response('{}', { status: 403, headers: { 'x-ratelimit-remaining': '0' } }),
+      });
+      const view = await show();
+      expect(await view.findByText('Checks unavailable')).toBeTruthy();
+      expect(view.getByText('Add pull request cards')).toBeTruthy();
+      expect(view.getByRole('button', { name: 'Retry' })).toBeTruthy();
+    });
   });
 });
