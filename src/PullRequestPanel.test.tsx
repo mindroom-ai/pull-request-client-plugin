@@ -245,6 +245,14 @@ describe('PullRequestPanel', () => {
       expect(view.getByRole('button', { name: 'Copied' })).toBeTruthy();
     });
 
+    it('leaves the checkout button as it was where there is no clipboard', async () => {
+      vi.stubGlobal('navigator', {});
+      const view = await show();
+      await click(await view.findByRole('button', { name: 'Copy checkout command' }));
+      expect(view.getByRole('button', { name: 'Copy checkout command' })).toBeTruthy();
+      expect(view.queryByRole('button', { name: 'Copied' })).toBeNull();
+    });
+
     it('names the owner of a fork head', async () => {
       serve(withHead({ head: { ref: 'feature', sha: SHA, repo: { full_name: 'octo/chat' } } }));
       const view = await show();
@@ -350,14 +358,18 @@ describe('PullRequestPanel', () => {
       await click(toggle);
       expect(view.getByRole('button', { name: 'Oldest first' })).toBeTruthy();
       await click(view.getByRole('tab', { name: 'Summary' }));
-      expect(view.queryByRole('button', { name: /first$/ })).toBeNull();
+      // The Summary tab's comments have an order of their own, still the newest first.
+      expect(view.queryByRole('button', { name: 'Oldest first' })).toBeNull();
     });
 
-    it('does not read reviews before Timeline shows', async () => {
+    it('reads the reviews for the Summary tab, and the files only for the Code tab', async () => {
       serve(withHead());
       const view = await show();
       await view.findByText('Add pull request cards');
-      expect(fetchMock.mock.calls.some(([url]) => url.includes('/reviews'))).toBe(false);
+      await vi.waitFor(() =>
+        expect(fetchMock.mock.calls.some(([url]) => url.includes('/pulls/200/reviews'))).toBe(true)
+      );
+      expect(filesRequests()).toHaveLength(0);
     });
 
     it('leaves the header whole when the checks do not load', async () => {

@@ -223,4 +223,13 @@ describe('PullRequestCard', () => {
     expect(writeText).toHaveBeenCalledWith(HREF);
     expect(await view.findByText('Copied')).toBeTruthy();
   });
+
+  it('leaves the row as it was where there is no clipboard', async () => {
+    fetchMock.mockImplementation(async () => respond(pull()));
+    vi.stubGlobal('navigator', {});
+    const view = await show();
+    await click(await view.findByText('Copy link'));
+    expect(view.getByText('Copy link')).toBeTruthy();
+    expect(view.queryByText('Copied')).toBeNull();
+  });
 });

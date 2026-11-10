@@ -28,6 +28,9 @@ const REVIEW_OUTCOMES: Record<ReviewState, Outcome | null> = {
   COMMENTED: null,
 };
 
+/** The verdict a review gives, or null for a comment-only review. */
+export const reviewOutcome = (state: ReviewState): Outcome | null => REVIEW_OUTCOMES[state];
+
 export type ReviewOutcome = {
   login: string;
   actor: Actor | null;

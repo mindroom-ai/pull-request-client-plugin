@@ -11,12 +11,13 @@ import {
   MessageSquare,
 } from 'lucide-react';
 import { usePluginTranslation } from '@mindroom/client-sdk/core';
-import { IconButton, IconTooltip, useMarkdownHtml } from '@mindroom/client-sdk/ui';
+import { IconButton, IconTooltip } from '@mindroom/client-sdk/ui';
 import { CodeTab } from './CodeTab';
 import { BaseBranch } from './detail/BaseBranch';
 import { ChangeBreakdownStat } from './detail/ChangeBreakdownStat';
 import { ChecksStatusLine } from './detail/ChecksStatusLine';
 import { baseFreshness, latestReviewOutcomes } from './detail/detail.logic';
+import { SummaryTab } from './detail/SummaryTab';
 import {
   parsePullRequestUrl,
   pullRequestUrl,
@@ -187,10 +188,15 @@ function CopyCheckoutButton({ command }: { command: string }) {
           aria-label={label}
           onClick={() => {
             // A browser that refuses the clipboard leaves the button as it was.
-            navigator.clipboard.writeText(command).then(
-              () => setCopied(true),
-              () => undefined
-            );
+            // A page without a clipboard (an insecure context) has nothing to copy with.
+            try {
+              void navigator.clipboard?.writeText(command).then(
+                () => setCopied(true),
+                () => undefined
+              );
+            } catch {
+              // The clipboard refused at once; the button stays as it was.
+            }
           }}
         >
           <Icon aria-hidden className="mrpr-button-icon" />
@@ -198,14 +204,6 @@ function CopyCheckoutButton({ command }: { command: string }) {
       )}
     </IconTooltip>
   );
-}
-
-function Description({ body }: { body: string }) {
-  const t = usePluginTranslation('pull-requests');
-  const html = useMarkdownHtml(body);
-  if (body.trim() === '') return <p className="mrpr-status">{t('noDescription')}</p>;
-  if (html === undefined) return null;
-  return <div className="mrpr-description" dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
 function Files({ pullRequest }: { pullRequest: PullRequestRef }) {
@@ -356,7 +354,7 @@ export default function PullRequestPanel({ request }: { roomId: string; request?
             aria-labelledby={`mrpr-tab-${tab}`}
           >
             {tab === 'summary' ? (
-              <Description body={pr.body} />
+              <SummaryTab pullRequest={pr} pullRequestRef={ref} />
             ) : tab === 'timeline' ? (
               <p className="mrpr-status">{t('timeline.placeholder')}</p>
             ) : (

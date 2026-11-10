@@ -39,6 +39,8 @@ export function PullRequestCard({ href, close }: MessageLinkCardProps) {
   const state = pr && resolvePullRequestState(pr);
 
   const copy = async () => {
+    // A page without a clipboard (an insecure context) leaves the row as it was.
+    if (!navigator.clipboard) return;
     try {
       await navigator.clipboard.writeText(href);
       setCopied(true);
