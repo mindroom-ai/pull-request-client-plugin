@@ -74,14 +74,33 @@ function readRoom(room: Room): RoomPullRequests {
   return { byThread, repositories: repositories.size };
 }
 
-type Snapshot = { events: readonly unknown[]; pullRequests: RoomPullRequests };
+/**
+ * A room's links for React: the snapshot last read, the components that read them, and, while any
+ * does, the removal of the one listener on the room's state that tells them all of a link event.
+ * The SDK's emitters warn past ten listeners for an event, and a room has a card for each thread.
+ */
+type RoomStore = {
+  snapshot?: { events: readonly unknown[]; pullRequests: RoomPullRequests };
+  listeners: Set<() => void>;
+  stop?: () => void;
+};
 
-const snapshots = new WeakMap<Room, Snapshot>();
+const stores = new WeakMap<Room, RoomStore>();
+
+function storeOf(room: Room): RoomStore {
+  let store = stores.get(room);
+  if (store === undefined) {
+    store = { listeners: new Set() };
+    stores.set(room, store);
+  }
+  return store;
+}
 
 /** The room's snapshot, rebuilt when its link events are no longer the ones it was built from. */
 function snapshotOf(room: Room): RoomPullRequests {
+  const store = storeOf(room);
   const events = room.currentState.getStateEvents(THREAD_PULL_REQUEST_EVENT_TYPE);
-  const cached = snapshots.get(room);
+  const cached = store.snapshot;
   if (
     cached !== undefined &&
     cached.events.length === events.length &&
@@ -90,19 +109,34 @@ function snapshotOf(room: Room): RoomPullRequests {
     return cached.pullRequests;
   }
   const pullRequests = readRoom(room);
-  snapshots.set(room, { events, pullRequests });
+  store.snapshot = { events, pullRequests };
   return pullRequests;
 }
 
 /** The subscription only tells React to read again; the read checks the room's state itself. */
 function subscribeTo(room: Room, notify: () => void): () => void {
-  const state = room.currentState;
-  const onEvent = (event: { getType(): string }) => {
-    if (event.getType() === THREAD_PULL_REQUEST_EVENT_TYPE) notify();
-  };
-  state.on(RoomStateEvent.Events, onEvent);
+  const store = storeOf(room);
+  if (store.listeners.size === 0) {
+    const state = room.currentState;
+    const onEvent = (event: { getType(): string }) => {
+      if (event.getType() !== THREAD_PULL_REQUEST_EVENT_TYPE) return;
+      // The SDK redacts a link event in place, so the snapshot's events can be the same objects
+      // with other content.
+      store.snapshot = undefined;
+      store.listeners.forEach((listener) => listener());
+    };
+    state.on(RoomStateEvent.Events, onEvent);
+    store.stop = () => {
+      state.off(RoomStateEvent.Events, onEvent);
+    };
+  }
+  store.listeners.add(notify);
   return () => {
-    state.off(RoomStateEvent.Events, onEvent);
+    store.listeners.delete(notify);
+    if (store.listeners.size > 0) return;
+    store.stop?.();
+    // Unheard, a redaction would leave the snapshot as it was; the next reader reads the room anew.
+    store.snapshot = undefined;
   };
 }
 
@@ -112,11 +146,20 @@ export function useRoomPullRequests(room: Room): RoomPullRequests {
   return useSyncExternalStore(subscribe, () => snapshotOf(room));
 }
 
-/** The pull requests of one thread in the order they were set; the same empty array when it has none. */
+/** A thread's pull requests, and how many repositories the links of its room span. */
+export type ThreadPullRequests = {
+  /** In the order they were set; the same empty array when the thread has none. */
+  pullRequests: readonly PullRequestRef[];
+  repositories: number;
+};
+
+/** The pull requests of one thread and the room's count of repositories, from one subscription. */
 export function useThreadPullRequests(
   room: Room,
   threadId: string | undefined
-): readonly PullRequestRef[] {
-  const { byThread } = useRoomPullRequests(room);
-  return (threadId === undefined ? undefined : byThread.get(threadId)) ?? NO_PULL_REQUESTS;
+): ThreadPullRequests {
+  const { byThread, repositories } = useRoomPullRequests(room);
+  const pullRequests =
+    (threadId === undefined ? undefined : byThread.get(threadId)) ?? NO_PULL_REQUESTS;
+  return { pullRequests, repositories };
 }

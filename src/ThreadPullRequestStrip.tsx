@@ -6,7 +6,7 @@ import { useShownThread } from '@mindroom/client-sdk/room';
 import { pullRequestUrl, type PullRequestRef } from './github';
 import { PullRequestChip } from './PullRequestChip';
 import { useShownPullRequest } from './shownPullRequest';
-import { useRoomPullRequests, useThreadPullRequests } from './threadPullRequests';
+import { useThreadPullRequests } from './threadPullRequests';
 
 /** Whether `a` and `b` name one pull request; GitHub's owner and repository names ignore case. */
 const samePullRequest = (a: PullRequestRef, b: PullRequestRef) =>
@@ -17,8 +17,7 @@ const samePullRequest = (a: PullRequestRef, b: PullRequestRef) =>
 export function ThreadPullRequestStrip({ room }: { room: Room }) {
   const t = usePluginTranslation('pull-requests');
   const threadId = useShownThread();
-  const pullRequests = useThreadPullRequests(room, threadId);
-  const { repositories } = useRoomPullRequests(room);
+  const { pullRequests, repositories } = useThreadPullRequests(room, threadId);
   const panel = useRoomSidePanel('pull-requests', 'pull-request');
   const shown = useShownPullRequest(room.roomId);
   if (pullRequests.length === 0) return null;

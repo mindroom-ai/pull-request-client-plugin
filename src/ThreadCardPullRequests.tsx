@@ -2,6 +2,7 @@
 // count of the rest. The app draws this inside the card's button, so nothing here is a control or
 // takes the focus; the strip under the room header has the same pull requests as buttons.
 import type { MouseEvent } from 'react';
+import type { Room } from 'matrix-js-sdk';
 import {
   usePluginTranslation,
   useRoomSidePanel,
@@ -9,19 +10,40 @@ import {
 } from '@mindroom/client-sdk/core';
 import { useRoomNavigate } from '@mindroom/client-sdk/room';
 import { useScreenSize } from '@mindroom/client-sdk/ui';
-import { pullRequestUrl } from './github';
+import { pullRequestUrl, type PullRequestRef } from './github';
 import { PullRequestChip } from './PullRequestChip';
 import { pluginRootStyle } from './theme';
-import { useRoomPullRequests, useThreadPullRequests } from './threadPullRequests';
+import { useThreadPullRequests } from './threadPullRequests';
 
+// Every thread of the Compact view has a card, most without links: those read only their links.
 export function ThreadCardPullRequests({ room, threadId }: ThreadCardBadgeProps) {
+  const { pullRequests, repositories } = useThreadPullRequests(room, threadId);
+  if (pullRequests.length === 0) return null;
+  return (
+    <CardChips
+      room={room}
+      threadId={threadId}
+      pullRequests={pullRequests}
+      showRepository={repositories > 1}
+    />
+  );
+}
+
+function CardChips({
+  room,
+  threadId,
+  pullRequests,
+  showRepository,
+}: {
+  room: Room;
+  threadId: string;
+  pullRequests: readonly PullRequestRef[];
+  showRepository: boolean;
+}) {
   const t = usePluginTranslation('pull-requests');
-  const pullRequests = useThreadPullRequests(room, threadId);
-  const { repositories } = useRoomPullRequests(room);
   const phone = useScreenSize() === 'Mobile';
   const panel = useRoomSidePanel('pull-requests', 'pull-request');
   const { navigateRoomThread } = useRoomNavigate();
-  if (pullRequests.length === 0) return null;
   const chips = pullRequests.slice(0, phone ? 1 : 2);
   const more = pullRequests.length - chips.length;
   const moreLabel = t('threadPullRequests.moreLabel', { count: more });
@@ -44,7 +66,7 @@ export function ThreadCardPullRequests({ room, threadId }: ThreadCardBadgeProps)
               : undefined
           }
         >
-          <PullRequestChip pullRequest={pullRequest} showRepository={repositories > 1} />
+          <PullRequestChip pullRequest={pullRequest} showRepository={showRepository} />
         </span>
       ))}
       {more > 0 ? (

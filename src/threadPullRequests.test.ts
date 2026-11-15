@@ -73,7 +73,7 @@ let renders: RoomPullRequests[];
 function Probe({ room, threadId }: { room: Room; threadId: string | undefined }) {
   latest = useRoomPullRequests(room);
   renders.push(latest);
-  thread = useThreadPullRequests(room, threadId);
+  thread = useThreadPullRequests(room, threadId).pullRequests;
   return null;
 }
 const mount = (room: Room, threadId: string | undefined = '$t1') =>

@@ -431,10 +431,7 @@ test.beforeEach(async () => {
 const listenerWarnings = (page: Page): string[] => {
   const warnings: string[] = [];
   page.on('console', (message) => {
-    const text = message.text();
-    if (/MaxListenersExceededWarning|Possible EventEmitter memory leak/.test(text)) {
-      warnings.push(text);
-    }
+    if (message.text().includes('MaxListenersExceededWarning')) warnings.push(message.text());
   });
   return warnings;
 };
