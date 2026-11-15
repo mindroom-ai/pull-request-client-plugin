@@ -58,8 +58,12 @@ export function PullRequestChip({
     </>
   );
   return onSelect ? (
-    <button {...root} type="button" aria-pressed={selected} onClick={onSelect}>{content}</button>
+    <button {...root} type="button" aria-pressed={selected} onClick={onSelect}>
+      {content}
+    </button>
   ) : (
-    <span {...root} role="img">{content}</span>
+    <span {...root} role="img">
+      {content}
+    </span>
   );
 }
