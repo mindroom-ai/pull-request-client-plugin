@@ -195,10 +195,12 @@ describe('room pull requests', () => {
     const { room, put } = fakeRoom();
     put(THREAD_PULL_REQUEST_EVENT_TYPE, key('$t1', 'mindroom-ai/mindroom-chat#412'), link(URL_412));
     await mount(room);
+    // Subscribing drops the snapshot the first render read, so the mount may build a second one.
     const first = latest;
+    renders = [];
     put('m.room.topic', '', { topic: 'x' });
     expect(latest).toBe(first);
-    expect(new Set(renders).size).toBe(1);
+    expect(new Set(renders).size).toBeLessThanOrEqual(1);
     put(
       THREAD_PULL_REQUEST_EVENT_TYPE,
       key('$t1', 'mindroom-ai/mindroom-chat#9'),
