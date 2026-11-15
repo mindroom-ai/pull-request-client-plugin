@@ -591,8 +591,9 @@ test('on a phone a card shows one chip and the count of the rest', async ({ brow
 });
 
 type SyncGate = {
-  /** Holds the page's next /sync answer back; resolves once the server has given it. */
-  hold(): Promise<void>;
+  /** Holds the page's /sync requests back until the release; one already open goes on. */
+  hold(): void;
+  /** Lets the held requests reach the server, each with the token it was sent with. */
   release(): void;
   /** Whether an answer after the release said the room's timeline was limited. */
   sawLimited(): boolean;
@@ -600,7 +601,7 @@ type SyncGate = {
 
 /** The page's /sync, which the test can hold back to make a gap, as a laptop's sleep does. */
 const gateSync = async (page: Page): Promise<SyncGate> => {
-  let held: { answered(): void; released: Promise<void> } | undefined;
+  let held: Promise<void> | undefined;
   let release = () => undefined as void;
   let released = false;
   let limited = false;
@@ -608,36 +609,35 @@ const gateSync = async (page: Page): Promise<SyncGate> => {
     (url) => url.pathname.endsWith('/_matrix/client/v3/sync'),
     async (route) => {
       try {
+        await held;
         // A long poll takes up to the server's own 30 seconds.
         const response = await route.fetch({ timeout: 0 });
-        const gate = held;
-        gate?.answered();
-        await gate?.released;
         const body = (await response.json()) as {
           rooms?: { join?: Record<string, { timeline?: { limited?: boolean } }> };
         };
-        if (!gate && released && body.rooms?.join?.[roomId]?.timeline?.limited) limited = true;
+        if (released && body.rooms?.join?.[roomId]?.timeline?.limited) limited = true;
         await route.fulfill({ response });
       } catch {
-        // The page closed while its long poll was open.
+        // The page closed, or gave the request up, while it was open.
       }
     }
   );
   return {
-    hold: () =>
-      new Promise<void>((answered) => {
-        let open = () => undefined as void;
-        held = { answered, released: new Promise<void>((resolve) => (open = resolve)) };
+    hold: () => {
+      held = new Promise<void>((resolve) => {
         release = () => {
           held = undefined;
           released = true;
-          open();
+          resolve();
         };
-      }),
+      });
+    },
     release: () => release(),
     sawLimited: () => limited,
   };
 };
+
+const GAP_STEPS = 40;
 
 test("a link written after a gap in the room's sync still shows on its card", async ({ page }) => {
   test.setTimeout(4 * 60_000);
@@ -647,21 +647,21 @@ test("a link written after a gap in the room's sync still shows on its card", as
   const chips = cardChips(page, roots.webhooks);
   await expect(card(page, roots.webhooks)).toBeVisible();
   await expect(chips).toHaveCount(0);
-
-  // The page falls behind by more than a sync answer carries (20 events a room), as after a
-  // laptop's sleep: its next answer is limited, and the SDK resets the room's live timeline. The
-  // reset keeps the room's `currentState` object (`EventTimeline.forkLive`), so the links' listener
-  // on it must keep hearing new links.
-  const answered = sync.hold();
   const deployLog = await sendRoomMessage(HOMESERVER, agent.accessToken, roomId, {
     msgtype: 'm.text',
     body: 'Nightly deploy to staging',
   });
-  await answered;
-  for (let step = 1; step <= 25; step += 1) {
+  await expect(card(page, deployLog)).toBeVisible({ timeout: 30_000 });
+
+  // The page falls behind by more than a sync answer carries (20 events a room), as after a
+  // laptop's sleep: its next answer is limited, and the SDK resets the room's live timeline. The
+  // reset keeps the room's `currentState` object (`EventTimeline.forkLive`), so the links' listener
+  // on it must keep hearing new links. The long poll open at the hold takes a step or two at most.
+  sync.hold();
+  for (let step = 1; step <= GAP_STEPS; step += 1) {
     await sendRoomMessage(HOMESERVER, agent.accessToken, roomId, {
       msgtype: 'm.text',
-      body: `Deploy step ${step} of 25 done.`,
+      body: `Deploy step ${step} of ${GAP_STEPS} done.`,
       'm.relates_to': { rel_type: 'm.thread', event_id: deployLog },
     });
   }
@@ -669,7 +669,9 @@ test("a link written after a gap in the room's sync still shows on its card", as
   await expect
     .poll(() => sync.sawLimited(), { timeout: 60_000, message: 'a limited sync' })
     .toBe(true);
-  await expect(card(page, deployLog)).toBeVisible({ timeout: 30_000 });
+  await expect(card(page, deployLog)).toContainText(`Deploy step ${GAP_STEPS} of ${GAP_STEPS}`, {
+    timeout: 30_000,
+  });
 
   await writeLink(roots.webhooks, PULLS.webhookRetries);
   await expectChips(chips, [PULLS.webhookRetries]);
