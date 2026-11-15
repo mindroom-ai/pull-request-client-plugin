@@ -21,6 +21,8 @@
       "folds": ["./.mindroom-chat/node_modules/folds"],
       "@tanstack/*": ["./.mindroom-chat/node_modules/@tanstack/*"],
       "react-i18next": ["./.mindroom-chat/node_modules/react-i18next"],
+      "matrix-js-sdk": ["./.mindroom-chat/node_modules/matrix-js-sdk"],
+      "matrix-js-sdk/*": ["./.mindroom-chat/node_modules/matrix-js-sdk/*"],
       "vitest": ["./.mindroom-chat/node_modules/vitest"]
     }
   },
