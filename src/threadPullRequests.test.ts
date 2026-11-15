@@ -23,27 +23,33 @@ const link = (url: string, setAt = '2026-11-15T10:00:00Z') => ({
   set_at: setAt,
 });
 
-type FakeEvent = { type: string; stateKey: string; content: unknown };
+type FakeEvent = {
+  getType(): string;
+  getStateKey(): string;
+  getContent(): unknown;
+};
 
-/** A room whose current state holds events by type and emits RoomStateEvent.Events like the SDK's. */
+/**
+ * A room whose current state holds events by type and emits RoomStateEvent.Events like the SDK's:
+ * a state event is replaced by a new object and getStateEvents returns a fresh array each call.
+ */
 function fakeRoom() {
   const events = new Map<string, FakeEvent>();
   const emitter = new EventEmitter();
-  const wrap = (event: FakeEvent) => ({
-    getType: () => event.type,
-    getStateKey: () => event.stateKey,
-    getContent: () => event.content,
-  });
   const currentState = Object.assign(emitter, {
     getStateEvents: (type: string) =>
-      [...events.values()].filter((event) => event.type === type).map(wrap),
+      [...events.values()].filter((event) => event.getType() === type),
   });
   const room = { roomId: '!room:example.org', currentState } as unknown as Room;
   const put = (type: string, stateKey: string, content: unknown) => {
-    const event = { type, stateKey, content };
+    const event: FakeEvent = {
+      getType: () => type,
+      getStateKey: () => stateKey,
+      getContent: () => content,
+    };
     events.set(`${type}|${stateKey}`, event);
     act(() => {
-      emitter.emit(RoomStateEvent.Events, wrap(event), currentState);
+      emitter.emit(RoomStateEvent.Events, event, currentState);
     });
   };
   return { room, put };
@@ -163,6 +169,21 @@ describe('room pull requests', () => {
       link('https://github.com/mindroom-ai/mindroom-chat/pull/9')
     );
     expect(latest).not.toBe(first);
+  });
+
+  it('shows a link set while nothing was mounted to a hook mounted afterwards', async () => {
+    const { room, put } = fakeRoom();
+    put(
+      THREAD_PULL_REQUEST_EVENT_TYPE,
+      key('$t1', 'mindroom-ai/mindroom-chat#9'),
+      link('https://github.com/mindroom-ai/mindroom-chat/pull/9')
+    );
+    const first = await mount(room);
+    expect(thread).toHaveLength(1);
+    first.unmount();
+    put(THREAD_PULL_REQUEST_EVENT_TYPE, key('$t1', 'mindroom-ai/mindroom-chat#412'), link(URL_412));
+    await mount(room);
+    expect(thread.map((ref) => (ref as { number: number }).number)).toEqual([9, 412]);
   });
 
   it('gives the same empty array for no thread and for a thread without links', async () => {
