@@ -466,12 +466,14 @@ const banner = (page: Page) => page.locator('[data-thread-context-banner]');
 
 /**
  * Expects `chips` to be the chips of `pulls`, in order, each with its repository's name, its
- * number, the state GitHub sent and, for an open pull request with checks, the checks' mark.
+ * number, the state GitHub sent and, for an open pull request with checks, the checks' mark. A
+ * chip asks GitHub once it has been on screen, so each is scrolled into view first.
  */
 const expectChips = async (chips: Locator, pulls: Pull[]) => {
   await expect(chips).toHaveCount(pulls.length);
   for (const [index, pull] of pulls.entries()) {
     const chip = chips.nth(index);
+    await chip.scrollIntoViewIfNeeded();
     await expect(chip).toHaveAttribute('aria-label', chipName(pull), { timeout: 30_000 });
     await expect(chip).toHaveText(`${pull.repo}#${pull.number}`);
     await expect(chip.locator(`svg.${STATE_TONE[pull.state]}`)).toHaveCount(1);
@@ -484,9 +486,14 @@ const expectChips = async (chips: Locator, pulls: Pull[]) => {
   }
 };
 
-/** Signs the lead in and opens the room, whose agent makes it open in the Compact view. */
+/**
+ * Signs the lead in, with a GitHub token in the plugin's storage so that the chips ask for checks,
+ * and opens the room, whose agent makes it open in the Compact view.
+ */
 const openRoom = async (page: Page) => {
   await loginWithPassword(page, { homeserver: HOMESERVER, ...lead });
+  const tokenKey = `mindroom.plugin:${encodeURIComponent(lead.userId)}/pull-requests/githubToken`;
+  await page.evaluate((key) => localStorage.setItem(key, 'ghp_e2e'), tokenKey);
   await page.goto(`/home/${encodeURIComponent(roomId)}`);
   await expect(card(page, roots.sessions)).toBeVisible({ timeout: 120_000 });
 };
