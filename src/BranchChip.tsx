@@ -9,7 +9,8 @@ import type { ThreadWorktree } from './threadPullRequests';
 export function BranchChip({ worktree }: { worktree: ThreadWorktree }) {
   const t = usePluginTranslation('pull-requests');
   const { path, branch } = worktree;
-  const name = branch || (path.split('/').filter((part) => part !== '').pop() ?? path);
+  // The path's last part, also of a path that ends in a slash.
+  const name = branch || (path.split('/').filter(Boolean).pop() ?? path);
   const label = branch
     ? t('branch.label', { path, branch })
     : t('branch.labelWithoutBranch', { path });
