@@ -41,7 +41,7 @@ import {
   useReviews,
 } from './queries';
 import { buildReviewThreads } from './reviewThreads';
-import { setShownPullRequest } from './shownPullRequest';
+import { clearShownPullRequest, setShownPullRequest } from './shownPullRequest';
 import { pluginRootStyle } from './theme';
 import { PanelTokenFormContext, TokenForm, useGitHubToken, usePanelTokenForm } from './token';
 
@@ -294,7 +294,7 @@ export default function PullRequestPanel({
   // The strip under the room header marks the chip of the pull request the panel shows.
   useEffect(() => {
     setShownPullRequest(roomId, ref);
-    return () => setShownPullRequest(roomId, undefined);
+    return () => clearShownPullRequest(roomId, ref);
   }, [roomId, ref]);
   const query = usePullRequest(ref);
   const { token, forget } = useGitHubToken();

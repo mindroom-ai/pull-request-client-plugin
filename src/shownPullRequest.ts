@@ -14,6 +14,17 @@ export function setShownPullRequest(roomId: string, pullRequest: PullRequestRef 
   for (const listener of listeners) listener();
 }
 
+/**
+ * Clears the record of the room `roomId` while it is still `pullRequest`: a panel that took the
+ * place of the one that set it may have recorded its own already.
+ */
+export function clearShownPullRequest(
+  roomId: string,
+  pullRequest: PullRequestRef | undefined
+): void {
+  if (shown.get(roomId) === pullRequest) setShownPullRequest(roomId, undefined);
+}
+
 function subscribe(listener: () => void): () => void {
   listeners.add(listener);
   return () => {
