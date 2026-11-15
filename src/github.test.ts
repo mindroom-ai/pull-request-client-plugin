@@ -1,5 +1,5 @@
 import { parsePatchFiles } from '@pierre/diffs';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   GitHubError,
   fetchBehindBy,
@@ -219,13 +219,17 @@ describe('the error kinds', () => {
     return error as GitHubError;
   }
 
+  // Each limit here reset long ago, so the next request still goes to GitHub.
+  const reset = { 'x-ratelimit-reset': '0' };
+
   it('maps statuses', async () => {
     expect((await failure(undefined, new Response('', { status: 404 }))).kind).toBe('notFound');
     expect((await failure(undefined, new Response('', { status: 401 }))).kind).toBe('notFound');
     expect((await failure('secret', new Response('', { status: 401 }))).kind).toBe('badToken');
-    const limited = { status: 403, headers: { 'x-ratelimit-remaining': '0' } };
+    const limited = { status: 403, headers: { 'x-ratelimit-remaining': '0', ...reset } };
     expect((await failure(undefined, new Response('', limited))).kind).toBe('rateLimited');
-    expect((await failure(undefined, new Response('', { status: 429 }))).kind).toBe('rateLimited');
+    const tooMany = { status: 429, headers: reset };
+    expect((await failure(undefined, new Response('', tooMany))).kind).toBe('rateLimited');
     expect((await failure(undefined, new Response('', { status: 403 }))).kind).toBe('failed');
     const server = await failure(undefined, new Response('', { status: 500 }));
     expect(server.kind).toBe('failed');
@@ -240,10 +244,80 @@ describe('the error kinds', () => {
 
   it('never puts the token in a message', async () => {
     for (const status of [401, 403, 404, 429, 500]) {
-      const error = await failure('secret', new Response('secret', { status }));
+      const error = await failure('secret', new Response('secret', { status, headers: reset }));
       expect(error.message).not.toContain('secret');
     }
     expect((await failure('secret', new TypeError('secret'))).message).not.toContain('secret');
+  });
+});
+
+describe('the rate limit', () => {
+  const NOW = Date.parse('2026-01-01T00:00:00Z');
+  const LIMITED = new GitHubError('rateLimited', 403);
+  const limited = (headers: Record<string, string> = {}) =>
+    new Response('', { status: 403, headers: { 'x-ratelimit-remaining': '0', ...headers } });
+  // GitHub's reset time, in seconds since the epoch: ten minutes from now.
+  const resetIn10 = { 'x-ratelimit-reset': String(NOW / 1000 + 600) };
+
+  // A clock of its own, in the past, so a limit a test leaves has reset for the tests after it.
+  beforeEach(() => {
+    vi.useFakeTimers({ now: NOW, toFake: ['Date'] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('asks GitHub nothing more until the limit resets', async () => {
+    const fetchMock = vi.fn(() => Promise.resolve(limited(resetIn10)));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(fetchPullRequest(ref, undefined)).rejects.toEqual(LIMITED);
+    fetchMock.mockImplementation(() => Promise.resolve(json(apiPull)));
+    vi.setSystemTime(NOW + 599_000);
+    const refused = await fetchPullRequest(ref, undefined).catch((error: unknown) => error);
+    expect(refused).toEqual(LIMITED);
+    expect((refused as GitHubError).kind).toBe('rateLimited');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    vi.setSystemTime(NOW + 600_000);
+    expect((await fetchPullRequest(ref, undefined)).title).toBe('T');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('waits a minute when GitHub names no reset time', async () => {
+    const fetchMock = vi.fn(() => Promise.resolve(new Response('', { status: 429 })));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(fetchPullRequest(ref, undefined)).rejects.toEqual(
+      new GitHubError('rateLimited', 429)
+    );
+    vi.setSystemTime(NOW + 59_000);
+    await expect(fetchPullRequest(ref, undefined)).rejects.toEqual(
+      new GitHubError('rateLimited', 429)
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    fetchMock.mockImplementation(() => Promise.resolve(json(apiPull)));
+    vi.setSystemTime(NOW + 60_000);
+    expect((await fetchPullRequest(ref, undefined)).title).toBe('T');
+  });
+
+  it('does not hold a request with a token to a limit reached without one', async () => {
+    const fetchMock = vi.fn(() => Promise.resolve(limited(resetIn10)));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(fetchPullRequest(ref, undefined)).rejects.toEqual(LIMITED);
+    fetchMock.mockImplementation(() => Promise.resolve(json(apiPull)));
+    expect((await fetchPullRequest(ref, 'token')).title).toBe('T');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await expect(fetchPullRequest(ref, undefined)).rejects.toEqual(LIMITED);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('asks again with another token', async () => {
+    const fetchMock = vi.fn(() => Promise.resolve(limited(resetIn10)));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(fetchPullRequest(ref, 'old')).rejects.toEqual(LIMITED);
+    await expect(fetchPullRequest(ref, 'old')).rejects.toEqual(LIMITED);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    fetchMock.mockImplementation(() => Promise.resolve(json(apiPull)));
+    expect((await fetchPullRequest(ref, 'new')).title).toBe('T');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
 

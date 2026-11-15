@@ -175,7 +175,10 @@ describe('PullRequestCard', () => {
       fetchMock.mockResolvedValue(respond({}, 404));
       const view = await show();
       await saveToken(view);
-      fetchMock.mockResolvedValue(respond({}, 429));
+      // A limit that reset long ago, so that each request still goes to GitHub.
+      fetchMock.mockResolvedValue(
+        new Response('{}', { status: 429, headers: { 'x-ratelimit-reset': '0' } })
+      );
       await click(
         await view
           .findByRole('button', { name: 'Forget token' })

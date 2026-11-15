@@ -140,7 +140,11 @@ describe('PullRequestChip', () => {
 
   it.each([
     ['not found', () => respond({ message: 'Not Found' }, 404)],
-    ['rate limited', () => respond({}, 403, { 'x-ratelimit-remaining': '0' })],
+    // A limit that reset long ago, so the plugin asks GitHub again in the tests after this one.
+    [
+      'rate limited',
+      () => respond({}, 403, { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': '0' }),
+    ],
   ])('shows the number and the neutral icon when GitHub answers %s', async (_, answer) => {
     fetchMock.mockImplementation(async () => answer());
     const { view, client } = await show();

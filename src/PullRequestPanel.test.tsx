@@ -685,7 +685,11 @@ describe('PullRequestPanel', () => {
 
     it('offers one token form under the rate limit, and each failed part its own Retry', async () => {
       const limited = () =>
-        new Response('{}', { status: 403, headers: { 'x-ratelimit-remaining': '0' } });
+        new Response('{}', {
+          status: 403,
+          // A limit that reset long ago, so that each request still goes to GitHub.
+          headers: { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': '0' },
+        });
       let limit = true;
       serve(withHead());
       const served = fetchMock.getMockImplementation()!;
@@ -727,7 +731,11 @@ describe('PullRequestPanel', () => {
 
     it('leaves the header whole when the checks do not load', async () => {
       const limited = () =>
-        new Response('{}', { status: 403, headers: { 'x-ratelimit-remaining': '0' } });
+        new Response('{}', {
+          status: 403,
+          // A limit that reset long ago, so that each request still goes to GitHub.
+          headers: { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': '0' },
+        });
       serve(withHead(), { checks: limited(), statuses: limited() });
       const view = await show();
       expect(await view.findByText('Checks unavailable')).toBeTruthy();
