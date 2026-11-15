@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import type { ComponentProps } from 'react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { focusManager, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderPluginComponent } from '@mindroom/client-sdk/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import plugin from './index';
@@ -116,6 +116,24 @@ afterEach(() => {
 });
 
 describe('PullRequestChip', () => {
+  it('asks GitHub nothing more when the tab regains focus after the stale time', async () => {
+    serve(pull());
+    const { client } = await show();
+    await answered(client, '/pulls/412');
+    const asked = fetchMock.mock.calls.length;
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + 10 * 60_000 });
+    try {
+      focusManager.setFocused(false);
+      focusManager.setFocused(true);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(client.isFetching()).toBe(0);
+      expect(fetchMock.mock.calls.length).toBe(asked);
+    } finally {
+      focusManager.setFocused(undefined);
+      vi.useRealTimers();
+    }
+  });
+
   it.each([
     ['open', pull(), 'Open', 'mrpr-tone-open'],
     ['draft', pull({ draft: true }), 'Draft', 'mrpr-tone-draft'],

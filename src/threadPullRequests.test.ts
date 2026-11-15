@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { EventEmitter } from 'node:events';
-import { createElement, Fragment } from 'react';
+import { createElement, Fragment, useLayoutEffect } from 'react';
 import type { Room } from 'matrix-js-sdk';
 import { RoomStateEvent } from 'matrix-js-sdk';
 import { act } from 'react-dom/test-utils';
@@ -132,6 +132,12 @@ describe('parseThreadPullRequestLink', () => {
       parseThreadPullRequestLink(key('$t1', 'mindroom-ai/mindroom-chat#413'), link(URL_412))
     ).toBeUndefined();
   });
+
+  it('rejects a state key that is not the compact JSON form', () => {
+    expect(
+      parseThreadPullRequestLink('[ "$t1", "mindroom-ai/mindroom-chat#412" ]', link(URL_412))
+    ).toBeUndefined();
+  });
 });
 
 describe('room pull requests', () => {
@@ -158,6 +164,18 @@ describe('room pull requests', () => {
       link('https://github.com/mindroom-ai/mindroom-chat/pull/9', '2026-11-15T13:00:00Z')
     );
     expect(thread.map((ref) => (ref as { number: number }).number)).toEqual([412, 9]);
+  });
+
+  it('shows a pull request once when its state key also exists in another JSON form', async () => {
+    const { room, put } = fakeRoom();
+    put(THREAD_PULL_REQUEST_EVENT_TYPE, key('$t1', 'mindroom-ai/mindroom-chat#412'), link(URL_412));
+    put(
+      THREAD_PULL_REQUEST_EVENT_TYPE,
+      '[ "$t1", "mindroom-ai/mindroom-chat#412" ]',
+      link(URL_412)
+    );
+    await mount(room);
+    expect(thread).toHaveLength(1);
   });
 
   it('counts distinct repositories across threads', async () => {
@@ -211,6 +229,24 @@ describe('room pull requests', () => {
     await mount(room);
     expect(thread).toHaveLength(1);
     redact(THREAD_PULL_REQUEST_EVENT_TYPE, a);
+    expect(thread).toEqual([]);
+  });
+
+  it('drops a link redacted after the first render read it and before the subscription', async () => {
+    const { room, put, redact } = fakeRoom();
+    const a = key('$t1', 'mindroom-ai/mindroom-chat#412');
+    put(THREAD_PULL_REQUEST_EVENT_TYPE, a, link(URL_412));
+    // A layout effect runs after the render read the room and before the passive subscription.
+    function Redactor() {
+      useLayoutEffect(() => {
+        redact(THREAD_PULL_REQUEST_EVENT_TYPE, a);
+      }, []);
+      return null;
+    }
+    await renderPluginComponent(
+      createElement(Fragment, null, createElement(Probe, { room, threadId: '$t1' }), createElement(Redactor)),
+      { id: 'pull-requests', plugin }
+    );
     expect(thread).toEqual([]);
   });
 
