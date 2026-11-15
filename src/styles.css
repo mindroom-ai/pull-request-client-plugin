@@ -1513,6 +1513,12 @@ button.mrpr-chip:focus-visible {
 .mrpr-thread-card-chip {
   display: contents;
 }
+/* A chip on a card takes its own click, which a pointer that hovers sees before it clicks. */
+@media (hover: hover) {
+  .mrpr-thread-card-chip .mrpr-chip:hover {
+    background: var(--pr-hover);
+  }
+}
 /* The count of the pull requests a card leaves out: plain text in a pill a chip's size. */
 .mrpr-chip-more {
   box-sizing: border-box;
