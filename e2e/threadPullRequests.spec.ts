@@ -23,8 +23,8 @@ import {
 // thread's card in the Compact view shows a chip per pull request, two at most (one on a phone) and
 // the count of the rest; a click on a chip opens the thread and the pull request in the side
 // panel; the strip under the room header has the thread's chips as buttons, the panel's pressed;
-// and a link written or cleared while the room is open shows on its card at once, also after a
-// gap in the room's sync.
+// a link written or cleared while the room is open shows on its card at once, also after a gap in
+// the room's sync; and the room's six threads leave the SDK's emitters within their listener limit.
 // Set MRPR_SHOTS=<directory> to save the screenshots of the pull request.
 
 const LINK_EVENT = 'com.mindroom.thread.pull_request';
@@ -308,6 +308,14 @@ type Thread = {
 };
 
 const THREADS = {
+  search: {
+    topic: 'Search is slow in large workspaces',
+    replies: [
+      ['agent', 'The query scans every message of the workspace; an index would avoid that.'],
+      ['lead', 'Measure it on the staging copy before we add one.'],
+    ],
+    pulls: [],
+  },
   webhooks: {
     topic: 'Webhook deliveries fail silently',
     replies: [
@@ -416,6 +424,21 @@ test.beforeEach(async () => {
 
 // The page.
 
+/**
+ * Collects the warnings the page prints when one of the SDK's emitters has more than ten listeners
+ * for an event, as a room's state would with a listener for each of its cards.
+ */
+const listenerWarnings = (page: Page): string[] => {
+  const warnings: string[] = [];
+  page.on('console', (message) => {
+    const text = message.text();
+    if (/MaxListenersExceededWarning|Possible EventEmitter memory leak/.test(text)) {
+      warnings.push(text);
+    }
+  });
+  return warnings;
+};
+
 const STATE_LABEL = { open: 'Open', draft: 'Draft', merged: 'Merged', closed: 'Closed' };
 const STATE_TONE = {
   open: 'mrpr-tone-open',
@@ -481,6 +504,7 @@ const shot = async (page: Page, name: string) => {
 test("each thread's card shows the chips of its pull requests", async ({ page }) => {
   test.setTimeout(4 * 60_000);
   const unanswered = await stubGitHub(page);
+  const warnings = listenerWarnings(page);
   await openRoom(page);
 
   await expectChips(cardChips(page, roots.sessions), THREADS.sessions.pulls);
@@ -500,6 +524,7 @@ test("each thread's card shows the chips of its pull requests", async ({ page })
   await expect(page.locator('html')).toHaveAttribute('data-theme-kind', 'dark');
   await shot(page, 'compact-dark');
   expect(unanswered).toEqual([]);
+  expect(warnings).toEqual([]);
 });
 
 test('a chip on a card opens the thread and its pull request; the strip switches between them', async ({
@@ -507,6 +532,7 @@ test('a chip on a card opens the thread and its pull request; the strip switches
 }) => {
   test.setTimeout(4 * 60_000);
   const unanswered = await stubGitHub(page);
+  const warnings = listenerWarnings(page);
   await openRoom(page);
   const [sessionStore, tokenEndpoint] = THREADS.sessions.pulls;
   await expectChips(cardChips(page, roots.sessions), [sessionStore, tokenEndpoint]);
@@ -534,6 +560,7 @@ test('a chip on a card opens the thread and its pull request; the strip switches
   await expect(page.getByText(THREADS.sessions.replies[2][1], { exact: true })).toBeVisible();
   await shot(page, 'thread-panel');
   expect(unanswered).toEqual([]);
+  expect(warnings).toEqual([]);
 });
 
 test('a link written or cleared while the room is open shows on its card at once', async ({
@@ -541,6 +568,7 @@ test('a link written or cleared while the room is open shows on its card at once
 }) => {
   test.setTimeout(4 * 60_000);
   const unanswered = await stubGitHub(page);
+  const warnings = listenerWarnings(page);
   await openRoom(page);
   const chips = cardChips(page, roots.webhooks);
   await expect(card(page, roots.webhooks)).toBeVisible();
@@ -556,6 +584,7 @@ test('a link written or cleared while the room is open shows on its card at once
   await expect(card(page, roots.webhooks).locator('.mrpr-thread-card-chips')).toHaveCount(0);
   expect(await page.evaluate(() => 'mrprSamePage' in window)).toBe(true);
   expect(unanswered).toEqual([]);
+  expect(warnings).toEqual([]);
 });
 
 test('on a phone a card shows one chip and the count of the rest', async ({ browser, baseURL }) => {
@@ -571,6 +600,7 @@ test('on a phone a card shows one chip and the count of the rest', async ({ brow
   const page = await context.newPage();
   try {
     const unanswered = await stubGitHub(page);
+    const warnings = listenerWarnings(page);
     await openRoom(page);
     await expectChips(cardChips(page, roots.sessions), [PULLS.sessionStore]);
     await expect(cardMore(page, roots.sessions)).toHaveText('+1');
@@ -585,6 +615,7 @@ test('on a phone a card shows one chip and the count of the rest', async ({ brow
     );
     await shot(page, 'phone-compact');
     expect(unanswered).toEqual([]);
+    expect(warnings).toEqual([]);
   } finally {
     await context.close();
   }
@@ -642,6 +673,7 @@ const GAP_STEPS = 40;
 test("a link written after a gap in the room's sync still shows on its card", async ({ page }) => {
   test.setTimeout(4 * 60_000);
   const unanswered = await stubGitHub(page);
+  const warnings = listenerWarnings(page);
   const sync = await gateSync(page);
   await openRoom(page);
   const chips = cardChips(page, roots.webhooks);
@@ -678,4 +710,5 @@ test("a link written after a gap in the room's sync still shows on its card", as
   await writeLink(roots.webhooks, PULLS.webhookRetries, {});
   await expect(chips).toHaveCount(0);
   expect(unanswered).toEqual([]);
+  expect(warnings).toEqual([]);
 });
