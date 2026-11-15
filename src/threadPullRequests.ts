@@ -47,7 +47,11 @@ export function parseThreadPullRequestLink(
     return undefined;
   }
   if (parsed === undefined) return undefined;
-  const pullRequest = { ...parsed, owner: parsed.owner.toLowerCase(), repo: parsed.repo.toLowerCase() };
+  const pullRequest = {
+    ...parsed,
+    owner: parsed.owner.toLowerCase(),
+    repo: parsed.repo.toLowerCase(),
+  };
   if (keyOf(pullRequest) !== refKey) return undefined;
   return { threadId, pullRequest, setAt: typeof setAt === 'string' ? setAt : '' };
 }

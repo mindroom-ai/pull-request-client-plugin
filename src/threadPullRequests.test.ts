@@ -82,7 +82,11 @@ describe('parseThreadPullRequestLink', () => {
       key('$t1', 'mindroom-ai/mindroom-chat#412'),
       link('https://github.com/Mindroom-AI/mindroom-chat/pull/412/files')
     );
-    expect(parsed?.pullRequest).toEqual({ owner: 'mindroom-ai', repo: 'mindroom-chat', number: 412 });
+    expect(parsed?.pullRequest).toEqual({
+      owner: 'mindroom-ai',
+      repo: 'mindroom-chat',
+      number: 412,
+    });
   });
 
   it('rejects an unlinked event, a malformed key, a foreign url and a mismatched key', () => {
@@ -94,7 +98,10 @@ describe('parseThreadPullRequestLink', () => {
     expect(parseThreadPullRequestLink(JSON.stringify(['$t1']), link(URL_412))).toBeUndefined();
     expect(parseThreadPullRequestLink(JSON.stringify(['$t1', 7]), link(URL_412))).toBeUndefined();
     expect(
-      parseThreadPullRequestLink(good, link('https://example.com/mindroom-ai/mindroom-chat/pull/412'))
+      parseThreadPullRequestLink(
+        good,
+        link('https://example.com/mindroom-ai/mindroom-chat/pull/412')
+      )
     ).toBeUndefined();
     expect(parseThreadPullRequestLink(good, { ...link(URL_412), url: 'nope' })).toBeUndefined();
     expect(
@@ -131,11 +138,7 @@ describe('room pull requests', () => {
 
   it('counts distinct repositories across threads', async () => {
     const { room, put } = fakeRoom();
-    put(
-      THREAD_PULL_REQUEST_EVENT_TYPE,
-      key('$t1', 'mindroom-ai/mindroom-chat#412'),
-      link(URL_412)
-    );
+    put(THREAD_PULL_REQUEST_EVENT_TYPE, key('$t1', 'mindroom-ai/mindroom-chat#412'), link(URL_412));
     put(
       THREAD_PULL_REQUEST_EVENT_TYPE,
       key('$t2', 'mindroom-ai/mindroom#5'),
@@ -148,11 +151,7 @@ describe('room pull requests', () => {
 
   it('keeps the same snapshot across renders and other state events, and a new one after a link event', async () => {
     const { room, put } = fakeRoom();
-    put(
-      THREAD_PULL_REQUEST_EVENT_TYPE,
-      key('$t1', 'mindroom-ai/mindroom-chat#412'),
-      link(URL_412)
-    );
+    put(THREAD_PULL_REQUEST_EVENT_TYPE, key('$t1', 'mindroom-ai/mindroom-chat#412'), link(URL_412));
     await mount(room);
     const first = latest;
     put('m.room.topic', '', { topic: 'x' });
