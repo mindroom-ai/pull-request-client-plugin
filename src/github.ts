@@ -96,11 +96,32 @@ function errorKind(response: Response, hasToken: boolean): GitHubErrorKind {
   return 'failed';
 }
 
+type RateLimit = { token: string | undefined; status: number; resetsAt: number };
+
+// The rate limit GitHub last answered, for requests with a token and for those without (which it
+// counts against the address), while it lasts. Until it resets, a request gets the same answer
+// from here without asking, so the chips of a busy room do not keep spending what the panel needs.
+// A request with another token than the one limited starts afresh: a new token is a new budget.
+const rateLimits = new Map<boolean, RateLimit>();
+
+/** When GitHub's rate limit resets, in milliseconds since the epoch; in a minute when it says not. */
+function resetTime(response: Response): number {
+  const header = response.headers.get('x-ratelimit-reset');
+  const seconds = header ? Number(header) : NaN;
+  return Number.isFinite(seconds) ? seconds * 1000 : Date.now() + 60_000;
+}
+
 async function getJson(
   path: string,
   token: string | undefined,
   signal: AbortSignal | undefined
 ): Promise<unknown> {
+  const withToken = Boolean(token);
+  const limit = rateLimits.get(withToken);
+  if (limit && limit.token === token && Date.now() < limit.resetsAt) {
+    throw new GitHubError('rateLimited', limit.status);
+  }
+  rateLimits.delete(withToken);
   const headers: Record<string, string> = {
     Accept: 'application/vnd.github+json',
     'X-GitHub-Api-Version': '2022-11-28',
@@ -114,7 +135,13 @@ async function getJson(
     if (signal?.aborted) throw error;
     throw new GitHubError('failed', 0);
   }
-  if (!response.ok) throw new GitHubError(errorKind(response, Boolean(token)), response.status);
+  if (!response.ok) {
+    const kind = errorKind(response, withToken);
+    if (kind === 'rateLimited') {
+      rateLimits.set(withToken, { token, status: response.status, resetsAt: resetTime(response) });
+    }
+    throw new GitHubError(kind, response.status);
+  }
   try {
     return await response.json();
   } catch {
