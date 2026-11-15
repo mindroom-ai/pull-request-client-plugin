@@ -6,7 +6,7 @@ import { renderPluginComponent } from '@mindroom/client-sdk/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import plugin from './index';
 import { setShownPullRequest } from './shownPullRequest';
-import { linkedRoom, type TestLink } from './testing/linkedRoom';
+import { linkedRoom, type TestLink, type TestWorktree } from './testing/linkedRoom';
 import { ThreadPullRequestStrip } from './ThreadPullRequestStrip';
 
 const ROOM_ID = '!room:example.org';
@@ -34,12 +34,15 @@ const strip = (room: Room) => (
     </div>
   </QueryClientProvider>
 );
-const show = async (links: TestLink[]) => {
-  const room = linkedRoom(ROOM_ID, links);
+const show = async (links: TestLink[], worktrees: TestWorktree[] = []) => {
+  const room = linkedRoom(ROOM_ID, links, worktrees);
   const view = await renderPluginComponent(strip(room), { id: 'pull-requests', plugin });
   return { view, room };
 };
 type View = Awaited<ReturnType<typeof show>>['view'];
+
+const WORKTREE = { path: 'worktrees/redis-sessions', branch: 'redis-sessions' };
+const BRANCH = 'Worktree worktrees/redis-sessions, branch redis-sessions';
 
 const chip = (view: View, number: number) =>
   view.getByRole('button', { name: `Pull request mindroom-ai/mindroom-chat #${number}` });
@@ -79,10 +82,25 @@ describe('ThreadPullRequestStrip', () => {
     expect(view.getByTestId('slot').childElementCount).toBe(0);
   });
 
-  it('renders nothing for a thread without links', async () => {
+  it('renders nothing for a thread without links or a worktree', async () => {
     page.thread = '$t2';
-    const { view } = await show([{ number: 1 }]);
+    const { view } = await show([{ number: 1 }], [WORKTREE]);
     expect(view.getByTestId('slot').childElementCount).toBe(0);
+  });
+
+  it("shows the thread's branch first, as text, then its pull requests", async () => {
+    const { view } = await show([{ number: 1 }, { number: 2 }], [WORKTREE]);
+    const branch = view.getByRole('img', { name: BRANCH });
+    expect(view.getByRole('group').firstElementChild).toBe(branch);
+    expect(branch.tagName).toBe('SPAN');
+    expect(branch.textContent).toBe('redis-sessions');
+    expect(view.getAllByRole('button').map((button) => button.textContent)).toEqual(['#1', '#2']);
+  });
+
+  it('shows the branch alone for a thread with a worktree and no links', async () => {
+    const { view } = await show([], [WORKTREE]);
+    expect(view.getByRole('img', { name: BRANCH }).textContent).toBe('redis-sessions');
+    expect(view.queryAllByRole('button')).toEqual([]);
   });
 
   it("shows each of the thread's pull requests as a button", async () => {

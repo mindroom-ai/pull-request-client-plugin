@@ -5,7 +5,7 @@ import { act } from 'react-dom/test-utils';
 import { renderPluginComponent } from '@mindroom/client-sdk/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import plugin from './index';
-import { linkedRoom, type TestLink } from './testing/linkedRoom';
+import { linkedRoom, type TestLink, type TestWorktree } from './testing/linkedRoom';
 import { ThreadCardPullRequests } from './ThreadCardPullRequests';
 
 const ROOM_ID = '!room:example.org';
@@ -39,7 +39,9 @@ vi.mock('@mindroom/client-sdk/room', async (importOriginal) => {
   };
 });
 
-const roomWith = (links: TestLink[]) => linkedRoom(ROOM_ID, links);
+const roomWith = (links: TestLink[], worktrees: TestWorktree[] = []) =>
+  linkedRoom(ROOM_ID, links, worktrees);
+const WORKTREE = { path: 'worktrees/redis-sessions', branch: 'redis-sessions' };
 
 const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>();
 
@@ -83,9 +85,32 @@ afterEach(() => {
 });
 
 describe('ThreadCardPullRequests', () => {
-  it('renders nothing for a thread without links', async () => {
-    const view = await show(roomWith([{ thread: '$other', number: 1 }]));
+  it('renders nothing for a thread without links or a worktree', async () => {
+    const view = await show(
+      roomWith([{ thread: '$other', number: 1 }], [{ thread: '$other', ...WORKTREE }])
+    );
     expect(view.getByTestId('card').childElementCount).toBe(0);
+  });
+
+  it('shows the branch of a thread with a worktree and no links, and lets a click reach the card', async () => {
+    const onParentClick = vi.fn();
+    const view = await show(roomWith([], [WORKTREE]), { onParentClick });
+    const branch = view.getByRole('img', {
+      name: 'Worktree worktrees/redis-sessions, branch redis-sessions',
+    });
+    expect(branch.textContent).toBe('redis-sessions');
+    expect(view.getByTestId('card').querySelector('button, a, [tabindex]')).toBeNull();
+    // The side panel's hooks are left for a thread with links.
+    expect(page.panelReads).toBe(0);
+    await act(async () => branch.click());
+    expect(onParentClick).toHaveBeenCalledTimes(1);
+    expect(page.navigateRoomThread).not.toHaveBeenCalled();
+  });
+
+  it('shows only the pull requests of a thread with links and a worktree', async () => {
+    const view = await show(roomWith([{ number: 1 }], [WORKTREE]));
+    expect(chips(view).map((chip) => chip.textContent)).toEqual(['#1']);
+    expect(view.queryByRole('img', { name: /^Worktree / })).toBeNull();
   });
 
   it('reads nothing but the links for a thread without any', async () => {

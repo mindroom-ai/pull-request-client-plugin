@@ -9,10 +9,13 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import plugin from './index';
 import {
   parseThreadPullRequestLink,
+  parseThreadWorktree,
   THREAD_PULL_REQUEST_EVENT_TYPE,
+  THREAD_WORKTREE_EVENT_TYPE,
   useRoomPullRequests,
   useThreadPullRequests,
   type RoomPullRequests,
+  type ThreadPullRequests,
 } from './threadPullRequests';
 
 const URL_412 = 'https://github.com/mindroom-ai/mindroom-chat/pull/412';
@@ -22,6 +25,12 @@ const link = (url: string, setAt = '2026-11-15T10:00:00Z') => ({
   set_by: '@plugin-tester:example.org',
   set_at: setAt,
 });
+const WORKTREE = {
+  path: 'worktrees/redis-sessions',
+  branch: 'redis-sessions',
+  set_by: '@plugin-tester:example.org',
+  set_at: '2026-11-15T10:00:00Z',
+};
 
 type FakeEvent = {
   content: unknown;
@@ -69,19 +78,24 @@ function fakeRoom() {
 
 let latest: RoomPullRequests;
 let thread: readonly unknown[];
+let worktree: ThreadPullRequests['worktree'];
 let renders: RoomPullRequests[];
 function Probe({ room, threadId }: { room: Room; threadId: string | undefined }) {
   latest = useRoomPullRequests(room);
   renders.push(latest);
-  thread = useThreadPullRequests(room, threadId).pullRequests;
+  const ofThread = useThreadPullRequests(room, threadId);
+  thread = ofThread.pullRequests;
+  worktree = ofThread.worktree;
   return null;
 }
 const mount = (room: Room, threadId: string | undefined = '$t1') =>
   renderPluginComponent(createElement(Probe, { room, threadId }), { id: 'pull-requests', plugin });
 
-/** A component that reads one thread's links, as a thread's card does. */
+/** What the last `ThreadReader` read. */
+let read: ThreadPullRequests;
+/** A component that reads one thread's links and worktree, as a thread's card does. */
 function ThreadReader({ room }: { room: Room }) {
-  useThreadPullRequests(room, '$t1');
+  read = useThreadPullRequests(room, '$t1');
   return null;
 }
 
@@ -137,6 +151,43 @@ describe('parseThreadPullRequestLink', () => {
     expect(
       parseThreadPullRequestLink('[ "$t1", "mindroom-ai/mindroom-chat#412" ]', link(URL_412))
     ).toBeUndefined();
+  });
+});
+
+describe('parseThreadWorktree', () => {
+  it('parses a valid event into its thread, path and branch', () => {
+    expect(parseThreadWorktree('$t1', WORKTREE)).toEqual({
+      threadId: '$t1',
+      path: 'worktrees/redis-sessions',
+      branch: 'redis-sessions',
+    });
+  });
+
+  it('reads a missing branch, or one that is not a string, as empty', () => {
+    expect(parseThreadWorktree('$t1', { path: 'worktrees/x' })).toEqual({
+      threadId: '$t1',
+      path: 'worktrees/x',
+      branch: '',
+    });
+    expect(parseThreadWorktree('$t1', { path: 'worktrees/x', branch: 7 })?.branch).toBe('');
+  });
+
+  it('rejects a cleared event, content that is not an object, and a missing or empty path', () => {
+    expect(parseThreadWorktree('$t1', {})).toBeUndefined();
+    expect(parseThreadWorktree('$t1', undefined)).toBeUndefined();
+    expect(parseThreadWorktree('$t1', null)).toBeUndefined();
+    expect(parseThreadWorktree('$t1', 'worktrees/x')).toBeUndefined();
+    expect(parseThreadWorktree('$t1', { branch: 'x' })).toBeUndefined();
+    expect(parseThreadWorktree('$t1', { path: '' })).toBeUndefined();
+    expect(parseThreadWorktree('$t1', { path: 7 })).toBeUndefined();
+  });
+
+  it('rejects an absolute path, a path with a .. part and one with a backslash', () => {
+    for (const path of ['/srv/x', '..', '../x', 'worktrees/../x', 'worktrees/..', 'a\\b']) {
+      expect(parseThreadWorktree('$t1', { path })).toBeUndefined();
+    }
+    // Two dots inside a name are no `..` part.
+    expect(parseThreadWorktree('$t1', { path: 'worktrees/x..y' })?.path).toBe('worktrees/x..y');
   });
 });
 
@@ -279,5 +330,43 @@ describe('room pull requests', () => {
     expect(none).toEqual([]);
     await mount(room, '$other');
     expect(thread).toBe(none);
+  });
+});
+
+describe('thread worktrees', () => {
+  it("gives a thread's worktree with its links from one subscription, and follows it live", async () => {
+    const { room, put, redact, listeners } = fakeRoom();
+    put(THREAD_PULL_REQUEST_EVENT_TYPE, key('$t1', 'mindroom-ai/mindroom-chat#412'), link(URL_412));
+    put(THREAD_WORKTREE_EVENT_TYPE, '$t1', WORKTREE);
+    await renderPluginComponent(createElement(ThreadReader, { room }), {
+      id: 'pull-requests',
+      plugin,
+    });
+    expect(read.pullRequests).toHaveLength(1);
+    expect(read.worktree).toEqual({ path: 'worktrees/redis-sessions', branch: 'redis-sessions' });
+    expect(listeners()).toBe(1);
+
+    put(THREAD_WORKTREE_EVENT_TYPE, '$t1', { ...WORKTREE, branch: 'redis-cache' });
+    expect(read.worktree?.branch).toBe('redis-cache');
+    put(THREAD_WORKTREE_EVENT_TYPE, '$t1', {});
+    expect(read.worktree).toBeUndefined();
+    expect(read.pullRequests).toHaveLength(1);
+    put(THREAD_WORKTREE_EVENT_TYPE, '$t1', WORKTREE);
+    expect(read.worktree?.path).toBe('worktrees/redis-sessions');
+    // The SDK redacts a worktree event in place too.
+    redact(THREAD_WORKTREE_EVENT_TYPE, '$t1');
+    expect(read.worktree).toBeUndefined();
+    expect(listeners()).toBe(1);
+  });
+
+  it('gives no worktree for no thread and for a thread without one', async () => {
+    const { room, put } = fakeRoom();
+    put(THREAD_WORKTREE_EVENT_TYPE, '$t2', WORKTREE);
+    await mount(room, undefined);
+    expect(worktree).toBeUndefined();
+    await mount(room, '$t1');
+    expect(worktree).toBeUndefined();
+    await mount(room, '$t2');
+    expect(worktree?.branch).toBe('redis-sessions');
   });
 });
