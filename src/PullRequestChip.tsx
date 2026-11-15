@@ -24,6 +24,8 @@ function useOnScreenOnce(element: Element | null): boolean {
   return seen;
 }
 
+const NO_FOCUS_REFETCH = { refetchOnWindowFocus: false };
+
 export function PullRequestChip({
   pullRequest,
   showRepository,
@@ -41,12 +43,14 @@ export function PullRequestChip({
   const [element, setElement] = useState<HTMLElement | null>(null);
   // The Compact view draws every card of a room: a chip asks GitHub once it has been on screen.
   const queried = useOnScreenOnce(element) ? pullRequest : undefined;
-  const pr = usePullRequest(queried).data;
+  // A chip asks again when it shows after its answer went stale, not when the tab regains focus:
+  // every chip seen so far would ask at once, and without a token that spends the hourly limit.
+  const pr = usePullRequest(queried, NO_FOCUS_REFETCH).data;
   const { token } = useGitHubToken();
   // Only an open pull request, draft or not, has checks worth asking for, and only with a token:
   // without one, GitHub allows 60 requests an hour, kept for the pull requests and the panel.
   const withChecks = pr?.state === 'open' && token !== undefined;
-  const checks = useChecks(queried, pr?.headSha ?? '', withChecks);
+  const checks = useChecks(queried, pr?.headSha ?? '', withChecks, NO_FOCUS_REFETCH);
   const checksMark = withChecks && checks.data ? checksState(checks.data.items) : 'none';
   const mark = checksMark === 'none' ? undefined : pullRequestChecksStatePresentation(checksMark);
   const state = pr && resolvePullRequestState(pr);

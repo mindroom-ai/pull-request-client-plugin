@@ -37,6 +37,8 @@ export function parseThreadPullRequestLink(
   if (!Array.isArray(key) || key.length !== 2) return undefined;
   const [threadId, refKey] = key as unknown[];
   if (typeof threadId !== 'string' || typeof refKey !== 'string') return undefined;
+  // Only the compact form the backend writes: another form of the same key would show a pull request twice.
+  if (JSON.stringify([threadId, refKey]) !== stateKey) return undefined;
   if (typeof content !== 'object' || content === null) return undefined;
   const { url, set_at: setAt } = content as { url?: unknown; set_at?: unknown };
   if (typeof url !== 'string') return undefined;
@@ -117,6 +119,8 @@ function snapshotOf(room: Room): RoomPullRequests {
 function subscribeTo(room: Room, notify: () => void): () => void {
   const store = storeOf(room);
   if (store.listeners.size === 0) {
+    // A redaction since the first render read the room went unheard; React reads again after this.
+    store.snapshot = undefined;
     const state = room.currentState;
     const onEvent = (event: { getType(): string }) => {
       if (event.getType() !== THREAD_PULL_REQUEST_EVENT_TYPE) return;

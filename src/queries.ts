@@ -26,7 +26,10 @@ const STALE_TIME = 120_000;
 const keyOf = (ref: PullRequestRef | undefined, tokenSet: boolean) =>
   ['pull-requests', 'pr', ref?.owner, ref?.repo, ref?.number, tokenSet] as const;
 
-export function usePullRequest(ref: PullRequestRef | undefined) {
+/** What a caller can change of a query's refetching; the chips leave out the refetch on window focus. */
+export type RefetchOptions = { refetchOnWindowFocus?: boolean };
+
+export function usePullRequest(ref: PullRequestRef | undefined, options: RefetchOptions = {}) {
   const { token } = useGitHubToken();
   const storedToken = useStoredToken();
   return useQuery({
@@ -35,6 +38,7 @@ export function usePullRequest(ref: PullRequestRef | undefined) {
     enabled: ref !== undefined,
     staleTime: STALE_TIME,
     retry,
+    ...options,
   });
 }
 
@@ -55,7 +59,8 @@ function useRefQuery<T>(
   ref: PullRequestRef | undefined,
   enabled: boolean,
   part: readonly (string | undefined)[],
-  load: (ref: PullRequestRef, token: string | undefined, signal: AbortSignal) => Promise<T>
+  load: (ref: PullRequestRef, token: string | undefined, signal: AbortSignal) => Promise<T>,
+  options: RefetchOptions = {}
 ) {
   const { token } = useGitHubToken();
   const storedToken = useStoredToken();
@@ -65,12 +70,22 @@ function useRefQuery<T>(
     enabled: enabled && ref !== undefined,
     staleTime: STALE_TIME,
     retry,
+    ...options,
   });
 }
 
-export const useChecks = (ref: PullRequestRef | undefined, headSha: string, enabled: boolean) =>
-  useRefQuery(ref, enabled && headSha !== '', ['checks', headSha], (r, token, signal) =>
-    fetchChecks(r, headSha, token, signal)
+export const useChecks = (
+  ref: PullRequestRef | undefined,
+  headSha: string,
+  enabled: boolean,
+  options?: RefetchOptions
+) =>
+  useRefQuery(
+    ref,
+    enabled && headSha !== '',
+    ['checks', headSha],
+    (r, token, signal) => fetchChecks(r, headSha, token, signal),
+    options
   );
 
 export const useBehindBy = (
