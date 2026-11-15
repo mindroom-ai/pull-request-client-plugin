@@ -15,10 +15,18 @@ const THREAD = '$t1';
 const page = vi.hoisted(() => ({
   panel: undefined as { isOpen: boolean; open: ReturnType<typeof vi.fn> } | undefined,
   navigateRoomThread: vi.fn(),
+  /** How many times a card asked for the side panel. */
+  panelReads: 0,
 }));
 vi.mock('@mindroom/client-sdk/core', async (importOriginal) => {
   const core = await importOriginal<typeof import('@mindroom/client-sdk/core')>();
-  return { ...core, useRoomSidePanel: () => page.panel };
+  return {
+    ...core,
+    useRoomSidePanel: () => {
+      page.panelReads += 1;
+      return page.panel;
+    },
+  };
 });
 vi.mock('@mindroom/client-sdk/room', async (importOriginal) => {
   const room = await importOriginal<typeof import('@mindroom/client-sdk/room')>();
@@ -58,6 +66,7 @@ beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   localStorage.clear();
   page.panel = { isOpen: false, open: vi.fn() };
+  page.panelReads = 0;
   page.navigateRoomThread.mockReset();
   fetchMock.mockReset();
   fetchMock.mockImplementation(
@@ -77,6 +86,13 @@ describe('ThreadCardPullRequests', () => {
   it('renders nothing for a thread without links', async () => {
     const view = await show(roomWith([{ thread: '$other', number: 1 }]));
     expect(view.getByTestId('card').childElementCount).toBe(0);
+  });
+
+  it('reads nothing but the links for a thread without any', async () => {
+    await show(roomWith([{ thread: '$other', number: 1 }]));
+    expect(page.panelReads).toBe(0);
+    await show(roomWith([{ number: 1 }]));
+    expect(page.panelReads).toBeGreaterThan(0);
   });
 
   it('shows two chips and the count of the rest', async () => {

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { EventEmitter } from 'node:events';
-import { createElement } from 'react';
+import { createElement, Fragment } from 'react';
 import type { Room } from 'matrix-js-sdk';
 import { RoomStateEvent } from 'matrix-js-sdk';
 import { act } from 'react-dom/test-utils';
@@ -24,6 +24,7 @@ const link = (url: string, setAt = '2026-11-15T10:00:00Z') => ({
 });
 
 type FakeEvent = {
+  content: unknown;
   getType(): string;
   getStateKey(): string;
   getContent(): unknown;
@@ -31,7 +32,8 @@ type FakeEvent = {
 
 /**
  * A room whose current state holds events by type and emits RoomStateEvent.Events like the SDK's:
- * a state event is replaced by a new object and getStateEvents returns a fresh array each call.
+ * a state event is replaced by a new object and getStateEvents returns a fresh array each call,
+ * but a redaction empties the event in place and emits that same object again.
  */
 function fakeRoom() {
   const events = new Map<string, FakeEvent>();
@@ -41,18 +43,28 @@ function fakeRoom() {
       [...events.values()].filter((event) => event.getType() === type),
   });
   const room = { roomId: '!room:example.org', currentState } as unknown as Room;
-  const put = (type: string, stateKey: string, content: unknown) => {
-    const event: FakeEvent = {
-      getType: () => type,
-      getStateKey: () => stateKey,
-      getContent: () => content,
-    };
-    events.set(`${type}|${stateKey}`, event);
+  const emit = (event: FakeEvent) =>
     act(() => {
       emitter.emit(RoomStateEvent.Events, event, currentState);
     });
+  const put = (type: string, stateKey: string, content: unknown) => {
+    const event: FakeEvent = {
+      content,
+      getType: () => type,
+      getStateKey: () => stateKey,
+      getContent: () => event.content,
+    };
+    events.set(`${type}|${stateKey}`, event);
+    emit(event);
   };
-  return { room, put };
+  const redact = (type: string, stateKey: string) => {
+    const event = events.get(`${type}|${stateKey}`) as FakeEvent;
+    event.content = {};
+    emit(event);
+  };
+  /** How many listeners the room's state has for its events. */
+  const listeners = () => emitter.listenerCount(RoomStateEvent.Events);
+  return { room, put, redact, listeners };
 }
 
 let latest: RoomPullRequests;
@@ -66,6 +78,12 @@ function Probe({ room, threadId }: { room: Room; threadId: string | undefined })
 }
 const mount = (room: Room, threadId: string | undefined = '$t1') =>
   renderPluginComponent(createElement(Probe, { room, threadId }), { id: 'pull-requests', plugin });
+
+/** A component that reads one thread's links, as a thread's card does. */
+function ThreadReader({ room }: { room: Room }) {
+  useThreadPullRequests(room, '$t1');
+  return null;
+}
 
 beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -184,6 +202,31 @@ describe('room pull requests', () => {
     put(THREAD_PULL_REQUEST_EVENT_TYPE, key('$t1', 'mindroom-ai/mindroom-chat#412'), link(URL_412));
     await mount(room);
     expect(thread.map((ref) => (ref as { number: number }).number)).toEqual([9, 412]);
+  });
+
+  it('drops a link whose event the SDK redacted in place', async () => {
+    const { room, put, redact } = fakeRoom();
+    const a = key('$t1', 'mindroom-ai/mindroom-chat#412');
+    put(THREAD_PULL_REQUEST_EVENT_TYPE, a, link(URL_412));
+    await mount(room);
+    expect(thread).toHaveLength(1);
+    redact(THREAD_PULL_REQUEST_EVENT_TYPE, a);
+    expect(thread).toEqual([]);
+  });
+
+  it("adds one listener to the room's state for all its readers, and none once they unmount", async () => {
+    const { room, put, listeners } = fakeRoom();
+    put(THREAD_PULL_REQUEST_EVENT_TYPE, key('$t1', 'mindroom-ai/mindroom-chat#412'), link(URL_412));
+    const readers = Array.from({ length: 20 }, (_, index) =>
+      createElement(ThreadReader, { key: index, room })
+    );
+    const view = await renderPluginComponent(createElement(Fragment, null, readers), {
+      id: 'pull-requests',
+      plugin,
+    });
+    expect(listeners()).toBe(1);
+    view.unmount();
+    expect(listeners()).toBe(0);
   });
 
   it('gives the same empty array for no thread and for a thread without links', async () => {
