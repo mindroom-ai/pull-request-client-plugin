@@ -4,6 +4,8 @@ import type { ClientPlugin } from '@mindroom/client-sdk/core';
 import { parsePullRequestUrl } from './github';
 import { PullRequestCard } from './PullRequestCard';
 import { en } from './strings';
+import { ThreadCardPullRequests } from './ThreadCardPullRequests';
+import { ThreadPullRequestStrip } from './ThreadPullRequestStrip';
 import './styles.css';
 
 // The panel loads when it first opens: it carries the diff libraries, which the card does not need.
@@ -25,6 +27,8 @@ const plugin: ClientPlugin = {
       Component: PullRequestPanel,
     },
   ],
+  threadCardBadges: [{ Component: ThreadCardPullRequests }],
+  roomHeaderSlot: [ThreadPullRequestStrip],
   translations: { en },
 };
 

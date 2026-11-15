@@ -41,6 +41,7 @@ import {
   useReviews,
 } from './queries';
 import { buildReviewThreads } from './reviewThreads';
+import { setShownPullRequest } from './shownPullRequest';
 import { pluginRootStyle } from './theme';
 import { PanelTokenFormContext, TokenForm, useGitHubToken, usePanelTokenForm } from './token';
 
@@ -281,9 +282,20 @@ function Files({
   );
 }
 
-export default function PullRequestPanel({ request }: { roomId: string; request?: unknown }) {
+export default function PullRequestPanel({
+  roomId,
+  request,
+}: {
+  roomId: string;
+  request?: unknown;
+}) {
   const t = usePluginTranslation('pull-requests');
   const ref = useMemo(() => readRequest(request), [request]);
+  // The strip under the room header marks the chip of the pull request the panel shows.
+  useEffect(() => {
+    setShownPullRequest(roomId, ref);
+    return () => setShownPullRequest(roomId, undefined);
+  }, [roomId, ref]);
   const query = usePullRequest(ref);
   const { token, forget } = useGitHubToken();
   const tokenForm = usePanelTokenForm();

@@ -215,6 +215,14 @@ export const en = {
     label: 'Pull request {{repository}} #{{number}}: {{state}}',
     labelWithoutState: 'Pull request {{repository}} #{{number}}',
   },
+  // A thread's pull requests: the count of those its card leaves out, and the name of the row of
+  // their chips under the room header.
+  threadPullRequests: {
+    more: '+{{count}}',
+    moreLabel_one: '{{count}} more pull request',
+    moreLabel_other: '{{count}} more pull requests',
+    strip: 'Pull requests of this thread',
+  },
   error: {
     notFound: 'GitHub did not find this pull request. A private repository needs a token.',
     rateLimited: "GitHub's rate limit was reached.",

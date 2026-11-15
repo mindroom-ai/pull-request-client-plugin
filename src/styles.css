@@ -1495,3 +1495,49 @@ button.mrpr-chip:focus-visible {
   outline: 2px solid var(--pr-primary);
   outline-offset: 2px;
 }
+
+/* A thread's pull requests on its card, in the card's metadata row: a row that keeps its size and
+   never wraps. Each chip sits in an element of its own that takes its click and draws no box. */
+.mrpr-thread-card-chips {
+  display: inline-flex;
+  flex: none;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px;
+}
+.mrpr-thread-card-chip {
+  display: contents;
+}
+/* The count of the pull requests a card leaves out: plain text in a pill a chip's size. */
+.mrpr-chip-more {
+  box-sizing: border-box;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  block-size: 18px;
+  padding: 0 6px;
+  border: 1px solid var(--pr-border);
+  border-radius: 9999px;
+  background: var(--pr-surface);
+  color: var(--pr-muted);
+  font-size: 11px;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* The open thread's pull requests under the room header, lined up with the header's content (16px
+   in from its start, 8px on a phone). */
+.mrpr-thread-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding-block: 0 8px;
+  padding-inline: 16px 8px;
+}
+@media (max-width: 750px) {
+  .mrpr-thread-strip {
+    padding-inline: 8px;
+  }
+}
