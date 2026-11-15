@@ -1,8 +1,10 @@
-// The pull requests of the thread the room's page shows, under the room header: a chip for each
-// that opens it in the side panel, the one the open panel shows marked as pressed.
+// The pull requests of the thread the room's page shows, under the room header: the branch of its
+// worktree as text first, then a chip for each that opens it in the side panel, the one the open
+// panel shows marked as pressed.
 import type { Room } from 'matrix-js-sdk';
 import { usePluginTranslation, useRoomSidePanel } from '@mindroom/client-sdk/core';
 import { useShownThread } from '@mindroom/client-sdk/room';
+import { BranchChip } from './BranchChip';
 import { pullRequestUrl, type PullRequestRef } from './github';
 import { PullRequestChip } from './PullRequestChip';
 import { useShownPullRequest } from './shownPullRequest';
@@ -17,13 +19,14 @@ const samePullRequest = (a: PullRequestRef, b: PullRequestRef) =>
 export function ThreadPullRequestStrip({ room }: { room: Room }) {
   const t = usePluginTranslation('pull-requests');
   const threadId = useShownThread();
-  const { pullRequests, repositories } = useThreadPullRequests(room, threadId);
+  const { pullRequests, repositories, worktree } = useThreadPullRequests(room, threadId);
   const panel = useRoomSidePanel('pull-requests', 'pull-request');
   const shown = useShownPullRequest(room.roomId);
-  if (pullRequests.length === 0) return null;
+  if (pullRequests.length === 0 && worktree === undefined) return null;
   const selected = panel?.isOpen ? shown : undefined;
   return (
     <div className="mrpr-thread-strip" role="group" aria-label={t('threadPullRequests.strip')}>
+      {worktree ? <BranchChip worktree={worktree} /> : null}
       {pullRequests.map((pullRequest) => (
         <PullRequestChip
           key={pullRequestUrl(pullRequest)}

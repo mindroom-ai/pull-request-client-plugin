@@ -24,6 +24,17 @@ A linked pull request shows as a chip: its state's icon, its number and, while a
 - On a thread's card in the Compact view: the chips of the first two pull requests linked to it (one on a phone), then `+N` for the rest. A click on a chip opens the thread and the pull request in the side panel; elsewhere on the card, the click opens the thread as before. These chips take no focus, since the card is one button.
 - Under the room header, while a thread is open: a chip for each of its pull requests, as a button that opens the pull request in the side panel. While the panel is open, the chip of the pull request it shows is pressed.
 
+A thread's agent can also work in a git worktree of its workspace. MindRoom's backend plugin `thread-worktree` records it in the room's state, one state event per thread, which this plugin only reads:
+
+- type: `com.mindroom.thread.worktree`
+- state key: the thread's root event ID, as it is (not JSON)
+- content: `{"path","branch","set_by","set_at"}`: the worktree's directory relative to the agent's workspace (POSIX separators, no `..` part), its branch (empty when it has none), who set it, and when; a thread without a worktree has the content `{}`
+
+The worktree shows as its branch: the branch icon and the branch's name, or the last part of the path when the branch is empty, with the path in its tooltip.
+
+- On a thread's card in the Compact view: in the place of the chips, when no pull request is linked to the thread; with linked pull requests, the card shows only their chips. A click on the branch opens the thread, as anywhere else on the card.
+- Under the room header, while a thread is open: before the chips of its pull requests, as text, not a button; alone when the thread has no linked pull request.
+
 ## Build it into a client
 
 The plugin is built into a MindRoom Chat client by listing its directory in `MINDROOM_CLIENT_PLUGINS` when the client is built or run (see "Client plugins" in the client's `docs/architecture.md`):
@@ -58,7 +69,7 @@ The end-to-end spec `e2e/threadPullRequests.spec.ts` runs in the client's Playwr
 E2E_PLUGIN_DIRS=/path/to/pull-request-client-plugin MINDROOM_CLIENT_PLUGINS=/path/to/pull-request-client-plugin just e2e-slot 3 --preview npx playwright test --project=pull-request-client-plugin
 ```
 
-The page answers GitHub's API itself, so no request leaves the test. With `MRPR_SHOTS=<directory>` (an absolute one: the run's working directory is the slot's snapshot), it saves screenshots of a thread's pull requests: the Compact view in the light and dark themes, an open thread with its strip and the panel, and the Compact view on a phone.
+The page answers GitHub's API itself, so no request leaves the test. With `MRPR_SHOTS=<directory>` (an absolute one: the run's working directory is the slot's snapshot), it saves screenshots of a thread's pull requests: the Compact view in the light and dark themes, an open thread with its strip and the panel, and the Compact view on a phone; and of a thread's branch on its card and in the strip of the open thread.
 
 ## GitHub token
 

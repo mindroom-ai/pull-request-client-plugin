@@ -24,10 +24,13 @@ import {
 // the count of the rest; a click on a chip opens the thread and the pull request in the side
 // panel; the strip under the room header has the thread's chips as buttons, the panel's pressed;
 // a link written or cleared while the room is open shows on its card at once, also after a gap in
-// the room's sync; and the room's six threads leave the SDK's emitters within their listener limit.
+// the room's sync; the room's six threads leave the SDK's emitters within their listener limit; and
+// a thread's worktree, which MindRoom's `thread-worktree` backend plugin writes, shows as its
+// branch on its card and in the strip until it is cleared.
 // Set MRPR_SHOTS=<directory> to save the screenshots of the pull request.
 
 const LINK_EVENT = 'com.mindroom.thread.pull_request';
+const WORKTREE_EVENT = 'com.mindroom.thread.worktree';
 const PASSWORD = 'thread-pull-requests-password';
 const RUN = Date.now().toString(36);
 const DESKTOP = { width: 1280, height: 800 };
@@ -389,6 +392,10 @@ const writeLink = (root: string, pull: Pull, content?: Record<string, unknown>) 
     }
   );
 
+/** Gives the thread of `root` the worktree `content`, `{}` for none, as the backend plugin does. */
+const writeWorktree = (root: string, content: Record<string, unknown>) =>
+  sendStateEvent(HOMESERVER, lead.accessToken, roomId, WORKTREE_EVENT, root, content);
+
 test.beforeAll(async () => {
   if (!(await disposableHomeserverIsUp())) return;
   test.setTimeout(3 * 60_000);
@@ -713,6 +720,54 @@ test("a link written after a gap in the room's sync still shows on its card", as
   await expectChips(chips, [PULLS.webhookRetries]);
   await writeLink(roots.webhooks, PULLS.webhookRetries, {});
   await expect(chips).toHaveCount(0);
+  expect(unanswered).toEqual([]);
+  expect(warnings).toEqual([]);
+});
+
+test("a thread's worktree shows as its branch on its card and in the strip until it is cleared", async ({
+  page,
+}) => {
+  test.setTimeout(4 * 60_000);
+  const unanswered = await stubGitHub(page);
+  const warnings = listenerWarnings(page);
+  await openRoom(page);
+  const worktree = {
+    path: 'worktrees/webhook-retries',
+    branch: 'webhook-retries',
+    set_by: agent.userId,
+    set_at: new Date().toISOString(),
+  };
+  const label = 'Worktree worktrees/webhook-retries, branch webhook-retries';
+  const branch = card(page, roots.webhooks).locator('.mrpr-branch-chip');
+  await expect(card(page, roots.webhooks)).toBeVisible();
+  await expect(branch).toHaveCount(0);
+  // Marks this page, so that a reload would show.
+  await page.evaluate(() => Object.assign(window, { mrprSamePage: true }));
+
+  // A thread without links shows its branch on its card, in the place of the chips.
+  await writeWorktree(roots.webhooks, worktree);
+  await expect(branch).toHaveText(worktree.branch, { timeout: 30_000 });
+  await expect(branch).toHaveAttribute('aria-label', label);
+  await expect(card(page, roots.webhooks).locator('.mrpr-thread-card-chips')).toHaveCount(0);
+  await shot(page, 'branch-card');
+  await writeWorktree(roots.webhooks, {});
+  await expect(branch).toHaveCount(0);
+
+  // A click on the branch opens the thread, as anywhere else on the card; the strip under the room
+  // header shows the branch alone, as text.
+  await writeWorktree(roots.webhooks, { ...worktree, set_at: new Date().toISOString() });
+  await branch.click();
+  await expect(banner(page)).toContainText(THREADS.webhooks.topic, { timeout: 30_000 });
+  const stripBranch = strip(page).locator('.mrpr-branch-chip');
+  await expect(stripBranch).toHaveText(worktree.branch);
+  await expect(stripBranch).toHaveAttribute('aria-label', label);
+  await expect(strip(page).getByRole('button')).toHaveCount(0);
+  await expect(page.getByText(THREADS.webhooks.replies[1][1], { exact: true })).toBeVisible();
+  await shot(page, 'branch-strip');
+
+  await writeWorktree(roots.webhooks, {});
+  await expect(strip(page)).toHaveCount(0);
+  expect(await page.evaluate(() => 'mrprSamePage' in window)).toBe(true);
   expect(unanswered).toEqual([]);
   expect(warnings).toEqual([]);
 });

@@ -1537,6 +1537,18 @@ button.mrpr-chip:focus-visible {
   white-space: nowrap;
 }
 
+/* A thread's worktree, in a pull request chip's box (.mrpr-chip) and plain text: the branch icon in
+   the muted tone and the branch's name, which ends in an ellipsis past about 24 characters; the
+   chip's title has the whole name. */
+.mrpr-branch-chip-icon {
+  color: var(--pr-muted);
+}
+.mrpr-branch-chip-name {
+  overflow: hidden;
+  max-inline-size: 24ch;
+  text-overflow: ellipsis;
+}
+
 /* The open thread's pull requests under the room header, lined up with the header's content (16px
    in from its start, 8px on a phone). */
 .mrpr-thread-strip {
