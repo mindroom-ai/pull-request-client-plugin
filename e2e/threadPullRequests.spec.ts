@@ -588,3 +588,89 @@ test('on a phone a card shows one chip and the count of the rest', async ({ brow
     await context.close();
   }
 });
+
+type SyncGate = {
+  /** Holds the page's next /sync answer back; resolves once the server has given it. */
+  hold(): Promise<void>;
+  release(): void;
+  /** Whether an answer after the release said the room's timeline was limited. */
+  sawLimited(): boolean;
+};
+
+/** The page's /sync, which the test can hold back to make a gap, as a laptop's sleep does. */
+const gateSync = async (page: Page): Promise<SyncGate> => {
+  let held: { answered(): void; released: Promise<void> } | undefined;
+  let release = () => undefined as void;
+  let released = false;
+  let limited = false;
+  await page.route(
+    (url) => url.pathname.endsWith('/_matrix/client/v3/sync'),
+    async (route) => {
+      try {
+        // A long poll takes up to the server's own 30 seconds.
+        const response = await route.fetch({ timeout: 0 });
+        const gate = held;
+        gate?.answered();
+        await gate?.released;
+        const body = (await response.json()) as {
+          rooms?: { join?: Record<string, { timeline?: { limited?: boolean } }> };
+        };
+        if (!gate && released && body.rooms?.join?.[roomId]?.timeline?.limited) limited = true;
+        await route.fulfill({ response });
+      } catch {
+        // The page closed while its long poll was open.
+      }
+    }
+  );
+  return {
+    hold: () =>
+      new Promise<void>((answered) => {
+        let open = () => undefined as void;
+        held = { answered, released: new Promise<void>((resolve) => (open = resolve)) };
+        release = () => {
+          held = undefined;
+          released = true;
+          open();
+        };
+      }),
+    release: () => release(),
+    sawLimited: () => limited,
+  };
+};
+
+test("a link written after a gap in the room's sync still shows on its card", async ({ page }) => {
+  test.setTimeout(4 * 60_000);
+  const unanswered = await stubGitHub(page);
+  const sync = await gateSync(page);
+  await openRoom(page);
+  const chips = cardChips(page, roots.webhooks);
+  await expect(card(page, roots.webhooks)).toBeVisible();
+  await expect(chips).toHaveCount(0);
+
+  // The page falls behind by more than a sync answer carries (20 events a room), as after a
+  // laptop's sleep: its next answer is limited, and the SDK replaces the room's current state.
+  const answered = sync.hold();
+  const deployLog = await sendRoomMessage(HOMESERVER, agent.accessToken, roomId, {
+    msgtype: 'm.text',
+    body: 'Nightly deploy to staging',
+  });
+  await answered;
+  for (let step = 1; step <= 25; step += 1) {
+    await sendRoomMessage(HOMESERVER, agent.accessToken, roomId, {
+      msgtype: 'm.text',
+      body: `Deploy step ${step} of 25 done.`,
+      'm.relates_to': { rel_type: 'm.thread', event_id: deployLog },
+    });
+  }
+  sync.release();
+  await expect
+    .poll(() => sync.sawLimited(), { timeout: 60_000, message: 'a limited sync' })
+    .toBe(true);
+  await expect(card(page, deployLog)).toBeVisible({ timeout: 30_000 });
+
+  await writeLink(roots.webhooks, PULLS.webhookRetries);
+  await expectChips(chips, [PULLS.webhookRetries]);
+  await writeLink(roots.webhooks, PULLS.webhookRetries, {});
+  await expect(chips).toHaveCount(0);
+  expect(unanswered).toEqual([]);
+});
