@@ -210,6 +210,11 @@ export const en = {
   opened: 'opened {{time}}',
   ghost: 'ghost',
   state: { open: 'Open', draft: 'Draft', closed: 'Closed', merged: 'Merged' },
+  // The name and tooltip of a pull request's chip, without its state until GitHub sent it.
+  chip: {
+    label: 'Pull request {{repository}} #{{number}}: {{state}}',
+    labelWithoutState: 'Pull request {{repository}} #{{number}}',
+  },
   error: {
     notFound: 'GitHub did not find this pull request. A private repository needs a token.',
     rateLimited: "GitHub's rate limit was reached.",

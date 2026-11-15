@@ -1456,3 +1456,42 @@ button.mrpr-timeline-row:hover .mrpr-timeline-title {
   color: var(--pr-muted);
   opacity: 0.7;
 }
+
+/* A pull request's chip, drawn outside the card and the panel: a span on a thread's card and a
+   button under the room header. It keeps its size and its one line wherever it sits. */
+.mrpr-chip {
+  box-sizing: border-box;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  block-size: 18px;
+  margin: 0;
+  padding: 0 6px;
+  border: 1px solid var(--pr-border);
+  border-radius: 9999px;
+  background: var(--pr-surface);
+  color: var(--pr-fg);
+  font: inherit;
+  font-size: 11px;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.mrpr-chip-repo {
+  color: var(--pr-muted);
+}
+.mrpr-chip-selected {
+  border-color: var(--pr-primary);
+  box-shadow: 0 0 0 1px var(--pr-primary);
+}
+button.mrpr-chip {
+  cursor: pointer;
+}
+button.mrpr-chip:hover {
+  background: var(--pr-hover);
+}
+button.mrpr-chip:focus-visible {
+  outline: 2px solid var(--pr-primary);
+  outline-offset: 2px;
+}
