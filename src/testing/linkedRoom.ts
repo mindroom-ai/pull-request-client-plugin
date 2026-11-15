@@ -12,7 +12,7 @@ export function linkedRoom(roomId: string, links: TestLink[]): Room {
     getStateKey: () => JSON.stringify([thread, `mindroom-ai/${repo}#${number}`]),
     getContent: () => ({
       url: `https://github.com/mindroom-ai/${repo}/pull/${number}`,
-      set_by: '@bas:example.org',
+      set_by: '@plugin-tester:example.org',
       set_at: `2026-11-15T10:0${index}:00Z`,
     }),
   }));

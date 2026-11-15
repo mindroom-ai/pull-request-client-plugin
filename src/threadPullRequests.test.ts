@@ -19,7 +19,7 @@ const URL_412 = 'https://github.com/mindroom-ai/mindroom-chat/pull/412';
 const key = (thread: string, ref: string) => JSON.stringify([thread, ref]);
 const link = (url: string, setAt = '2026-11-15T10:00:00Z') => ({
   url,
-  set_by: '@bas:example.org',
+  set_by: '@plugin-tester:example.org',
   set_at: setAt,
 });
 
