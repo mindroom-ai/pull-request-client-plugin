@@ -165,6 +165,30 @@ describe('PullRequestPanel', () => {
     expect(shown).toBeUndefined();
   });
 
+  it('leaves the record of the panel that took its place when it unmounts', async () => {
+    let shown: PullRequestRef | undefined;
+    function ShownProbe() {
+      shown = useShownPullRequest('!room:example.org');
+      return null;
+    }
+    const next = { ...REQUEST, number: 201 };
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    // A new panel mounts while the one it replaces still moves out.
+    const page = (withOld: boolean) => (
+      <QueryClientProvider client={client}>
+        {withOld ? (
+          <PullRequestPanel key="old" roomId="!room:example.org" request={REQUEST} />
+        ) : null}
+        <PullRequestPanel key="new" roomId="!room:example.org" request={next} />
+        <ShownProbe />
+      </QueryClientProvider>
+    );
+    const view = await renderPluginComponent(page(true), { id: 'pull-requests', plugin });
+    expect(shown).toEqual(next);
+    view.rerender(page(false));
+    expect(shown).toEqual(next);
+  });
+
   it('shows the header', async () => {
     const view = await show();
     expect(await view.findByText('Add pull request cards')).toBeTruthy();
