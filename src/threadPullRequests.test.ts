@@ -169,11 +169,7 @@ describe('room pull requests', () => {
   it('shows a pull request once when its state key also exists in another JSON form', async () => {
     const { room, put } = fakeRoom();
     put(THREAD_PULL_REQUEST_EVENT_TYPE, key('$t1', 'mindroom-ai/mindroom-chat#412'), link(URL_412));
-    put(
-      THREAD_PULL_REQUEST_EVENT_TYPE,
-      '[ "$t1", "mindroom-ai/mindroom-chat#412" ]',
-      link(URL_412)
-    );
+    put(THREAD_PULL_REQUEST_EVENT_TYPE, '[ "$t1", "mindroom-ai/mindroom-chat#412" ]', link(URL_412));
     await mount(room);
     expect(thread).toHaveLength(1);
   });
@@ -246,7 +242,12 @@ describe('room pull requests', () => {
       return null;
     }
     await renderPluginComponent(
-      createElement(Fragment, null, createElement(Probe, { room, threadId: '$t1' }), createElement(Redactor)),
+      createElement(
+        Fragment,
+        null,
+        createElement(Probe, { room, threadId: '$t1' }),
+        createElement(Redactor)
+      ),
       { id: 'pull-requests', plugin }
     );
     expect(thread).toEqual([]);
