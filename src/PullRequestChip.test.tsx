@@ -37,6 +37,42 @@ const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(
 
 const requested = (part: string) => fetchMock.mock.calls.some(([url]) => url.includes(part));
 
+// Where `usePluginStorage` keeps the GitHub token of the test's account.
+const TOKEN_KEY = 'mindroom.plugin:%40plugin-tester%3Aexample.org/pull-requests/githubToken';
+const saveToken = () => localStorage.setItem(TOKEN_KEY, 'ghp_test');
+
+/** The chips' observers, which report only when a test tells them to (`report`). */
+const observers: FakeIntersectionObserver[] = [];
+class FakeIntersectionObserver {
+  readonly targets = new Set<Element>();
+  readonly callback: IntersectionObserverCallback;
+  constructor(callback: IntersectionObserverCallback) {
+    this.callback = callback;
+    observers.push(this);
+  }
+  observe(target: Element) {
+    this.targets.add(target);
+  }
+  unobserve(target: Element) {
+    this.targets.delete(target);
+  }
+  disconnect() {
+    this.targets.clear();
+  }
+}
+
+/** Reports to each observer that its elements are on screen, or not. */
+const report = (isIntersecting: boolean) => {
+  for (const observer of observers) {
+    const entries = [...observer.targets].map(
+      (target) => ({ target, isIntersecting } as IntersectionObserverEntry)
+    );
+    if (entries.length > 0) {
+      observer.callback(entries, observer as unknown as IntersectionObserver);
+    }
+  }
+};
+
 /** GitHub with the pull request `pr`, whose head commit has the check runs `runs`. */
 const serve = (pr: unknown, runs: unknown[] = []) =>
   fetchMock.mockImplementation(async (url) => {
@@ -71,6 +107,7 @@ const answered = async (client: QueryClient, part: string) => {
 
 beforeEach(() => {
   localStorage.clear();
+  observers.length = 0;
   fetchMock.mockReset();
   vi.stubGlobal('fetch', fetchMock);
 });
@@ -116,6 +153,7 @@ describe('PullRequestChip', () => {
     ['failing', pull(), [run('success'), run('failure')], 'mrpr-tone-failure'],
     ['pending', pull({ draft: true }), [run(null, 'in_progress')], 'mrpr-tone-warning'],
   ])('marks %s checks', async (_, pr, runs, tone) => {
+    saveToken();
     serve(pr, runs);
     const { view } = await show();
     const mark = () => view.container.querySelector('.mrpr-chip-checks');
@@ -123,6 +161,7 @@ describe('PullRequestChip', () => {
   });
 
   it('marks nothing for a pull request without checks', async () => {
+    saveToken();
     serve(pull());
     const { view, client } = await show();
     await view.findByRole('img', { name: /: Open/ });
@@ -131,11 +170,38 @@ describe('PullRequestChip', () => {
   });
 
   it('asks for no checks of a pull request that is not open', async () => {
+    saveToken();
     serve(pull(MERGED), [run('failure')]);
     const { view } = await show();
     await view.findByRole('img', { name: /: Merged/ });
     expect(requested('/check-runs')).toBe(false);
     expect(view.container.querySelector('.mrpr-chip-checks')).toBeNull();
+  });
+
+  it('asks for no checks without a token, and shows the state and the number', async () => {
+    serve(pull(), [run('failure')]);
+    const { view, client } = await show();
+    const chip = await view.findByRole('img', { name: /: Open/ });
+    await answered(client, '/pulls/412');
+    expect(chip.textContent).toBe('#412');
+    expect(requested('/check-runs')).toBe(false);
+    expect(requested('/status?')).toBe(false);
+    expect(view.container.querySelector('.mrpr-chip-checks')).toBeNull();
+  });
+
+  it('asks GitHub nothing until it has been on screen, then shows the state', async () => {
+    vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver);
+    serve(pull({ state: 'closed' }));
+    const { view } = await show();
+    const chip = view.getByRole('img', { name: LABEL });
+    expect(chip.textContent).toBe('#412');
+    expect(chip.firstElementChild?.getAttribute('class')).toContain('mrpr-tone-draft');
+    report(false);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fetchMock).not.toHaveBeenCalled();
+    report(true);
+    await view.findByRole('img', { name: /: Closed/ });
+    expect(requested('/pulls/412')).toBe(true);
   });
 
   it.each([
