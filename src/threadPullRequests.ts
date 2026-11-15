@@ -1,7 +1,7 @@
 // Reads which pull requests belong to a thread from the room's state, where the backend
 // plugin records them: one state event per thread and pull request, empty once unlinked.
 
-import { useSyncExternalStore } from 'react';
+import { useCallback, useSyncExternalStore } from 'react';
 import { RoomStateEvent, type Room } from 'matrix-js-sdk';
 import { parsePullRequestUrl, type PullRequestRef } from './github';
 
@@ -74,23 +74,31 @@ function readRoom(room: Room): RoomPullRequests {
   return { byThread, repositories: repositories.size };
 }
 
-const snapshots = new WeakMap<Room, RoomPullRequests>();
+type Snapshot = { events: readonly unknown[]; pullRequests: RoomPullRequests };
 
+const snapshots = new WeakMap<Room, Snapshot>();
+
+/** The room's snapshot, rebuilt when its link events are no longer the ones it was built from. */
 function snapshotOf(room: Room): RoomPullRequests {
-  let snapshot = snapshots.get(room);
-  if (snapshot === undefined) {
-    snapshot = readRoom(room);
-    snapshots.set(room, snapshot);
+  const events = room.currentState.getStateEvents(THREAD_PULL_REQUEST_EVENT_TYPE);
+  const cached = snapshots.get(room);
+  if (
+    cached !== undefined &&
+    cached.events.length === events.length &&
+    cached.events.every((event, index) => event === events[index])
+  ) {
+    return cached.pullRequests;
   }
-  return snapshot;
+  const pullRequests = readRoom(room);
+  snapshots.set(room, { events, pullRequests });
+  return pullRequests;
 }
 
+/** The subscription only tells React to read again; the read checks the room's state itself. */
 function subscribeTo(room: Room, notify: () => void): () => void {
   const state = room.currentState;
   const onEvent = (event: { getType(): string }) => {
-    if (event.getType() !== THREAD_PULL_REQUEST_EVENT_TYPE) return;
-    snapshots.delete(room);
-    notify();
+    if (event.getType() === THREAD_PULL_REQUEST_EVENT_TYPE) notify();
   };
   state.on(RoomStateEvent.Events, onEvent);
   return () => {
@@ -100,10 +108,8 @@ function subscribeTo(room: Room, notify: () => void): () => void {
 
 /** Every pull request link of a room, updated when a link event arrives. */
 export function useRoomPullRequests(room: Room): RoomPullRequests {
-  return useSyncExternalStore(
-    (notify) => subscribeTo(room, notify),
-    () => snapshotOf(room)
-  );
+  const subscribe = useCallback((notify: () => void) => subscribeTo(room, notify), [room]);
+  return useSyncExternalStore(subscribe, () => snapshotOf(room));
 }
 
 /** The pull requests of one thread in the order they were set; the same empty array when it has none. */
