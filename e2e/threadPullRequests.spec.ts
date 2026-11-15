@@ -23,7 +23,8 @@ import {
 // thread's card in the Compact view shows a chip per pull request, two at most (one on a phone) and
 // the count of the rest; a click on a chip opens the thread and the pull request in the side
 // panel; the strip under the room header has the thread's chips as buttons, the panel's pressed;
-// and a link written or cleared while the room is open shows on its card at once.
+// and a link written or cleared while the room is open shows on its card at once, also after a
+// gap in the room's sync.
 // Set MRPR_SHOTS=<directory> to save the screenshots of the pull request.
 
 const LINK_EVENT = 'com.mindroom.thread.pull_request';
@@ -648,7 +649,9 @@ test("a link written after a gap in the room's sync still shows on its card", as
   await expect(chips).toHaveCount(0);
 
   // The page falls behind by more than a sync answer carries (20 events a room), as after a
-  // laptop's sleep: its next answer is limited, and the SDK replaces the room's current state.
+  // laptop's sleep: its next answer is limited, and the SDK resets the room's live timeline. The
+  // reset keeps the room's `currentState` object (`EventTimeline.forkLive`), so the links' listener
+  // on it must keep hearing new links.
   const answered = sync.hold();
   const deployLog = await sendRoomMessage(HOMESERVER, agent.accessToken, roomId, {
     msgtype: 'm.text',
