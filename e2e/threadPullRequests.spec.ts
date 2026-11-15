@@ -470,7 +470,9 @@ const openRoom = async (page: Page) => {
 const shot = async (page: Page, name: string) => {
   const directory = process.env.MRPR_SHOTS;
   if (!directory) return;
-  // No hover or tooltip in the picture.
+  // A new session's "Catching up..." pill over the room goes with its next sync; no hover or
+  // tooltip either.
+  await expect(page.getByText(/^Catching up/)).toHaveCount(0, { timeout: 60_000 });
   await page.mouse.move(0, 0);
   await page.screenshot({ path: join(directory, `${name}.png`) });
 };
