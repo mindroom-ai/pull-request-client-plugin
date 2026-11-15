@@ -1478,8 +1478,13 @@ button.mrpr-timeline-row:hover .mrpr-timeline-title {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+/* A long repository name ends in an ellipsis, so it cannot crowd a phone card's row; the chip's
+   title has the whole name. */
 .mrpr-chip-repo {
+  overflow: hidden;
+  max-inline-size: 12ch;
   color: var(--pr-muted);
+  text-overflow: ellipsis;
 }
 .mrpr-chip-selected {
   border-color: var(--pr-primary);
