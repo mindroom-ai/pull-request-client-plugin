@@ -1479,7 +1479,7 @@ button.mrpr-timeline-row:hover .mrpr-timeline-title {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-/* A chip's icons scale with its text: 12px beside the 11px text the chip used to have. */
+/* A chip's icons scale with its text, a little taller than it (1.1em). */
 .mrpr-chip .mrpr-icon {
   inline-size: 1.1em;
   block-size: 1.1em;
