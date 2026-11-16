@@ -333,7 +333,8 @@ const THREADS = {
       ['agent', 'Merged the rate limit per token and the changelog; closed the limit per IP.'],
       ['lead', 'Thanks. I will tag the release after lunch.'],
     ],
-    pulls: [PULLS.rateLimit, PULLS.changelog, PULLS.ipRateLimit],
+    // A merged and a closed pull request show on the card, in their colors.
+    pulls: [PULLS.rateLimit, PULLS.ipRateLimit, PULLS.changelog],
   },
   checkout: {
     topic: 'Checkout test fails on CI since Tuesday',

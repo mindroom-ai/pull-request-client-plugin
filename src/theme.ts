@@ -3,7 +3,8 @@ import { color, config } from 'folds';
 
 /**
  * The variables `styles.css` draws with, from the app's theme tokens, so the card and the panel
- * follow the light and dark themes. Set on the root element of each of them.
+ * follow the light and dark themes. Set on the root element of each of them. A pull request's
+ * state is the exception: GitHub's green, red, purple and gray, the same in every theme.
  */
 export function pluginRootStyle(): CSSProperties {
   return {
@@ -15,10 +16,10 @@ export function pluginRootStyle(): CSSProperties {
     '--pr-added': color.Success.Main,
     '--pr-removed': color.Critical.Main,
     '--pr-warning': color.Warning.Main,
-    '--pr-open': color.Success.Main,
-    '--pr-closed': color.Critical.Main,
-    '--pr-merged': color.Primary.Main,
-    '--pr-draft': color.SurfaceVariant.OnContainer,
+    '--pr-open': '#2da44e',
+    '--pr-closed': '#da3633',
+    '--pr-merged': '#8957e5',
+    '--pr-draft': '#848d97',
     '--pr-primary': color.Primary.Main,
     '--pr-font-sans': config.font.Inter,
     '--pr-font-mono': 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',

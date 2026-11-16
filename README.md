@@ -9,6 +9,8 @@ A [MindRoom Chat](https://github.com/mindroom-ai/mindroom-chat) client plugin fo
 - Timeline: the opening, each commit, each verdict, the review threads, the comments and the merge or close, in time order; choosing a commit shows its diff in the Code tab.
 - Code: the changed files as a tree beside their diffs, in T3 Code's file order, with the review threads at their lines (and those not on the diff above it), a commit selector, viewed marks kept in the browser, and controls to hide test files and whitespace changes, show the diffs split or stacked, wrap lines, and collapse or expand all files.
 
+A pull request's state has GitHub's colors, the same in every theme, wherever it shows: green for open, purple for merged, red for closed and gray for a draft.
+
 The card and most of the panel are ported from [T3 Code](https://github.com/pingdotgg/t3code) (MIT, see [NOTICE](NOTICE)); each ported file names its T3 Code source in its first line.
 
 ## Pull requests of a thread
