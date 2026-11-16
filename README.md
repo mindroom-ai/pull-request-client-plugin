@@ -34,8 +34,8 @@ A pointer that rests on a chip for 150 ms, on a card or in the strip, opens a ca
 - the head and base branches, with a warning when the branch conflicts with its base or is behind it
 - the lines, files, commits and comments
 - the checks' summary, when the chip shows their mark (an open pull request, with a token)
-- each reviewer's latest verdict, and the reviewers and teams still asked for a review, six at most and the count of the rest, with a token
-- the first five labels and the count of the rest
+- each reviewer's latest verdict, and the reviewers and teams still asked for a review, in one line: an avatar with the verdict on its corner as in the panel, six at most and the count of the rest, with a token
+- the first five labels, each cut to one short line, and the count of the rest
 - a note that a click opens the pull request in the side panel, when it does
 
 Until GitHub sent the pull request, the card shows the repository, the number and that it loads; when GitHub refused, why. It only reads: it takes no pointer and no focus, and closes when the pointer leaves, on a click and on Escape. It opens below the chip, or above it when the chip is in the lower half of the window, and stays inside the window as its content arrives.
@@ -87,7 +87,7 @@ The end-to-end spec `e2e/threadPullRequests.spec.ts` runs in the client's Playwr
 E2E_PLUGIN_DIRS=/path/to/pull-request-client-plugin MINDROOM_CLIENT_PLUGINS=/path/to/pull-request-client-plugin just e2e-slot 3 --preview npx playwright test --project=pull-request-client-plugin
 ```
 
-The page answers GitHub's API itself, so no request leaves the test. With `MRPR_SHOTS=<directory>` (an absolute one: the run's working directory is the slot's snapshot), it saves screenshots of a thread's pull requests: the Compact view in the light and dark themes, the hover card of a chip on a card and of one in the strip in both themes, an open thread with its strip and the panel, and the Compact view on a phone; and of a thread's branch on its card and in the strip of the open thread.
+The page answers GitHub's API itself, so no request leaves the test. With `MRPR_SHOTS=<directory>` (an absolute one: the run's working directory is the slot's snapshot), it saves screenshots of a thread's pull requests: the Compact view in the light and dark themes, the hover card of a chip on a card and of one in the strip in both themes, a hover card with six reviewers and five labels, an open thread with its strip and the panel, and the Compact view on a phone; and of a thread's branch on its card and in the strip of the open thread.
 
 ## GitHub token
 

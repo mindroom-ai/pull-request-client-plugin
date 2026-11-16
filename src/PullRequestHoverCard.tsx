@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useState } from 'react';
 import { config, Portal, useTooltipContainer } from 'folds';
 import { usePluginTranslation } from '@mindroom/client-sdk/core';
-import { CircleDashed, TriangleAlert } from 'lucide-react';
+import { TriangleAlert } from 'lucide-react';
 import {
   checksState,
   joinReviewers,
@@ -15,16 +15,14 @@ import type { PullRequest, PullRequestCheck, PullRequestRef } from './github';
 import { useGitHubErrorMessage } from './GitHubErrorState';
 import { hoverCardPlacement, splitOverflow } from './hoverCard.logic';
 import {
-  PullRequestActorAvatar,
   PullRequestActorLabel,
   PullRequestDiffStat,
   PullRequestLabelChip,
   PullRequestMetaLine,
-  PullRequestReviewOutcomeIcon,
+  PullRequestReviewerAvatar,
   pullRequestChecksStatePresentation,
   RelativeTime,
   resolvePullRequestState,
-  usePullRequestReviewOutcomeLabel,
 } from './presentation';
 import { useReviews } from './queries';
 import { pluginRootStyle } from './theme';
@@ -326,7 +324,6 @@ function ChecksRow({ items }: { items: PullRequestCheck[] | undefined }) {
  */
 function ReviewsRow({ pullRequest, pr }: { pullRequest: PullRequestRef; pr: PullRequest }) {
   const t = usePluginTranslation('pull-requests');
-  const outcomeLabel = usePullRequestReviewOutcomeLabel();
   const { token } = useGitHubToken();
   const reviews = useReviews(pullRequest, token !== undefined);
   if (token === undefined || reviews.isError) return null;
@@ -353,26 +350,11 @@ function ReviewsRow({ pullRequest, pr }: { pullRequest: PullRequestRef; pr: Pull
         typeof entry === 'string' ? (
           <PullRequestLabelChip key={`team:${entry}`} label={{ name: entry, color: null }} />
         ) : (
-          <span key={entry.key} className="mrpr-hover-reviewer">
-            <PullRequestActorAvatar actor={entry.actor} />
-            <span className="mrpr-truncate mrpr-actor-login">
-              {entry.actor?.login ?? t('ghost')}
-            </span>
-            {entry.outcome ? (
-              <>
-                <PullRequestReviewOutcomeIcon
-                  outcome={entry.outcome}
-                  className={entry.stale ? 'mrpr-hover-stale' : ''}
-                />
-                <span className="mrpr-sr-only">{outcomeLabel(entry.outcome, entry.stale)}</span>
-              </>
-            ) : (
-              <>
-                <CircleDashed aria-hidden className="mrpr-icon mrpr-tone-muted" />
-                <span className="mrpr-sr-only">{t('hoverCard.awaitingReview')}</span>
-              </>
-            )}
-          </span>
+          <PullRequestReviewerAvatar
+            key={entry.key}
+            reviewer={entry}
+            pending={t('hoverCard.awaitingReview')}
+          />
         )
       )}
       {more > 0 ? (

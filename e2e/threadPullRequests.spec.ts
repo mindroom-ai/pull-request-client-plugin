@@ -54,7 +54,7 @@ type Pull = {
   labels?: string[];
   approvedBy?: string;
   /** Asked for a review that has not come yet. */
-  reviewer?: string;
+  reviewers?: string[];
   comment?: { author: string; body: string };
 };
 
@@ -69,7 +69,7 @@ const PULLS = {
     author: 'acme-builder',
     body: 'Moves the session store from Postgres to Redis behind the `SessionStore` interface.',
     labels: ['backend', 'performance'],
-    reviewer: 'platform-lead',
+    reviewers: ['platform-lead'],
     comment: {
       author: 'platform-lead',
       body: 'Keep the Postgres fallback until the cache is warm after a deploy.',
@@ -107,7 +107,16 @@ const PULLS = {
     branch: 'checkout-test-clock',
     author: 'acme-builder',
     body: 'The checkout test read the wall clock, so a slow runner saw an expired card.',
-    labels: ['tests'],
+    // Enough reviewers and labels to fill its hover card.
+    labels: [
+      'tests',
+      'payments-and-billing',
+      'continuous-integration',
+      'flaky-test-investigation',
+      'needs-backport-to-release',
+    ],
+    reviewers: [1, 2, 3, 4, 5].map((index) => `checkout-payments-reviewer-${index}`),
+    approvedBy: 'checkout-payments-reviewer-lead',
   },
   rateLimit: {
     repo: 'api',
@@ -175,7 +184,7 @@ const apiPull = (pull: Pull) => {
     body: pull.body,
     user: gitHubUser(pull.author),
     labels: (pull.labels ?? []).map((name) => ({ name, color: '0e8a16' })),
-    requested_reviewers: pull.reviewer ? [gitHubUser(pull.reviewer)] : [],
+    requested_reviewers: (pull.reviewers ?? []).map(gitHubUser),
     requested_teams: [],
     mergeable_state: done ? null : 'clean',
     auto_merge: null,
@@ -662,8 +671,8 @@ test("a chip's hover card shows its pull request, on a card and in the strip", a
   await expectChips(buttons, [sessionStore, tokenEndpoint]);
   await buttons.first().hover();
   await expect(hoverCard(page)).toContainText(sessionStore.title);
-  await expect(hoverCard(page).locator('.mrpr-hover-reviewer')).toContainText(
-    PULLS.sessionStore.reviewer
+  await expect(hoverCard(page).locator('.mrpr-hover-reviews')).toContainText(
+    PULLS.sessionStore.reviewers[0]
   );
   // The panel already shows this chip's pull request, so its card offers no click.
   await expect(buttons.first()).toHaveAttribute('aria-pressed', 'true');
@@ -672,6 +681,68 @@ test("a chip's hover card shows its pull request, on a card and in the strip", a
   await shotBothThemes(page, 'hover-strip');
   expect(unanswered).toEqual([]);
   expect(warnings).toEqual([]);
+});
+
+test('a hover card as tall as the room by its chip keeps its rows apart', async ({ page }) => {
+  test.setTimeout(4 * 60_000);
+  const unanswered = await stubGitHub(page);
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await openRoom(page);
+  const chip = cardChips(page, roots.checkout).first();
+  await expectChips(cardChips(page, roots.checkout), THREADS.checkout.pulls);
+  // Near the window's middle, the card has about half the window's height to fill.
+  const at = await chip.boundingBox();
+  if (!at) throw new Error('No box for the chip');
+  expect(Math.abs(at.y + at.height / 2 - 360)).toBeLessThan(72);
+
+  await chip.hover();
+  // The sixth reviewer, whose verdict comes last.
+  await expect(hoverCard(page).locator('.mrpr-hover-reviews')).toContainText(
+    PULLS.checkoutClock.approvedBy
+  );
+  // Each row as far as it and its parts reach: a row squeezed below its content's height lets its
+  // parts reach over the next row.
+  const boxes = await hoverCard(page).evaluate((element) => {
+    const box = (selector: string) => {
+      const found = selector === 'card' ? element : element.querySelector(selector);
+      if (!found) throw new Error(`No ${selector} in the hover card`);
+      const parts = [found, ...(selector === 'card' ? [] : found.children)].map((part) =>
+        part.getBoundingClientRect()
+      );
+      return {
+        selector,
+        top: Math.min(...parts.map((part) => part.top)),
+        bottom: Math.max(...parts.map((part) => part.bottom)),
+        left: Math.min(...parts.map((part) => part.left)),
+        right: Math.max(...parts.map((part) => part.right)),
+      };
+    };
+    return {
+      card: box('card'),
+      rows: [box('.mrpr-hover-reviews'), box('.mrpr-hover-labels'), box('.mrpr-hover-hint')],
+    };
+  });
+  for (const row of boxes.rows) {
+    expect(row.top, `${row.selector} starts inside the card`).toBeGreaterThanOrEqual(
+      boxes.card.top
+    );
+    expect(row.bottom, `${row.selector} ends inside the card`).toBeLessThanOrEqual(
+      boxes.card.bottom
+    );
+    expect(row.left).toBeGreaterThanOrEqual(boxes.card.left);
+    expect(row.right).toBeLessThanOrEqual(boxes.card.right);
+  }
+  for (const [above, below] of [
+    [boxes.rows[0], boxes.rows[1]],
+    [boxes.rows[1], boxes.rows[2]],
+  ]) {
+    expect(above.bottom, `${above.selector} ends above ${below.selector}`).toBeLessThanOrEqual(
+      below.top
+    );
+  }
+  await expectBeside(page, chip);
+  await shot(page, 'hover-card-many-reviewers', { keepPointer: true });
+  expect(unanswered).toEqual([]);
 });
 
 test('a link written or cleared while the room is open shows on its card at once', async ({

@@ -19,12 +19,10 @@ import { Menu, PopOut, useMarkdownHtml } from '@mindroom/client-sdk/ui';
 import type { Paged, PullRequest, PullRequestRef, Review } from '../github';
 import { GitHubErrorState } from '../GitHubErrorState';
 import {
-  PullRequestActorAvatar,
   PullRequestCheckStatusIcon,
   PullRequestCheckStatusLabel,
   PullRequestLabelChip,
-  PullRequestReviewOutcomeAvatarBadge,
-  pullRequestReviewOutcomeRingClassName,
+  PullRequestReviewerAvatar,
   usePullRequestReviewOutcomeLabel,
 } from '../presentation';
 import { useChecks, useConversationComments, useReviewComments, useReviews } from '../queries';
@@ -147,27 +145,11 @@ function ReviewersRow({
                   : login;
               const label = entry.outcome ? outcomeLabel(entry.outcome, entry.stale) : null;
               return (
-                <span
+                <PullRequestReviewerAvatar
                   key={entry.key}
-                  className={`mrpr-reviewer${
-                    entry.outcome
-                      ? ` ${pullRequestReviewOutcomeRingClassName(entry.outcome, entry.stale)}`
-                      : ''
-                  }`}
+                  reviewer={entry}
                   title={label ? t('summary.reviewerTitle', { name, outcome: label }) : name}
-                >
-                  <PullRequestActorAvatar actor={entry.actor} />
-                  <span className="mrpr-sr-only">{login}</span>
-                  {entry.outcome ? (
-                    <>
-                      <PullRequestReviewOutcomeAvatarBadge
-                        outcome={entry.outcome}
-                        stale={entry.stale}
-                      />
-                      <span className="mrpr-sr-only">{label}</span>
-                    </>
-                  ) : null}
-                </span>
+                />
               );
             })}
           </span>

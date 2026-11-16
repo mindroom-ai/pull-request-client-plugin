@@ -15,7 +15,12 @@ import {
   LoaderCircle,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { isWorkflowApprovalCheck, type ChecksState, type Outcome } from './detail/detail.logic';
+import {
+  isWorkflowApprovalCheck,
+  type ChecksState,
+  type Outcome,
+  type Reviewer,
+} from './detail/detail.logic';
 import type { Actor, CheckStatus, PullRequest, PullRequestCheck } from './github';
 
 export const PULL_REQUEST_STATE_PRESENTATION = {
@@ -295,6 +300,42 @@ export function PullRequestReviewOutcomeAvatarBadge({
         stale ? ' mrpr-outcome-badge-stale' : ''
       }`}
     />
+  );
+}
+
+/**
+ * A reviewer as the panel and a hover card show them: their avatar, ringed and badged with their
+ * verdict, and for screen readers their login and the verdict, or `pending` without one.
+ */
+export function PullRequestReviewerAvatar({
+  reviewer: { actor, outcome, stale },
+  title,
+  pending,
+}: {
+  reviewer: Reviewer;
+  title?: string;
+  pending?: string;
+}) {
+  const t = usePluginTranslation('pull-requests');
+  const outcomeLabel = usePullRequestReviewOutcomeLabel();
+  return (
+    <span
+      className={`mrpr-reviewer${
+        outcome ? ` ${pullRequestReviewOutcomeRingClassName(outcome, stale)}` : ''
+      }`}
+      title={title}
+    >
+      <PullRequestActorAvatar actor={actor} />
+      <span className="mrpr-sr-only">{actor?.login ?? t('ghost')}</span>
+      {outcome ? (
+        <>
+          <PullRequestReviewOutcomeAvatarBadge outcome={outcome} stale={stale} />
+          <span className="mrpr-sr-only">{outcomeLabel(outcome, stale)}</span>
+        </>
+      ) : pending ? (
+        <span className="mrpr-sr-only">{pending}</span>
+      ) : null}
+    </span>
   );
 }
 

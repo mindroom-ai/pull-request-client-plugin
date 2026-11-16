@@ -349,6 +349,13 @@ const openCard = async (props: Partial<ComponentProps<typeof PullRequestChip>> =
 
 const text = (element: Element | null | undefined) => element?.textContent ?? '';
 
+/** The reviewers a card shows: their avatars, each with the login for screen readers first. */
+const reviewers = (tooltip: Element) => [
+  ...tooltip.querySelectorAll('.mrpr-hover-reviews .mrpr-reviewer'),
+];
+const reviewer = (tooltip: Element, login: string) =>
+  reviewers(tooltip).find((entry) => text(entry.querySelector('.mrpr-sr-only')) === login);
+
 describe('PullRequestChip hover card', () => {
   it('opens 150 ms after a mouse comes to rest on the chip, not before', async () => {
     serve(pull());
@@ -522,15 +529,15 @@ describe('PullRequestChip hover card', () => {
     expect(text(row('size'))).toContain('5 comments');
     await vi.waitFor(() => expect(text(row('checks'))).toBe('1 of 2 failing'));
     expect(row('checks')?.querySelector('.mrpr-tone-failure')).not.toBeNull();
-    await vi.waitFor(() => expect(text(row('reviews'))).toContain('bob'));
-    // An avatar without an image shows the login's initial, so a reviewer is found by its login.
-    const reviewer = (login: string) =>
-      [...tooltip.querySelectorAll('.mrpr-hover-reviewer')].find(
-        (entry) => text(entry.querySelector('.mrpr-actor-login')) === login
-      );
-    expect(text(reviewer('bob'))).toContain('Approved');
-    expect(reviewer('bob')?.querySelector('.mrpr-tone-success')).not.toBeNull();
-    expect(text(reviewer('dee'))).toContain('Awaiting review');
+    await vi.waitFor(() => expect(reviewer(tooltip, 'bob')).toBeDefined());
+    // Each reviewer is an avatar with the verdict's glyph on its corner, in one line; the login
+    // and the verdict are there for screen readers.
+    expect(text(reviewer(tooltip, 'bob'))).toContain('Approved');
+    expect(
+      reviewer(tooltip, 'bob')?.querySelector('.mrpr-outcome-badge.mrpr-tone-success')
+    ).not.toBeNull();
+    expect(text(reviewer(tooltip, 'dee'))).toContain('Awaiting review');
+    expect(row('reviews')?.querySelector('.mrpr-actor-login')).toBeNull();
     expect(text(row('reviews'))).toContain('core');
     const labels = [...(row('labels')?.querySelectorAll('.mrpr-label') ?? [])].map(text);
     expect(labels).toEqual(['ui', 'chips', 'tests', 'docs', 'e2e']);
@@ -584,12 +591,8 @@ describe('PullRequestChip hover card', () => {
     saveToken();
     serve(full({ requested_reviewers: [user('bob')] }), [], [approval('bob')]);
     const { tooltip } = await openCard();
-    const bob = () =>
-      [...tooltip.querySelectorAll('.mrpr-hover-reviewer')].find(
-        (entry) => text(entry.querySelector('.mrpr-actor-login')) === 'bob'
-      );
-    await vi.waitFor(() => expect(text(bob())).toContain('Approved'));
-    expect(tooltip.querySelectorAll('.mrpr-hover-reviewer')).toHaveLength(1);
+    await vi.waitFor(() => expect(text(reviewer(tooltip, 'bob'))).toContain('Approved'));
+    expect(reviewers(tooltip)).toHaveLength(1);
   });
 
   it('shows six reviewers at most, teams among them, and counts the rest', async () => {
@@ -598,9 +601,7 @@ describe('PullRequestChip hover card', () => {
     serve(full({ requested_reviewers: asked, requested_teams: [{ name: 'core' }] }));
     const { tooltip } = await openCard();
     const row = () => tooltip.querySelector('.mrpr-hover-reviews');
-    await vi.waitFor(() =>
-      expect(tooltip.querySelectorAll('.mrpr-hover-reviewer')).toHaveLength(6)
-    );
+    await vi.waitFor(() => expect(reviewers(tooltip)).toHaveLength(6));
     expect(text(row())).toContain('+2');
     expect(text(row())).not.toContain('core');
   });
