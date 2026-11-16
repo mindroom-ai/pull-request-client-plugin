@@ -38,7 +38,15 @@ const HEAD = 'headsha';
 const PR_URL = 'https://github.com/mindroom-ai/mindroom-chat/pull/200';
 const UUID = '11111111-2222-3333-4444-555555555555';
 const ATTACHMENT = `https://github.com/user-attachments/assets/${UUID}`;
-const SIGNED = `https://private-user-images.githubusercontent.com/1/2-${UUID}.png?jwt=x&v=1`;
+// A signed address whose `jwt` is valid until 2100, as GitHub mints them, new for each answer.
+const signed = (key: string) => {
+  const payload = btoa(JSON.stringify({ exp: 4_102_444_800, key }))
+    .replace(/=+$/u, '')
+    .replace(/\+/gu, '-')
+    .replace(/\//gu, '_');
+  return `https://private-user-images.githubusercontent.com/1/2-${UUID}.png?jwt=e30.${payload}.sig&v=1`;
+};
+const SIGNED = signed('first');
 const CAMO = 'https://camo.githubusercontent.com/abc/def';
 // The signed address as GitHub's HTML writes it, with its `&` escaped.
 const SIGNED_HTML = SIGNED.replace('&', '&amp;');
@@ -290,15 +298,14 @@ describe('SummaryTab', () => {
   });
 
   it('fetches the pull request again, once a minute at most, when a signed image fails', async () => {
-    serve({
-      pull: {
-        title: 'Shots',
-        state: 'open',
-        body: `![Before](${ATTACHMENT})`,
-        body_html: `<p><img src="${SIGNED_HTML}" alt="Before"></p>`,
-        head: { sha: HEAD },
-      },
-    });
+    const answer = {
+      title: 'Shots',
+      state: 'open',
+      body: `![Before](${ATTACHMENT})`,
+      body_html: `<p><img src="${SIGNED_HTML}" alt="Before"></p>`,
+      head: { sha: HEAD },
+    };
+    serve({ pull: answer });
     const client = new QueryClient({ defaultOptions: { queries: { retryDelay: 0 } } });
     const view = await renderPluginComponent(
       <QueryClientProvider client={client}>
@@ -306,8 +313,14 @@ describe('SummaryTab', () => {
       </QueryClientProvider>,
       { id: 'pull-requests', plugin }
     );
+    // GitHub signs the attachment anew; the failed address, valid by the clock, is not kept.
+    const second = signed('second');
+    answer.body_html = `<p><img src="${second.replace('&', '&amp;')}" alt="Before"></p>`;
     await fail(await view.findByAltText('Before'));
     await vi.waitFor(() => expect(calls('/pulls/200')).toBe(2));
+    await vi.waitFor(async () =>
+      expect((await view.findByAltText('Before')).getAttribute('src')).toBe(second)
+    );
     await fail(await view.findByAltText('Before'));
     await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
     expect(calls('/pulls/200')).toBe(2);

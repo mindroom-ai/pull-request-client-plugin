@@ -4,7 +4,7 @@
 // really broken must not ask GitHub over and over.
 import { useEffect, useState } from 'react';
 import { useQueryClient, type Query } from '@tanstack/react-query';
-import type { ImageSources } from '../images';
+import { forgetSigned, type ImageSources } from '../images';
 
 const SIGNED = 'https://private-user-images.githubusercontent.com/';
 const MINUTE = 60_000;
@@ -37,6 +37,7 @@ export function useRefetchOnExpiredImage(images: ImageSources) {
       const last = lastRefetch.get(query);
       if (last !== undefined && Date.now() - last < MINUTE) return;
       lastRefetch.set(query, Date.now());
+      forgetSigned(image.src);
       void queryClient.refetchQueries({ queryKey: query.queryKey, exact: true });
     };
     // An image's error does not bubble, but it passes its ancestors on the way down.

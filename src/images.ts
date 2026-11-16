@@ -88,6 +88,17 @@ function stableSigned(uuid: string, url: URL): string {
   return url.href;
 }
 
+/**
+ * Forgets the signed address handed out for this image's attachment, which failed to load: the
+ * next answer's address is handed out instead, even when the device's clock deems the failed one
+ * valid.
+ */
+export function forgetSigned(src: string): void {
+  const url = httpsUrl(src);
+  const uuid = url?.hostname === SIGNED_HOST ? lastUuid(url.pathname) : undefined;
+  if (uuid) handedOut.delete(uuid);
+}
+
 /** The image addresses in GitHub's HTML of a body (`body_html`); none when it sent none. */
 export function imageSources(html: unknown): ImageSources {
   const sources: ImageSources = { byUrl: {}, byAttachment: {} };
