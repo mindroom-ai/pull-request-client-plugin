@@ -47,6 +47,8 @@ Run `npm install` here first. `.npmrc` sets `legacy-peer-deps`, so that the Pier
 
 ## Tests and types
 
+Every pull request and every push to `main` runs the unit tests, the type check and Prettier against the client's `main` (`.github/workflows/ci.yml`).
+
 The tests run with the client's vitest, from the client's checkout:
 
 ```sh

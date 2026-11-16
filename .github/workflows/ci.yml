@@ -1,0 +1,53 @@
+# Every push to main and every pull request: the plugin's unit tests, type check and formatting
+# against MindRoom Chat's main, the app whose releases build this plugin in.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to the same branch or pull request replaces a run that is still going.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Unit tests, type check and formatting
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      # The app's checkout at the plugin's top, where the plugin's configs look for it
+      # (MindRoom Chat docs/development.md, "A client plugin in its own repository").
+      - uses: actions/checkout@v7
+        with:
+          repository: mindroom-ai/mindroom-chat
+          path: .mindroom-chat
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Install the app's dependencies
+        working-directory: .mindroom-chat
+        run: npm ci
+      - name: Install the plugin's dependencies
+        run: npm ci
+      # Each check runs even when one before it failed, so one run reports all of them.
+      - name: Unit tests
+        working-directory: .mindroom-chat
+        env:
+          MINDROOM_CLIENT_PLUGINS: ${{ github.workspace }}
+          MINDROOM_CLIENT_PLUGIN_TESTS_ONLY: '1'
+        # The filter keeps the run to the plugin's own tests.
+        run: npx vitest run "$MINDROOM_CLIENT_PLUGINS/src"
+      - name: Type check
+        if: ${{ !cancelled() }}
+        run: npm run typecheck
+      - name: Formatting
+        if: ${{ !cancelled() }}
+        run: .mindroom-chat/node_modules/.bin/prettier --check src e2e README.md package.json tsconfig.json
