@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act } from 'react-dom/test-utils';
 import { renderPluginComponent } from '@mindroom/client-sdk/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -40,7 +41,12 @@ const thread = (id: number, path: string, line: number | null = id): ReviewThrea
 });
 
 const show = (threads: ReviewThread[]) =>
-  renderPluginComponent(<OffDiffThreads threads={threads} />, { id: 'pull-requests', plugin });
+  renderPluginComponent(
+    <QueryClientProvider client={new QueryClient()}>
+      <OffDiffThreads threads={threads} />
+    </QueryClientProvider>,
+    { id: 'pull-requests', plugin }
+  );
 
 const click = (element: HTMLElement) => act(async () => element.click());
 

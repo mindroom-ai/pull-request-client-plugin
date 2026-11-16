@@ -33,6 +33,7 @@ import { buildReviewThreads } from '../reviewThreads';
 import { pluginRootStyle } from '../theme';
 import { MenuOption } from './CommitSelector';
 import { ConversationCard } from './ConversationCards';
+import { useRefetchOnExpiredImage } from './expiredImages';
 import { TruncatedNote } from './TruncatedNote';
 import {
   conversationItems,
@@ -233,9 +234,12 @@ function Description({ body, images }: { body: string; images: ImageSources }) {
   // One function per answer of GitHub's: a new one would sanitize the body again on each render.
   const imageSource = useMemo(() => imageResolver(images), [images]);
   const html = useMarkdownHtml(body, { imageSource });
+  const imagesRef = useRefetchOnExpiredImage(images);
   if (body.trim() === '') return <p className="mrpr-status">{t('noDescription')}</p>;
   if (html === undefined) return null;
-  return <div className="mrpr-description" dangerouslySetInnerHTML={{ __html: html }} />;
+  return (
+    <div ref={imagesRef} className="mrpr-description" dangerouslySetInnerHTML={{ __html: html }} />
+  );
 }
 
 /** The checks of the head commit, one row each; loaded once the section is open. */

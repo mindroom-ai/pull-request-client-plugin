@@ -7,6 +7,7 @@ import { usePluginTranslation } from '@mindroom/client-sdk/core';
 import { useMarkdownHtml } from '@mindroom/client-sdk/ui';
 import { imageResolver, type ImageSources } from '../images';
 import { visibleBody } from './detail.logic';
+import { useRefetchOnExpiredImage } from './expiredImages';
 
 const CLAMP = 240;
 
@@ -17,6 +18,7 @@ export function CommentBody({ body, images }: { body: string; images: ImageSourc
   const imageSource = useMemo(() => imageResolver(images), [images]);
   // The plain text shows until the app's Markdown renderer has loaded.
   const html = useMarkdownHtml(visible ?? '', { imageSource });
+  const imagesRef = useRefetchOnExpiredImage(images);
   const [expanded, setExpanded] = useState(false);
   const [overflowing, setOverflowing] = useState(false);
   const clip = useRef<HTMLDivElement>(null);
@@ -46,7 +48,11 @@ export function CommentBody({ body, images }: { body: string; images: ImageSourc
           <div className="mrpr-markdown mrpr-comment-plain">{visible}</div>
         ) : (
           // The app's renderer sanitizes this HTML under its own policy.
-          <div className="mrpr-markdown" dangerouslySetInnerHTML={{ __html: html }} />
+          <div
+            ref={imagesRef}
+            className="mrpr-markdown"
+            dangerouslySetInnerHTML={{ __html: html }}
+          />
         )}
         {overflowing && !expanded ? <div aria-hidden className="mrpr-comment-fade" /> : null}
       </div>

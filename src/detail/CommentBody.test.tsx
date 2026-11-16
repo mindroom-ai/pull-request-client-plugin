@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act } from 'react-dom/test-utils';
 import { renderPluginComponent } from '@mindroom/client-sdk/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -23,8 +24,15 @@ vi.mock('@mindroom/client-sdk/ui', async (importOriginal) => {
   };
 });
 
-const render = (ui: React.ReactElement) =>
-  renderPluginComponent(ui, { id: 'pull-requests', plugin });
+// The body asks the app's query client for the query to fetch again when a signed image fails.
+const render = async (ui: React.ReactElement) => {
+  const client = new QueryClient();
+  const inClient = (body: React.ReactElement) => (
+    <QueryClientProvider client={client}>{body}</QueryClientProvider>
+  );
+  const view = await renderPluginComponent(inClient(ui), { id: 'pull-requests', plugin });
+  return { ...view, rerender: (next: React.ReactElement) => view.rerender(inClient(next)) };
+};
 
 const heights = (height: number) =>
   vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(height);

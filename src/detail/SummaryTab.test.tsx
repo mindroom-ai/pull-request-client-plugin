@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PullRequest, PullRequestRef } from '../github';
 import { imageSources } from '../images';
 import plugin from '../index';
+import { usePullRequest } from '../queries';
 import { trapOptions } from '../testing/focusTrapStandIn';
 import { SummaryTab } from './SummaryTab';
 
@@ -114,6 +115,7 @@ const respond = (body: unknown, status = 200) =>
   });
 
 type Parts = {
+  pull?: unknown;
   reviews?: unknown[] | Response;
   comments?: unknown[] | Response;
   reviewComments?: unknown[] | Response;
@@ -130,6 +132,7 @@ const serve = (parts: Parts = {}) =>
       return respond({ check_runs: parts.checks ?? [], total_count: parts.checksTotal });
     }
     if (url.includes('/status?')) return respond({ statuses: [] });
+    if (url.endsWith('/pulls/200')) return respond(parts.pull ?? {});
     if (url.includes('/pulls/200/reviews')) return answer(parts.reviews);
     if (url.includes('/pulls/200/comments')) return answer(parts.reviewComments);
     if (url.includes('/issues/200/comments')) return answer(parts.comments);
@@ -147,6 +150,15 @@ const show = async (pullRequest: PullRequest = pull()) => {
 };
 
 const click = (element: HTMLElement) => act(async () => element.click());
+
+// The tab as the panel shows it, with the pull request out of its query.
+function FetchedSummary() {
+  const query = usePullRequest(REF);
+  return query.data ? <SummaryTab pullRequest={query.data} pullRequestRef={REF} /> : null;
+}
+
+const calls = (path: string) => fetchMock.mock.calls.filter(([url]) => url.endsWith(path)).length;
+const fail = (image: Element) => act(async () => void image.dispatchEvent(new Event('error')));
 
 beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -275,6 +287,54 @@ describe('SummaryTab', () => {
     });
     const view = await show();
     expect((await view.findByAltText('shot')).getAttribute('src')).toBe(SIGNED);
+  });
+
+  it('fetches the pull request again, once a minute at most, when a signed image fails', async () => {
+    serve({
+      pull: {
+        title: 'Shots',
+        state: 'open',
+        body: `![Before](${ATTACHMENT})`,
+        body_html: `<p><img src="${SIGNED_HTML}" alt="Before"></p>`,
+        head: { sha: HEAD },
+      },
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retryDelay: 0 } } });
+    const view = await renderPluginComponent(
+      <QueryClientProvider client={client}>
+        <FetchedSummary />
+      </QueryClientProvider>,
+      { id: 'pull-requests', plugin }
+    );
+    await fail(await view.findByAltText('Before'));
+    await vi.waitFor(() => expect(calls('/pulls/200')).toBe(2));
+    await fail(await view.findByAltText('Before'));
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(calls('/pulls/200')).toBe(2);
+    const now = Date.now();
+    const later = vi.spyOn(Date, 'now').mockReturnValue(now + 61_000);
+    await fail(await view.findByAltText('Before'));
+    await vi.waitFor(() => expect(calls('/pulls/200')).toBe(3));
+    later.mockRestore();
+  });
+
+  it("fetches a comment's list again when its signed image fails, not for another image", async () => {
+    serve({
+      comments: [
+        issueComment(1, 'ann', `![shot](${ATTACHMENT}) ![badge](https://img.example/b.svg)`, {
+          body_html: `<p><img src="${SIGNED_HTML}" alt="shot"> <img src="${CAMO}" data-canonical-src="https://img.example/b.svg"></p>`,
+        }),
+      ],
+    });
+    const view = await show();
+    await fail(await view.findByAltText('badge'));
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(calls('/issues/200/comments?per_page=100&page=1')).toBe(1);
+    await fail(await view.findByAltText('shot'));
+    await vi.waitFor(() => expect(calls('/issues/200/comments?per_page=100&page=1')).toBe(2));
+    await fail(await view.findByAltText('shot'));
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(calls('/issues/200/comments?per_page=100&page=1')).toBe(2);
   });
 
   it('says so when there is no description', async () => {
