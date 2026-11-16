@@ -13,11 +13,16 @@ import {
   RelativeTime,
 } from './presentation';
 import { usePullRequestStatus } from './pullRequestStatus';
+import { NO_FOCUS_REFETCH } from './queries';
 import { pluginRootStyle } from './theme';
 import { useThreadPullRequests, type ThreadWorktree } from './threadPullRequests';
 
 /** The most code points each side of a pull request's branches shows. */
 const BRANCH_MAX = 24;
+
+// A hover shows what GitHub answered a chip, however old: only a pull request it has no answer for
+// yet is asked for, so moving the pointer over cards spends none of the hourly limit.
+const ANSWERED_ONLY = { ...NO_FOCUS_REFETCH, refetchOnMount: false };
 
 export function ThreadDetails({ room, threadId }: ThreadDetailProps) {
   const { pullRequests, worktree } = useThreadPullRequests(room, threadId);
@@ -36,7 +41,7 @@ export function ThreadDetails({ room, threadId }: ThreadDetailProps) {
 function PullRequestDetails({ pullRequest }: { pullRequest: PullRequestRef }) {
   const t = usePluginTranslation('pull-requests');
   // The very ref the chip asks with: the same queries, so a chip that loaded leaves nothing to ask.
-  const { pr, state, checks } = usePullRequestStatus(pullRequest);
+  const { pr, state, checks } = usePullRequestStatus(pullRequest, ANSWERED_ONLY);
   const mark = checks && {
     ...pullRequestChecksStatePresentation(checks),
     label: t(`checksState.${checks}`),

@@ -99,6 +99,7 @@ beforeEach(() => {
   vi.stubGlobal('fetch', fetchMock);
 });
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -239,6 +240,33 @@ describe('ThreadDetails', () => {
     expect(view.getByText('Store sessions in Redis')).toBeTruthy();
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(client.isFetching()).toBe(0);
+    expect(fetchMock.mock.calls.length).toBe(asked);
+  });
+
+  it("asks GitHub nothing more on a hover after its chip's answer went stale", async () => {
+    saveToken();
+    serve({ 412: pull() }, [run('success')]);
+    const room = roomWith([{ number: 412 }]);
+    const client = newClient();
+    const card = await renderPluginComponent(
+      <QueryClientProvider client={client}>
+        <ThreadCardPullRequests room={room} threadId="$t1" />
+      </QueryClientProvider>,
+      { id: 'pull-requests', plugin }
+    );
+    await card.findByRole('img', { name: /: Open/ });
+    await answered(client, '/check-runs');
+    const asked = fetchMock.mock.calls.length;
+    // Past the two minutes the chip's answers stay fresh; only the clock is fake.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(Date.now() + 121_000);
+    for (let hover = 0; hover < 2; hover += 1) {
+      const { view } = await show(room, client);
+      expect(view.getByRole('img', { name: 'All checks have passed' })).toBeTruthy();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(client.isFetching()).toBe(0);
+      view.unmount();
+    }
     expect(fetchMock.mock.calls.length).toBe(asked);
   });
 });
