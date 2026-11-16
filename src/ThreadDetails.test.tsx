@@ -278,4 +278,40 @@ describe('ThreadDetails', () => {
     }
     expect(fetchMock.mock.calls.length).toBe(asked);
   });
+
+  it('asks nothing more on a hover after its chip was refused', async () => {
+    const refusals: [string, () => void, number][] = [
+      // A private pull request without a token, or a deleted one: GitHub says 404 and is not asked again.
+      ['notFound', () => serve({}), 1],
+      // A failed request is tried three times in all (`retry`), the test client without a delay.
+      [
+        'failed',
+        () => fetchMock.mockImplementation(async () => respond({ message: 'Oops' }, 502)),
+        3,
+      ],
+      ['network', () => fetchMock.mockRejectedValue(new TypeError('Failed to fetch')), 3],
+    ];
+    for (const [kind, refuse, tries] of refusals) {
+      fetchMock.mockReset();
+      refuse();
+      const room = roomWith([{ number: 412 }]);
+      const client = newClient();
+      const card = await renderPluginComponent(
+        <QueryClientProvider client={client}>
+          <ThreadCardPullRequests room={room} threadId="$t1" />
+        </QueryClientProvider>,
+        { id: 'pull-requests', plugin }
+      );
+      await answered(client, '/pulls/412');
+      expect([kind, fetchMock.mock.calls.length]).toEqual([kind, tries]);
+      for (let hover = 0; hover < 3; hover += 1) {
+        const { view } = await show(room, client);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        await vi.waitFor(() => expect(client.isFetching()).toBe(0));
+        view.unmount();
+      }
+      expect([kind, fetchMock.mock.calls.length]).toEqual([kind, tries]);
+      card.unmount();
+    }
+  });
 });

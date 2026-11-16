@@ -27,8 +27,12 @@ const keyOf = (ref: PullRequestRef | undefined, tokenSet: boolean) =>
   ['pull-requests', 'pr', ref?.owner, ref?.repo, ref?.number, tokenSet] as const;
 
 /** What a caller can change of a query's refetching: the chips leave out the refetch on window focus,
- * a thread's details also the one on mount. */
-export type RefetchOptions = { refetchOnWindowFocus?: boolean; refetchOnMount?: boolean };
+ * a thread's details also the one on mount, for an answer and for a refusal alike. */
+export type RefetchOptions = {
+  refetchOnWindowFocus?: boolean;
+  refetchOnMount?: boolean;
+  retryOnMount?: boolean;
+};
 
 // A chip asks again when it shows after its answer went stale, not when the tab regains focus:
 // every chip seen so far would ask at once, and without a token that spends the hourly limit.
