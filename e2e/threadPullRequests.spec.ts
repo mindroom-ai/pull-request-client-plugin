@@ -665,7 +665,9 @@ test("a chip's hover card shows its pull request, on a card and in the strip", a
   await expect(hoverCard(page).locator('.mrpr-hover-reviewer')).toContainText(
     PULLS.sessionStore.reviewer
   );
-  await expect(hoverCard(page)).toContainText('Click to open in the side panel');
+  // The panel already shows this chip's pull request, so its card offers no click.
+  await expect(buttons.first()).toHaveAttribute('aria-pressed', 'true');
+  await expect(hoverCard(page).locator('.mrpr-hover-hint')).toHaveCount(0);
   await expectBeside(page, buttons.first());
   await shotBothThemes(page, 'hover-strip');
   expect(unanswered).toEqual([]);
