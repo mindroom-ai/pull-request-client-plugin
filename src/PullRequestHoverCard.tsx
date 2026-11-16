@@ -31,8 +31,8 @@ const FINE_POINTER = '(hover: hover) and (pointer: fine)';
 /**
  * Whether the card of the chip `trigger` is open: from `HOVER_CARD_DELAY_MS` after a mouse came to
  * rest on it, or after the keyboard focused it (a `focusable` chip, a button), until the pointer
- * leaves, a click, Escape or the focus leaving. A screen that cannot hover with a fine pointer opens
- * none, and neither does a tap: browsers send a mouseenter with each tap.
+ * leaves, a click, a touch, Escape or the focus leaving. A mouse opens it only on a screen that
+ * hovers with a fine pointer, and a tap never does: browsers send a mouseenter with each tap.
  */
 export function useHoverCard(trigger: HTMLElement | null, focusable: boolean): boolean {
   const [open, setOpen] = useState(false);
@@ -40,24 +40,32 @@ export function useHoverCard(trigger: HTMLElement | null, focusable: boolean): b
     if (!trigger) return undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let touched = false;
-    const show = () => {
+    // Escape counts from when the card waits to open until it closes.
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') hide();
+    };
+    const show = (still: () => boolean) => {
       clearTimeout(timer);
-      timer = setTimeout(() => setOpen(true), HOVER_CARD_DELAY_MS);
+      document.addEventListener('keydown', onKeyDown);
+      timer = setTimeout(() => (still() ? setOpen(true) : hide()), HOVER_CARD_DELAY_MS);
     };
     const hide = () => {
       clearTimeout(timer);
+      document.removeEventListener('keydown', onKeyDown);
       setOpen(false);
     };
     // A tap sends its pointer events before the mouseenter it also sends.
     const onPointer = (event: PointerEvent) => {
       touched = event.pointerType === 'touch';
+      if (touched) hide();
     };
+    const byMouse = () => !touched && window.matchMedia?.(FINE_POINTER).matches === true;
     const onMouseEnter = () => {
-      if (!touched && window.matchMedia?.(FINE_POINTER).matches) show();
+      if (byMouse()) show(byMouse);
     };
-    // A click focuses a button without the focus ring; only the keyboard's focus shows the card.
+    // A click or a tap focuses a button without the focus ring; the keyboard's focus shows it.
     const onFocus = () => {
-      if (!touched && trigger.matches(':focus-visible')) show();
+      if (trigger.matches(':focus-visible')) show(() => true);
     };
     const listeners: [string, EventListener][] = [
       ['pointerenter', onPointer as EventListener],
@@ -75,17 +83,10 @@ export function useHoverCard(trigger: HTMLElement | null, focusable: boolean): b
     for (const [type, listener] of listeners) trigger.addEventListener(type, listener);
     return () => {
       clearTimeout(timer);
+      document.removeEventListener('keydown', onKeyDown);
       for (const [type, listener] of listeners) trigger.removeEventListener(type, listener);
     };
   }, [trigger, focusable]);
-  useEffect(() => {
-    if (!open) return undefined;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false);
-    };
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [open]);
   return open;
 }
 

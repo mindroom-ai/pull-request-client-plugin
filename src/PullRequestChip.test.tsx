@@ -325,6 +325,16 @@ const pointer = (fine: boolean) =>
 
 const hover = (chip: Element) => chip.dispatchEvent(new MouseEvent('mouseenter'));
 
+/** A finger that comes down on the chip. */
+const touch = (chip: Element) =>
+  chip.dispatchEvent(Object.assign(new MouseEvent('pointerdown'), { pointerType: 'touch' }));
+
+const escape = () =>
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+
+/** Waits past the card's delay. */
+const settle = () => new Promise((resolve) => setTimeout(resolve, 300));
+
 const card = () => document.querySelector<HTMLElement>('[role="tooltip"]');
 
 /** Hovers the chip once GitHub sent its pull request, and waits for the card. */
@@ -403,6 +413,66 @@ describe('PullRequestChip hover card', () => {
     await vi.waitFor(() => expect(card()).not.toBeNull());
     chip.blur();
     await vi.waitFor(() => expect(card()).toBeNull());
+  });
+
+  it('stays closed after Escape that came just after the keyboard focused the chip', async () => {
+    serve(pull());
+    const { chip } = await openCard({ onSelect: () => {} });
+    chip.focus();
+    escape();
+    await settle();
+    expect(card()).toBeNull();
+  });
+
+  it('opens for no Escape pressed while it waits to open', async () => {
+    serve(pull());
+    pointer(true);
+    const { view } = await show();
+    hover(await view.findByRole('img', { name: /: Open/ }));
+    escape();
+    await settle();
+    expect(card()).toBeNull();
+  });
+
+  it('opens for no touch that starts while it waits to open', async () => {
+    serve(pull());
+    pointer(true);
+    const { view } = await show();
+    const chip = await view.findByRole('img', { name: /: Open/ });
+    hover(chip);
+    touch(chip);
+    await settle();
+    expect(card()).toBeNull();
+  });
+
+  it('closes when a touch starts on the chip', async () => {
+    serve(pull());
+    const { chip } = await openCard();
+    touch(chip);
+    await vi.waitFor(() => expect(card()).toBeNull());
+  });
+
+  it('opens for no rest of a mouse that the screen can no longer hover with', async () => {
+    serve(pull());
+    pointer(true);
+    const { view } = await show();
+    hover(await view.findByRole('img', { name: /: Open/ }));
+    pointer(false);
+    await settle();
+    expect(card()).toBeNull();
+  });
+
+  it.each([
+    ['after a touch on it', true, true],
+    ['where the pointer cannot hover', false, false],
+  ])('opens on a strip chip that the keyboard focused %s', async (_, fine, touched) => {
+    serve(pull());
+    pointer(fine);
+    const { view } = await show({ onSelect: () => {} });
+    const chip = await view.findByRole('button', { name: /: Open/ });
+    if (touched) touch(chip);
+    chip.focus();
+    await vi.waitFor(() => expect(card()).not.toBeNull());
   });
 
   it('opens above a chip in the lower half of the window, held there by its bottom edge', async () => {
