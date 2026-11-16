@@ -415,6 +415,19 @@ describe('PullRequestChip hover card', () => {
     await vi.waitFor(() => expect(card()).toBeNull());
   });
 
+  it('opens for no focus without the focus ring, as a click or a tap gives', async () => {
+    serve(pull());
+    pointer(true);
+    const { view } = await show({ onSelect: () => {} });
+    const chip = await view.findByRole('button', { name: /: Open/ });
+    // jsdom matches :focus-visible on any focus; a browser does not on a click's or a tap's.
+    const matches = chip.matches.bind(chip);
+    chip.matches = (selector: string) => selector !== ':focus-visible' && matches(selector);
+    chip.focus();
+    await settle();
+    expect(card()).toBeNull();
+  });
+
   it('stays closed after Escape that came just after the keyboard focused the chip', async () => {
     serve(pull());
     const { chip } = await openCard({ onSelect: () => {} });
