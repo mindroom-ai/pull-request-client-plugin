@@ -20,6 +20,10 @@ describe('hoverCardPlacement', () => {
     expect(place(at(100, -50))).toEqual({ top: 8, left: 100, maxHeight: 784 });
   });
 
+  it('keeps the card above the window bottom when the chip is partly scrolled below it', () => {
+    expect(place(at(100, 798))).toEqual({ bottom: 8, left: 100, maxHeight: 784 });
+  });
+
   it('keeps the card inside the viewport at its inline end', () => {
     expect(place(at(900, 100)).left).toBe(632);
   });

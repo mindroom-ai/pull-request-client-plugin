@@ -36,11 +36,9 @@ export function hoverCardPlacement({
     const top = Math.max(margin, anchor.bottom + gap);
     return { top, left, maxHeight: viewport.height - top - margin };
   }
-  return {
-    bottom: viewport.height - anchor.top + gap,
-    left,
-    maxHeight: anchor.top - gap - margin,
-  };
+  // And one partly scrolled below it leaves the card inside it too.
+  const bottom = Math.max(margin, viewport.height - anchor.top + gap);
+  return { bottom, left, maxHeight: viewport.height - bottom - margin };
 }
 
 /** The first `max` of `items`, which a row of the card shows, and the count of the rest. */
