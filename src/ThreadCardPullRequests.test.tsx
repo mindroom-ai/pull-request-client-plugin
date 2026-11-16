@@ -114,7 +114,8 @@ describe('ThreadCardPullRequests', () => {
     // The chip's text in one room, which is unmounted before the next one is shown.
     const drawn = async (room: Room) => {
       const view = await show(room);
-      const parts = [...view.getByRole('img', { name }).querySelectorAll('span')];
+      const chip = view.getByRole('img', { name });
+      const parts = [...chip.querySelectorAll('.mrpr-branch-chip-names > span')];
       view.unmount();
       return parts.map((part) => part.textContent);
     };
@@ -131,6 +132,8 @@ describe('ThreadCardPullRequests', () => {
       { thread: '$other', repo: 'mindroom', number: 2 },
     ];
     expect(await drawn(roomWith(links, [worktree]))).toEqual(['mindroom-chat', 'redis-sessions']);
+    // A worktree whose event names no repository is not one more repository.
+    expect(await drawn(roomWith([], [worktree, other]))).toEqual(['redis-sessions']);
   });
 
   it('shows only the pull requests of a thread with links and a worktree', async () => {

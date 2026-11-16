@@ -27,7 +27,6 @@ describe('BranchChip', () => {
 
   it.each([
     ['worktrees/redis-sessions', 'redis-sessions'],
-    ['worktrees/redis-sessions/', 'redis-sessions'],
     ['redis-sessions', 'redis-sessions'],
   ])('shows the last part of the path %s without a branch', async (path, name) => {
     const view = await show(path, '');
@@ -42,10 +41,9 @@ describe('BranchChip', () => {
     const label = `Worktree ${path}, repository mindroom-chat, branch redis-sessions`;
     const chip = view.getByRole('img', { name: label });
     expect(chip.getAttribute('title')).toBe(label);
-    expect([...chip.querySelectorAll('span')].map((part) => part.textContent)).toEqual([
-      'mindroom-chat',
-      'redis-sessions',
-    ]);
+    expect(
+      [...chip.querySelectorAll('.mrpr-branch-chip-names > span')].map((part) => part.textContent)
+    ).toEqual(['mindroom-chat', 'redis-sessions']);
     expect(chip.querySelector('.mrpr-chip-repo')?.textContent).toBe('mindroom-chat');
   });
 
@@ -53,10 +51,9 @@ describe('BranchChip', () => {
     const view = await show('mindroom-chat-worktrees/redis-sessions', '', 'mindroom-chat');
     const label = 'Worktree mindroom-chat-worktrees/redis-sessions, repository mindroom-chat';
     const chip = view.getByRole('img', { name: label });
-    expect([...chip.querySelectorAll('span')].map((part) => part.textContent)).toEqual([
-      'mindroom-chat',
-      'redis-sessions',
-    ]);
+    expect(
+      [...chip.querySelectorAll('.mrpr-branch-chip-names > span')].map((part) => part.textContent)
+    ).toEqual(['mindroom-chat', 'redis-sessions']);
   });
 
   it('names the repository without drawing it in a room with one repository', async () => {

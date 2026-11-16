@@ -212,34 +212,37 @@ export function useRoomPullRequests(room: Room): RoomPullRequests {
   return useSyncExternalStore(subscribe, () => snapshotOf(room));
 }
 
-/** A thread's pull requests and worktree, and how many repositories the links of its room span. */
+/**
+ * A thread's pull requests and worktree, how many repositories the links of its room span, and
+ * whether its worktree's chip draws the repository's name.
+ */
 export type ThreadPullRequests = {
   /** In the order they were set; the same empty array when the thread has none. */
   pullRequests: readonly PullRequestRef[];
   repositories: number;
   worktree: ThreadWorktree | undefined;
-  /** Whether the room works on several repositories, by its links or by its worktrees. */
-  severalRepositories: boolean;
+  /** Whether the room's links, or its worktrees, span several repositories. */
+  showWorktreeRepository: boolean;
 };
 
 /**
- * The pull requests and the worktree of one thread and the room's count of repositories, from one
- * subscription.
+ * The pull requests and the worktree of one thread, the room's count of repositories and whether
+ * a worktree's repository is drawn, from one subscription.
  */
 export function useThreadPullRequests(
   room: Room,
   threadId: string | undefined
 ): ThreadPullRequests {
   const { byThread, worktrees, repositories, worktreeRepositories } = useRoomPullRequests(room);
-  const severalRepositories = repositories > 1 || worktreeRepositories > 1;
+  const showWorktreeRepository = repositories > 1 || worktreeRepositories > 1;
   if (threadId === undefined) {
     return {
       pullRequests: NO_PULL_REQUESTS,
       repositories,
       worktree: undefined,
-      severalRepositories,
+      showWorktreeRepository,
     };
   }
   const pullRequests = byThread.get(threadId) ?? NO_PULL_REQUESTS;
-  return { pullRequests, repositories, worktree: worktrees.get(threadId), severalRepositories };
+  return { pullRequests, repositories, worktree: worktrees.get(threadId), showWorktreeRepository };
 }

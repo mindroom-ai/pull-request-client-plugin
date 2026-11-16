@@ -1543,20 +1543,26 @@ button.mrpr-chip:focus-visible {
 }
 
 /* A thread's worktree, in a pull request chip's box (.mrpr-chip) and plain text: the branch icon in
-   the muted tone, the repository's name in a room with several (.mrpr-chip-repo), and the branch's
-   name, which ends in an ellipsis past about 24 characters; the chip's title has the whole names.
-   After a repository's name the branch gets half of that, so the chip stays as wide and cannot
-   crowd a phone card's row. */
+   the muted tone, then its names in about 24 characters at most, with or without a repository, so
+   the chip cannot crowd a phone card's row. In a room with several repositories the repository's
+   name comes first (.mrpr-chip-repo, 12 characters at most), and the branch's name takes the room
+   it leaves and ends in an ellipsis past that; the chip's title has the whole names. */
 .mrpr-branch-chip-icon {
   color: var(--pr-muted);
 }
+.mrpr-branch-chip-names {
+  display: inline-flex;
+  gap: 0.25rem;
+  min-inline-size: 0;
+  max-inline-size: 24ch;
+}
+.mrpr-branch-chip-names .mrpr-chip-repo {
+  flex: none;
+}
 .mrpr-branch-chip-name {
   overflow: hidden;
-  max-inline-size: 24ch;
+  min-inline-size: 0;
   text-overflow: ellipsis;
-}
-.mrpr-chip-repo + .mrpr-branch-chip-name {
-  max-inline-size: 12ch;
 }
 
 /* The open thread's pull requests under the room header, lined up with the header's content (16px

@@ -97,6 +97,18 @@ describe('ThreadPullRequestStrip', () => {
     expect(view.getAllByRole('button').map((button) => button.textContent)).toEqual(['#1', '#2']);
   });
 
+  it("draws the branch's repository in a room whose links span several", async () => {
+    const worktree = { ...WORKTREE, repo: 'mindroom-chat' };
+    const name =
+      'Worktree worktrees/redis-sessions, repository mindroom-chat, branch redis-sessions';
+    const one = await show([{ number: 1 }], [worktree]);
+    expect(one.view.getByRole('img', { name }).querySelector('.mrpr-chip-repo')).toBeNull();
+    one.view.unmount();
+    const several = await show([{ number: 1 }, { repo: 'mindroom', number: 2 }], [worktree]);
+    const chip = several.view.getByRole('img', { name });
+    expect(chip.querySelector('.mrpr-chip-repo')?.textContent).toBe('mindroom-chat');
+  });
+
   it('shows the branch alone for a thread with a worktree and no links', async () => {
     const { view } = await show([], [WORKTREE]);
     expect(view.getByRole('img', { name: BRANCH }).textContent).toBe('redis-sessions');

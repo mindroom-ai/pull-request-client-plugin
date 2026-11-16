@@ -19,7 +19,7 @@ const samePullRequest = (a: PullRequestRef, b: PullRequestRef) =>
 export function ThreadPullRequestStrip({ room }: { room: Room }) {
   const t = usePluginTranslation('pull-requests');
   const threadId = useShownThread();
-  const { pullRequests, repositories, worktree, severalRepositories } = useThreadPullRequests(
+  const { pullRequests, repositories, worktree, showWorktreeRepository } = useThreadPullRequests(
     room,
     threadId
   );
@@ -29,7 +29,7 @@ export function ThreadPullRequestStrip({ room }: { room: Room }) {
   const selected = panel?.isOpen ? shown : undefined;
   return (
     <div className="mrpr-thread-strip" role="group" aria-label={t('threadPullRequests.strip')}>
-      {worktree ? <BranchChip worktree={worktree} showRepository={severalRepositories} /> : null}
+      {worktree ? <BranchChip worktree={worktree} showRepository={showWorktreeRepository} /> : null}
       {pullRequests.map((pullRequest) => (
         <PullRequestChip
           key={pullRequestUrl(pullRequest)}

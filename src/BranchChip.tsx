@@ -17,11 +17,9 @@ export function BranchChip({
 }) {
   const t = usePluginTranslation('pull-requests');
   const { path, branch, repo } = worktree;
-  // The path's last part, also of a path that ends in a slash.
-  const name = branch || (path.split('/').filter(Boolean).pop() ?? path);
-  const key = `branch.label${repo ? 'WithRepository' : ''}${
-    branch ? '' : 'WithoutBranch'
-  }` as const;
+  // Without a branch, the path's last part: a path the reader takes has no empty part.
+  const name = branch || path.split('/').pop();
+  const key = `branch.label${repo ? 'WithRepository' : ''}${branch ? '' : 'WithoutBranch'}`;
   const label = t(key, { path, branch, repo });
   // The chip is drawn outside the card and the panel, so it sets the variables it draws with.
   return (
@@ -33,8 +31,10 @@ export function BranchChip({
       title={label}
     >
       <GitBranch aria-hidden className="mrpr-icon mrpr-branch-chip-icon" />
-      {repo && showRepository ? <span className="mrpr-chip-repo">{repo}</span> : null}
-      <span className="mrpr-branch-chip-name">{name}</span>
+      <span className="mrpr-branch-chip-names">
+        {repo && showRepository ? <span className="mrpr-chip-repo">{repo}</span> : null}
+        <span className="mrpr-branch-chip-name">{name}</span>
+      </span>
     </span>
   );
 }
