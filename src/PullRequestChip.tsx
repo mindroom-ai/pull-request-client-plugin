@@ -1,7 +1,7 @@
 // A pull request in one line: its state's icon, its number and the mark of its checks, with a card
 // of its details while a mouse rests on it. A thread's card draws it as a span inside the card's
 // button; the strip under the room header as a button.
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { usePluginTranslation } from '@mindroom/client-sdk/core';
 import { GitPullRequestArrow } from 'lucide-react';
 import { checksState } from './detail/detail.logic';
@@ -73,6 +73,7 @@ export function PullRequestChip({
   const name = pr?.title ? `${label}\n${pr.title}` : label;
   // The hover card stands in for a title, which would show a second tooltip, a slow one.
   const hoverCardOpen = useHoverCard(element, onSelect !== undefined);
+  const hoverCardId = useId();
   // The chip is drawn outside the card and the panel, so it sets the variables it draws with.
   const root = {
     ref: setElement,
@@ -93,7 +94,14 @@ export function PullRequestChip({
   return (
     <>
       {onSelect ? (
-        <button {...root} type="button" aria-pressed={selected} onClick={onSelect}>
+        <button
+          {...root}
+          type="button"
+          aria-pressed={selected}
+          // The card chip's span, inside the thread card's button, is described by nothing.
+          aria-describedby={hoverCardOpen ? hoverCardId : undefined}
+          onClick={onSelect}
+        >
           {content}
         </button>
       ) : (
@@ -103,12 +111,14 @@ export function PullRequestChip({
       )}
       {hoverCardOpen && element ? (
         <PullRequestHoverCard
+          id={hoverCardId}
           anchor={element}
           pullRequest={pullRequest}
           pr={pr}
           error={query.error}
           checks={withChecks ? { items: checks.data?.items, failed: checks.isError } : undefined}
-          opensPanel={onSelect !== undefined || opensPanel}
+          // The panel already shows a pressed chip's pull request.
+          opensPanel={(onSelect !== undefined && !selected) || opensPanel}
         />
       ) : null}
     </>

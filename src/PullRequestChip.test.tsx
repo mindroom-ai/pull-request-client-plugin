@@ -623,6 +623,28 @@ describe('PullRequestChip hover card', () => {
     expect(text(tooltip.querySelector('.mrpr-hover-hint'))).toBe('Click to open in the side panel');
   });
 
+  it('says nothing of the side panel on a pressed strip chip, whose pull request it shows', async () => {
+    serve(full());
+    const { tooltip } = await openCard({ onSelect: () => {}, selected: true });
+    expect(tooltip.querySelector('.mrpr-hover-hint')).toBeNull();
+  });
+
+  it('describes a strip chip by its card while the card is open', async () => {
+    serve(full());
+    const { chip, tooltip } = await openCard({ onSelect: () => {} });
+    expect(tooltip.id).not.toBe('');
+    expect(chip.getAttribute('aria-describedby')).toBe(tooltip.id);
+    chip.dispatchEvent(new MouseEvent('mouseleave'));
+    await vi.waitFor(() => expect(card()).toBeNull());
+    expect(chip.hasAttribute('aria-describedby')).toBe(false);
+  });
+
+  it('describes no card chip by its card, which is inside the thread card button', async () => {
+    serve(full());
+    const { chip } = await openCard({ opensPanel: true });
+    expect(chip.hasAttribute('aria-describedby')).toBe(false);
+  });
+
   it('shows the repository and the number while the pull request loads', async () => {
     fetchMock.mockImplementation(() => new Promise<Response>(() => {}));
     pointer(true);

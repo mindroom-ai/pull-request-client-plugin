@@ -135,6 +135,7 @@ function usePlacement(anchor: HTMLElement, card: HTMLElement | null) {
 }
 
 export function PullRequestHoverCard({
+  id,
   anchor,
   pullRequest,
   pr,
@@ -142,6 +143,7 @@ export function PullRequestHoverCard({
   checks,
   opensPanel,
 }: {
+  id: string;
   anchor: HTMLElement;
   pullRequest: PullRequestRef;
   /** The chip's pull request, undefined until GitHub sent it. */
@@ -161,6 +163,7 @@ export function PullRequestHoverCard({
     <Portal container={useTooltipContainer()}>
       <div
         ref={setCard}
+        id={id}
         role="tooltip"
         className="mrpr-root mrpr-hover"
         style={{
