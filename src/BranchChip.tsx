@@ -1,13 +1,20 @@
-// A thread's worktree in one line: the branch icon, the repository's name when the worktree has
-// one, and the branch's name, or the last part of the worktree's path when it has no branch. A span
-// wherever it sits: on a thread's card a click on it opens the thread, as anywhere else on the
-// card, and under the room header it is only text.
+// A thread's worktree in one line: the branch icon, the repository's name in a room that works on
+// several repositories, and the branch's name, or the last part of the worktree's path when it has
+// no branch. A span wherever it sits: on a thread's card a click on it opens the thread, as
+// anywhere else on the card, and under the room header it is only text.
 import { usePluginTranslation } from '@mindroom/client-sdk/core';
 import { GitBranch } from 'lucide-react';
 import { pluginRootStyle } from './theme';
 import type { ThreadWorktree } from './threadPullRequests';
 
-export function BranchChip({ worktree }: { worktree: ThreadWorktree }) {
+export function BranchChip({
+  worktree,
+  showRepository,
+}: {
+  worktree: ThreadWorktree;
+  /** Whether the repository's name is drawn; the chip's label names it either way. */
+  showRepository: boolean;
+}) {
   const t = usePluginTranslation('pull-requests');
   const { path, branch, repo } = worktree;
   // The path's last part, also of a path that ends in a slash.
@@ -26,7 +33,7 @@ export function BranchChip({ worktree }: { worktree: ThreadWorktree }) {
       title={label}
     >
       <GitBranch aria-hidden className="mrpr-icon mrpr-branch-chip-icon" />
-      {repo ? <span className="mrpr-chip-repo">{repo}</span> : null}
+      {repo && showRepository ? <span className="mrpr-chip-repo">{repo}</span> : null}
       <span className="mrpr-branch-chip-name">{name}</span>
     </span>
   );

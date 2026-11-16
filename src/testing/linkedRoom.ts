@@ -7,7 +7,7 @@ import { THREAD_PULL_REQUEST_EVENT_TYPE, THREAD_WORKTREE_EVENT_TYPE } from '../t
 export type TestLink = { thread?: string; repo?: string; number: number };
 
 /** The worktree of a thread, `$t1` unless given. */
-export type TestWorktree = { thread?: string; path: string; branch?: string };
+export type TestWorktree = { thread?: string; path: string; branch?: string; repo?: string };
 
 /**
  * A room `roomId` whose state links each pull request of `links`, set in the order given, and
@@ -27,12 +27,13 @@ export function linkedRoom(
       set_at: `2026-11-15T10:0${index}:00Z`,
     }),
   }));
-  const worktreeEvents = worktrees.map(({ thread = '$t1', path, branch }) => ({
+  const worktreeEvents = worktrees.map(({ thread = '$t1', path, branch, repo }) => ({
     getType: () => THREAD_WORKTREE_EVENT_TYPE,
     getStateKey: () => thread,
     getContent: () => ({
       path,
       branch,
+      repo,
       set_by: '@plugin-tester:example.org',
       set_at: '2026-11-15T10:00:00Z',
     }),

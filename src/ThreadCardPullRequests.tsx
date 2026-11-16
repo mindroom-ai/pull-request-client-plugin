@@ -20,8 +20,15 @@ import { useThreadPullRequests } from './threadPullRequests';
 // Every thread of the Compact view has a card, most without links: those read only their links
 // and worktree. The branch takes no click of its own: a click on it opens the thread.
 export function ThreadCardPullRequests({ room, threadId }: ThreadCardBadgeProps) {
-  const { pullRequests, repositories, worktree } = useThreadPullRequests(room, threadId);
-  if (pullRequests.length === 0) return worktree ? <BranchChip worktree={worktree} /> : null;
+  const { pullRequests, repositories, worktree, severalRepositories } = useThreadPullRequests(
+    room,
+    threadId
+  );
+  if (pullRequests.length === 0) {
+    return worktree ? (
+      <BranchChip worktree={worktree} showRepository={severalRepositories} />
+    ) : null;
+  }
   return (
     <CardChips
       room={room}

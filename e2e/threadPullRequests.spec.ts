@@ -625,6 +625,27 @@ test('on a phone a card shows one chip and the count of the rest', async ({ brow
       '2 more pull requests'
     );
     await shot(page, 'phone-compact');
+
+    // A long repository name before a long branch leaves the branch chip as wide as it is without
+    // one, so it cannot push the card's reply count off the row.
+    const worktree = {
+      path: '/srv/worktrees/billing-webhook-retries',
+      branch: 'webhook-retries-with-exponential-backoff',
+      set_by: agent.userId,
+      set_at: new Date().toISOString(),
+    };
+    const branch = card(page, roots.webhooks).locator('.mrpr-branch-chip');
+    await writeWorktree(roots.webhooks, worktree);
+    await expect(branch).toBeVisible({ timeout: 30_000 });
+    const plain = (await branch.boundingBox())?.width ?? 0;
+    await writeWorktree(roots.webhooks, { ...worktree, repo: 'billing-and-invoicing-service' });
+    await expect(branch.locator('.mrpr-chip-repo')).toBeVisible({ timeout: 30_000 });
+    const withRepository = (await branch.boundingBox())?.width ?? 0;
+    expect(plain).toBeGreaterThan(0);
+    expect(withRepository).toBeLessThanOrEqual(plain + 8);
+    await shot(page, 'phone-branch-repo');
+    await writeWorktree(roots.webhooks, {});
+    await expect(branch).toHaveCount(0);
     expect(unanswered).toEqual([]);
     expect(warnings).toEqual([]);
   } finally {

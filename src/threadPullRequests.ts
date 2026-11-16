@@ -24,12 +24,14 @@ export type ThreadWorktree = { path: string; branch: string; repo: string };
 
 /**
  * A room's links by thread, each thread's in the order they were set, and its worktrees by thread;
- * the same object until a link or a worktree changes.
+ * the same object until a link or a worktree changes. `repositories` counts the repositories of
+ * the links, and `worktreeRepositories` those the worktrees name.
  */
 export type RoomPullRequests = {
   byThread: ReadonlyMap<string, readonly PullRequestRef[]>;
   worktrees: ReadonlyMap<string, ThreadWorktree>;
   repositories: number;
+  worktreeRepositories: number;
 };
 
 const NO_PULL_REQUESTS: readonly PullRequestRef[] = [];
@@ -71,9 +73,16 @@ export function parseThreadPullRequestLink(
   return { threadId, pullRequest, setAt: typeof setAt === 'string' ? setAt : '' };
 }
 
+// What the backend plugin stores, and reads back, in a worktree's path, branch and repository:
+// plain path characters, in a path at most 200 of them and in a name at most 100.
+const PLAIN = /^[A-Za-z0-9._/-]+$/;
+const plainName = (value: unknown) =>
+  typeof value === 'string' && value.length <= 100 && PLAIN.test(value) ? value : '';
+
 /**
  * The worktree one state event records, whose state key is the thread's root ID, or undefined for
- * a cleared or malformed event.
+ * a cleared or malformed event. It reads an event as the backend plugin does: a path the backend
+ * takes for no worktree shows none here, and a branch or repository it takes for none is empty.
  */
 export function parseThreadWorktree(
   stateKey: string,
@@ -81,15 +90,11 @@ export function parseThreadWorktree(
 ): ({ threadId: string } & ThreadWorktree) | undefined {
   if (typeof content !== 'object' || content === null) return undefined;
   const { path, branch, repo } = content as { path?: unknown; branch?: unknown; repo?: unknown };
-  if (typeof path !== 'string' || path === '') return undefined;
-  // Only a path in POSIX form that names one directory.
-  if (path.includes('\\') || path.split('/').includes('..')) return undefined;
-  return {
-    threadId: stateKey,
-    path,
-    branch: typeof branch === 'string' ? branch : '',
-    repo: typeof repo === 'string' ? repo : '',
-  };
+  if (typeof path !== 'string' || path.length > 200 || !PLAIN.test(path)) return undefined;
+  // One leading slash makes the path absolute; no part of it is empty, `.` or `..`.
+  const parts = path.replace(/^\//, '').split('/');
+  if (parts.some((part) => part === '' || part === '.' || part === '..')) return undefined;
+  return { threadId: stateKey, path, branch: plainName(branch), repo: plainName(repo) };
 }
 
 /** The room's state events the snapshot is built from: the links', then the worktrees'. */
@@ -114,14 +119,21 @@ function readRoom(room: Room): RoomPullRequests {
     repositories.add(`${pullRequest.owner}/${pullRequest.repo}`);
   }
   const worktrees = new Map<string, ThreadWorktree>();
+  const worktreeRepositories = new Set<string>();
   for (const event of room.currentState.getStateEvents(THREAD_WORKTREE_EVENT_TYPE)) {
-    const worktree = parseThreadWorktree(event.getStateKey() ?? '', event.getContent());
-    if (worktree !== undefined) {
-      const { path, branch, repo } = worktree;
-      worktrees.set(worktree.threadId, { path, branch, repo });
+    const parsed = parseThreadWorktree(event.getStateKey() ?? '', event.getContent());
+    if (parsed !== undefined) {
+      const { threadId, ...worktree } = parsed;
+      worktrees.set(threadId, worktree);
+      if (worktree.repo) worktreeRepositories.add(worktree.repo);
     }
   }
-  return { byThread, worktrees, repositories: repositories.size };
+  return {
+    byThread,
+    worktrees,
+    repositories: repositories.size,
+    worktreeRepositories: worktreeRepositories.size,
+  };
 }
 
 /**
@@ -206,6 +218,8 @@ export type ThreadPullRequests = {
   pullRequests: readonly PullRequestRef[];
   repositories: number;
   worktree: ThreadWorktree | undefined;
+  /** Whether the room works on several repositories, by its links or by its worktrees. */
+  severalRepositories: boolean;
 };
 
 /**
@@ -216,10 +230,16 @@ export function useThreadPullRequests(
   room: Room,
   threadId: string | undefined
 ): ThreadPullRequests {
-  const { byThread, worktrees, repositories } = useRoomPullRequests(room);
+  const { byThread, worktrees, repositories, worktreeRepositories } = useRoomPullRequests(room);
+  const severalRepositories = repositories > 1 || worktreeRepositories > 1;
   if (threadId === undefined) {
-    return { pullRequests: NO_PULL_REQUESTS, repositories, worktree: undefined };
+    return {
+      pullRequests: NO_PULL_REQUESTS,
+      repositories,
+      worktree: undefined,
+      severalRepositories,
+    };
   }
   const pullRequests = byThread.get(threadId) ?? NO_PULL_REQUESTS;
-  return { pullRequests, repositories, worktree: worktrees.get(threadId) };
+  return { pullRequests, repositories, worktree: worktrees.get(threadId), severalRepositories };
 }

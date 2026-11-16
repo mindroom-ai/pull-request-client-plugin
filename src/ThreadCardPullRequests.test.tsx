@@ -107,6 +107,32 @@ describe('ThreadCardPullRequests', () => {
     expect(page.navigateRoomThread).not.toHaveBeenCalled();
   });
 
+  it("draws a worktree's repository only in a room that works on several", async () => {
+    const worktree = { ...WORKTREE, repo: 'mindroom-chat' };
+    const name =
+      'Worktree worktrees/redis-sessions, repository mindroom-chat, branch redis-sessions';
+    const one = await show(roomWith([], [worktree, { ...worktree, thread: '$other' }]));
+    expect(one.getByRole('img', { name }).textContent).toBe('redis-sessions');
+    const byWorktrees = await show(
+      roomWith([], [worktree, { ...WORKTREE, thread: '$other', repo: 'mindroom' }])
+    );
+    expect(
+      byWorktrees.getByRole('img', { name }).querySelector('.mrpr-chip-repo')?.textContent
+    ).toBe('mindroom-chat');
+    const byLinks = await show(
+      roomWith(
+        [
+          { thread: '$other', number: 1 },
+          { thread: '$other', repo: 'mindroom', number: 2 },
+        ],
+        [worktree]
+      )
+    );
+    expect(byLinks.getByRole('img', { name }).querySelector('.mrpr-chip-repo')?.textContent).toBe(
+      'mindroom-chat'
+    );
+  });
+
   it('shows only the pull requests of a thread with links and a worktree', async () => {
     const view = await show(roomWith([{ number: 1 }], [WORKTREE]));
     expect(chips(view).map((chip) => chip.textContent)).toEqual(['#1']);
