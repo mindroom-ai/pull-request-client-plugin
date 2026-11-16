@@ -4,7 +4,7 @@ import { act } from 'react-dom/test-utils';
 import { renderPluginComponent } from '@mindroom/client-sdk/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PullRequest, PullRequestRef } from '../github';
-import { imageSources } from '../images';
+import { forgetSigned, imageSources } from '../images';
 import plugin from '../index';
 import { usePullRequest } from '../queries';
 import { trapOptions } from '../testing/focusTrapStandIn';
@@ -171,6 +171,9 @@ const fail = (image: Element) => act(async () => void image.dispatchEvent(new Ev
 beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   localStorage.clear();
+  // The signed addresses images.ts handed out stay for the module; each test starts without them.
+  forgetSigned(SIGNED);
+  forgetSigned(SIGNED.replace(UUID, '99999999-2222-3333-4444-555555555555'));
   fetchMock.mockReset();
   serve();
   vi.stubGlobal('fetch', fetchMock);
@@ -329,6 +332,46 @@ describe('SummaryTab', () => {
     await fail(await view.findByAltText('Before'));
     await vi.waitFor(() => expect(calls('/pulls/200')).toBe(3));
     later.mockRestore();
+  });
+
+  it("two signed images that fail at once both get the next answer's addresses", async () => {
+    const U2 = '99999999-2222-3333-4444-555555555555';
+    const signed2 = (key: string) => signed(key).replace(UUID, U2);
+    const answer = {
+      title: 'Shots',
+      state: 'open',
+      body: `![A](${ATTACHMENT}) ![B](https://github.com/user-attachments/assets/${U2})`,
+      body_html: `<p><img src="${SIGNED_HTML}" alt="A"> <img src="${signed2('first').replace(
+        '&',
+        '&amp;'
+      )}" alt="B"></p>`,
+      head: { sha: HEAD },
+    };
+    serve({ pull: answer });
+    const client = new QueryClient({ defaultOptions: { queries: { retryDelay: 0 } } });
+    const view = await renderPluginComponent(
+      <QueryClientProvider client={client}>
+        <FetchedSummary />
+      </QueryClientProvider>,
+      { id: 'pull-requests', plugin }
+    );
+    const a2 = signed('second');
+    const b2 = signed2('second');
+    answer.body_html = `<p><img src="${a2.replace('&', '&amp;')}" alt="A"> <img src="${b2.replace(
+      '&',
+      '&amp;'
+    )}" alt="B"></p>`;
+    const a = await view.findByAltText('A');
+    const b = await view.findByAltText('B');
+    await act(async () => {
+      a.dispatchEvent(new Event('error'));
+      b.dispatchEvent(new Event('error'));
+    });
+    await vi.waitFor(() => expect(calls('/pulls/200')).toBe(2));
+    await vi.waitFor(async () =>
+      expect((await view.findByAltText('A')).getAttribute('src')).toBe(a2)
+    );
+    expect((await view.findByAltText('B')).getAttribute('src')).toBe(b2);
   });
 
   it("fetches a comment's list again when its signed image fails, not for another image", async () => {

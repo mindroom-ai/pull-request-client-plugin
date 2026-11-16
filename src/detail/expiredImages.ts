@@ -29,6 +29,9 @@ export function useRefetchOnExpiredImage(images: ImageSources) {
     const onError = (event: Event) => {
       const image = event.target;
       if (!(image instanceof HTMLImageElement) || !image.src.startsWith(SIGNED)) return;
+      // Every failed address is forgotten, also one whose refetch the limit holds back, so the
+      // next answer's address replaces it.
+      forgetSigned(image.src);
       const query = queryClient
         .getQueryCache()
         .findAll({ queryKey: ['pull-requests'] })
@@ -37,7 +40,6 @@ export function useRefetchOnExpiredImage(images: ImageSources) {
       const last = lastRefetch.get(query);
       if (last !== undefined && Date.now() - last < MINUTE) return;
       lastRefetch.set(query, Date.now());
-      forgetSigned(image.src);
       void queryClient.refetchQueries({ queryKey: query.queryKey, exact: true });
     };
     // An image's error does not bubble, but it passes its ancestors on the way down.
