@@ -16,6 +16,7 @@ const comment = (id: number, path: string): ReviewComment => ({
   id,
   author: null,
   body: `Comment ${id}`,
+  images: { byUrl: {}, byAttachment: {} },
   createdAt: '2026-11-01T00:00:00Z',
   url: '',
   reactions: [],

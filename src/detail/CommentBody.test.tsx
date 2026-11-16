@@ -5,10 +5,22 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import plugin from '../index';
 import { CommentBody } from './CommentBody';
 
-const markdown = vi.hoisted(() => ({ html: undefined as string | undefined }));
+const NO_IMAGES = { byUrl: {}, byAttachment: {} };
+
+type ImageSource = (src: string) => string | undefined;
+const markdown = vi.hoisted(() => ({
+  html: undefined as string | undefined,
+  imageSources: [] as (ImageSource | undefined)[],
+}));
 vi.mock('@mindroom/client-sdk/ui', async (importOriginal) => {
   const ui = await importOriginal<typeof import('@mindroom/client-sdk/ui')>();
-  return { ...ui, useMarkdownHtml: () => markdown.html };
+  return {
+    ...ui,
+    useMarkdownHtml: (_markdown: string, options?: { imageSource?: ImageSource }) => {
+      markdown.imageSources.push(options?.imageSource);
+      return markdown.html;
+    },
+  };
 });
 
 const render = (ui: React.ReactElement) =>
@@ -21,39 +33,58 @@ beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   vi.restoreAllMocks();
   markdown.html = undefined;
+  markdown.imageSources = [];
   // jsdom has no scrollIntoView.
   Element.prototype.scrollIntoView = vi.fn();
 });
 
 describe('CommentBody', () => {
   it('shows the plain text until the renderer has loaded, then its HTML', async () => {
-    const view = await render(<CommentBody body="Looks **good**" />);
+    const view = await render(<CommentBody body="Looks **good**" images={NO_IMAGES} />);
     expect(view.container.textContent).toBe('Looks **good**');
     markdown.html = '<p>Looks <strong>good</strong></p>';
-    view.rerender(<CommentBody body="Looks **good**" />);
+    view.rerender(<CommentBody body="Looks **good**" images={NO_IMAGES} />);
     expect(view.container.querySelector('strong')?.textContent).toBe('good');
   });
 
+  it("resolves its images by GitHub's HTML, with one function while that stays", async () => {
+    const uuid = '11111111-2222-3333-4444-555555555555';
+    const signed = `https://private-user-images.githubusercontent.com/1/2-${uuid}.png?jwt=x`;
+    const images = { byUrl: {}, byAttachment: { [uuid]: signed } };
+    const body = `![a](https://github.com/user-attachments/assets/${uuid})`;
+    const view = await render(<CommentBody body={body} images={images} />);
+    view.rerender(<CommentBody body={body} images={images} />);
+    const [first, second] = markdown.imageSources;
+    expect(first?.(`https://github.com/user-attachments/assets/${uuid}`)).toBe(signed);
+    expect(second).toBe(first);
+    view.rerender(<CommentBody body={body} images={{ byUrl: {}, byAttachment: {} }} />);
+    expect(markdown.imageSources.at(-1)).not.toBe(first);
+  });
+
   it('renders nothing for a body of only HTML comments and whitespace', async () => {
-    const view = await render(<CommentBody body={'<!-- MURMUR_IGNORE -->\n  '} />);
+    const view = await render(
+      <CommentBody body={'<!-- MURMUR_IGNORE -->\n  '} images={NO_IMAGES} />
+    );
     expect(view.container.textContent).toBe('');
     expect(view.container.querySelector('.mrpr-comment-body')).toBeNull();
   });
 
   it('keeps a body that says more than its HTML comment', async () => {
-    const view = await render(<CommentBody body={'<!-- bot -->\nNeeds a test.'} />);
+    const view = await render(
+      <CommentBody body={'<!-- bot -->\nNeeds a test.'} images={NO_IMAGES} />
+    );
     expect(view.container.textContent).toContain('Needs a test.');
   });
 
   it('shows a short body whole, with no button', async () => {
     heights(100);
-    const view = await render(<CommentBody body="Short" />);
+    const view = await render(<CommentBody body="Short" images={NO_IMAGES} />);
     expect(view.queryByText('Show full comment')).toBeNull();
   });
 
   it('clamps a tall body at 240 px until Show full comment expands it', async () => {
     heights(500);
-    const view = await render(<CommentBody body="Tall" />);
+    const view = await render(<CommentBody body="Tall" images={NO_IMAGES} />);
     const clip = view.container.querySelector('.mrpr-comment-clip') as HTMLElement;
     expect(clip.className).toContain('mrpr-comment-clamped');
     const button = view.getByText('Show full comment');

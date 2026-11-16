@@ -3,6 +3,7 @@
 // review with a body, or a review thread whole).
 import { usePluginTranslation } from '@mindroom/client-sdk/core';
 import type { Actor, Reaction } from '../github';
+import type { ImageSources } from '../images';
 import {
   PullRequestActorLabel,
   PullRequestReviewOutcomeBadge,
@@ -17,6 +18,7 @@ type CardData = {
   at: string;
   url: string;
   body: string;
+  images: ImageSources;
   reactions: Reaction[];
   outcome: Outcome | null;
 };
@@ -56,7 +58,7 @@ export function CommentCard({
           ) : null}
         </div>
       ) : null}
-      <CommentBody body={card.body} />
+      <CommentBody body={card.body} images={card.images} />
     </article>
   );
 }
@@ -71,6 +73,7 @@ export function ConversationCard({ item }: { item: ConversationItem }) {
           at: comment.createdAt,
           url: comment.url,
           body: comment.body,
+          images: comment.images,
           reactions: comment.reactions,
           outcome: null,
         }}
@@ -86,6 +89,7 @@ export function ConversationCard({ item }: { item: ConversationItem }) {
           at: review.submittedAt,
           url: review.url,
           body: review.body,
+          images: review.images,
           reactions: [],
           outcome: reviewOutcome(review.state),
         }}
@@ -100,6 +104,7 @@ export function ConversationCard({ item }: { item: ConversationItem }) {
     at: comment.createdAt,
     url: comment.url,
     body: comment.body,
+    images: comment.images,
     reactions: comment.reactions,
     outcome: null,
   });

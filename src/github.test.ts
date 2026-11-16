@@ -96,7 +96,8 @@ describe('fetchPullRequest', () => {
     expect(withToken.get('authorization')).toBe('Bearer t');
     expect(without.get('authorization')).toBeNull();
     for (const headers of [withToken, without]) {
-      expect(headers.get('accept')).toBe('application/vnd.github+json');
+      // The full media type adds `body_html`, where the description's images have addresses.
+      expect(headers.get('accept')).toBe('application/vnd.github.full+json');
       expect(headers.get('x-github-api-version')).toBe('2022-11-28');
     }
   });
@@ -108,6 +109,7 @@ describe('fetchPullRequest', () => {
       state: 'open',
       draft: false,
       body: '',
+      images: { byUrl: {}, byAttachment: {} },
       author: {
         login: 'u',
         name: null,
@@ -681,6 +683,44 @@ describe('commit paths', () => {
 });
 
 describe('the lists', () => {
+  const UUID = '11111111-2222-3333-4444-555555555555';
+  const SIGNED = `https://private-user-images.githubusercontent.com/1/2-${UUID}.png?jwt=x&v=1`;
+  const HTML = `<p><img src="${SIGNED.replace('&', '&amp;')}" alt="a"></p>`;
+  const accepts = (fetchMock: ReturnType<typeof stubRoutes>) =>
+    (fetchMock.mock.calls as unknown as [string, RequestInit][]).map(([url, init]) => [
+      new URL(url).pathname,
+      new Headers(init.headers).get('accept'),
+    ]);
+
+  it("asks for the bodies' HTML, and maps its images, on every list with a body", async () => {
+    const item = { id: 1, state: 'COMMENTED', user: { login: 'c' }, body: 'b', body_html: HTML };
+    const fetchMock = stubRoutes({
+      '/pulls/1/reviews': [item],
+      '/pulls/1/comments': [item],
+      '/issues/1/comments': [item],
+      '/pulls/1/commits': [],
+      '/pulls/1': { ...apiPull, body_html: HTML },
+    });
+    const lists = [
+      (await fetchReviews(ref, undefined)).items[0]!,
+      (await fetchReviewComments(ref, undefined)).items[0]!,
+      (await fetchConversationComments(ref, undefined)).items[0]!,
+      await fetchPullRequest(ref, undefined),
+    ];
+    await fetchCommits(ref, undefined);
+    for (const answer of lists) {
+      expect(answer.images).toEqual({ byUrl: {}, byAttachment: { [UUID]: SIGNED } });
+    }
+    expect(accepts(fetchMock)).toEqual([
+      ['/repos/a/b/pulls/1/reviews', 'application/vnd.github.full+json'],
+      ['/repos/a/b/pulls/1/comments', 'application/vnd.github.full+json'],
+      ['/repos/a/b/issues/1/comments', 'application/vnd.github.full+json'],
+      ['/repos/a/b/pulls/1', 'application/vnd.github.full+json'],
+      // A list without bodies keeps the plain media type.
+      ['/repos/a/b/pulls/1/commits', 'application/vnd.github+json'],
+    ]);
+  });
+
   it('drops pending reviews', async () => {
     const review = (id: number, state: string) => ({
       id,

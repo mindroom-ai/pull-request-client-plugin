@@ -18,6 +18,7 @@ import { usePluginStorage, usePluginTranslation } from '@mindroom/client-sdk/cor
 import { Menu, PopOut, useMarkdownHtml } from '@mindroom/client-sdk/ui';
 import type { Actor, Paged, PullRequest, PullRequestRef, Review } from '../github';
 import { GitHubErrorState } from '../GitHubErrorState';
+import { imageResolver, type ImageSources } from '../images';
 import {
   PullRequestActorAvatar,
   PullRequestCheckStatusIcon,
@@ -227,9 +228,11 @@ function ReviewersRow({
   );
 }
 
-function Description({ body }: { body: string }) {
+function Description({ body, images }: { body: string; images: ImageSources }) {
   const t = usePluginTranslation('pull-requests');
-  const html = useMarkdownHtml(body);
+  // One function per answer of GitHub's: a new one would sanitize the body again on each render.
+  const imageSource = useMemo(() => imageResolver(images), [images]);
+  const html = useMarkdownHtml(body, { imageSource });
   if (body.trim() === '') return <p className="mrpr-status">{t('noDescription')}</p>;
   if (html === undefined) return null;
   return <div className="mrpr-description" dangerouslySetInnerHTML={{ __html: html }} />;
@@ -440,7 +443,7 @@ export function SummaryTab({
       </section>
 
       <Section title={t('summary.description')} keepMounted>
-        <Description body={pullRequest.body} />
+        <Description body={pullRequest.body} images={pullRequest.images} />
       </Section>
 
       <Section title={t('summary.checks')} defaultOpen={false}>

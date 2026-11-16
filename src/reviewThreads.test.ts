@@ -10,6 +10,7 @@ const comment = (
   id,
   author: null,
   body: '',
+  images: { byUrl: {}, byAttachment: {} },
   createdAt,
   url: '',
   reactions: [],
