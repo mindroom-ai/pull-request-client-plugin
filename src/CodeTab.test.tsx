@@ -818,17 +818,17 @@ describe('CodeTab', () => {
       });
       // Root files count in no folder, and a folder with no changed lines shows none.
       expect(folderLines(tab)).toEqual({
-        'src/': `+${(1230).toLocaleString()} \u22127`,
-        'src/lib/': `+${(1200).toLocaleString()} \u22122`,
+        'src/': `+${(1230).toLocaleString()} -7`,
+        'src/lib/': `+${(1200).toLocaleString()} -2`,
       });
       const src = tab.getByTestId('tree-folders').querySelector<HTMLElement>('[data-path="src/"]');
-      expect(src?.title).toBe('1230 lines added, 7 removed');
+      expect(src?.title).toBe(`${(1230).toLocaleString()} lines added, 7 removed`);
       expect(src?.dataset.colors).toBe('var(--pr-added) var(--pr-removed)');
 
       await click(tab.getByRole('button', { name: 'Hide test files' }));
       expect(folderLines(tab)).toEqual({
-        'src/': `+${(1200).toLocaleString()} \u22122`,
-        'src/lib/': `+${(1200).toLocaleString()} \u22122`,
+        'src/': `+${(1200).toLocaleString()} -2`,
+        'src/lib/': `+${(1200).toLocaleString()} -2`,
       });
     });
 
@@ -840,10 +840,13 @@ describe('CodeTab', () => {
           <Holder files={[file({ path: 'src/a.ts', additions, deletions })]} />
         </QueryClientProvider>
       );
-      const tab = await renderPluginComponent(ui(3, 1), { id: 'pull-requests', plugin });
-      expect(folderLines(tab)).toEqual({ 'src/': '+3 \u22121' });
+      const tab = await renderPluginComponent(ui(1, 0), { id: 'pull-requests', plugin });
+      expect(folderLines(tab)).toEqual({ 'src/': '+1 -0' });
+      const src = () => tab.getByTestId('tree-folders').querySelector<HTMLElement>('[data-path]');
+      expect(src()?.title).toBe('1 line added, 0 removed');
       tab.rerender(ui(8, 4));
-      expect(folderLines(tab)).toEqual({ 'src/': '+8 \u22124' });
+      expect(folderLines(tab)).toEqual({ 'src/': '+8 -4' });
+      expect(src()?.title).toBe('8 lines added, 4 removed');
     });
 
     it('offers no test file toggle without test files', async () => {

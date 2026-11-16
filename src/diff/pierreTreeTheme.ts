@@ -17,7 +17,9 @@ export const PIERRE_TREE_UNSAFE_CSS = `
   [data-truncate-content='visible'] { overflow: hidden; text-overflow: ellipsis; }
   [data-truncate-marker] { display: none; }
   button[data-type='item'], button[data-type='item']::before { border-radius: 6px; }
-  /* A folder's changed lines, which line up from row to row. */
+  /* A folder's changed lines keep their width at the row's end; its name shrinks to its ellipsis. */
+  [data-item-section='decoration'] { flex: none; margin-inline-start: auto; }
+  /* Equal digit widths, right-aligned. */
   [data-item-section='decoration'] > span { gap: 0.35em; font-variant-numeric: tabular-nums; }
 `;
 

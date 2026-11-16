@@ -115,11 +115,14 @@ export function DiffFileTree({ entries, onSelectFile, ariaLabel }: DiffFileTreeP
       if (item.kind !== 'directory') return null;
       const lines = directoryLines.get(item.path);
       if (lines === undefined || (lines.additions === 0 && lines.deletions === 0)) return null;
-      const added = `+${lines.additions.toLocaleString()}`;
-      const removed = `\u2212${lines.deletions.toLocaleString()}`;
+      const additions = lines.additions.toLocaleString();
+      const deletions = lines.deletions.toLocaleString();
+      const added = `+${additions}`;
+      const removed = `-${deletions}`;
       return {
         text: `${added} ${removed}`,
-        title: t('code.folderLines', { count: lines.additions, deletions: lines.deletions }),
+        // The plural follows the number; the text shows it formatted, as the row does.
+        title: t('code.folderLines', { count: lines.additions, additions, deletions }),
         parts: [
           { text: added, color: 'var(--pr-added)' },
           { text: removed, color: 'var(--pr-removed)' },
@@ -199,7 +202,9 @@ export function DiffFileTree({ entries, onSelectFile, ariaLabel }: DiffFileTreeP
   }, [directoryPaths, gitStatus, model, modelPaths, ordering, positions, presented]);
 
   // Pierre draws its rows again on a change of paths or git status, not of counts alone, as when
-  // another commit changed the same files. Setting its composition again draws them again.
+  // another commit changed the same files. Setting its composition again is its only public call
+  // that redraws without changing anything, as it does not skip an unchanged value; re-check this
+  // when upgrading @pierre/trees (1.0.0-beta.6).
   useEffect(() => {
     model.setComposition(model.getComposition());
   }, [directoryLines, model, t]);

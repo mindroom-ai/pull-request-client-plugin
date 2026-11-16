@@ -376,6 +376,10 @@ export function CodeTab({
     () => new Map((viewFiles ?? []).map((file) => [file.path, treeStatus(file.status)])),
     [viewFiles]
   );
+
+  const marked = listed
+    .filter((path) => markTexts.has(path))
+    .map((path) => ({ fileKey: path, path, patch: markTexts.get(path) ?? '' }));
   const stats = useMemo(
     () =>
       new Map(
@@ -397,10 +401,6 @@ export function CodeTab({
       })),
     [listed, statusByPath, stats]
   );
-
-  const marked = listed
-    .filter((path) => markTexts.has(path))
-    .map((path) => ({ fileKey: path, path, patch: markTexts.get(path) ?? '' }));
 
   const updateFolds = (change: (current: Folds) => Partial<Folds>) =>
     setFolds((stored) => {
