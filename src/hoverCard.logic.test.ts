@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hoverCardPlacement, splitLabels } from './hoverCard.logic';
+import { hoverCardPlacement, splitOverflow } from './hoverCard.logic';
 
 const VIEWPORT = { width: 1000, height: 800 };
 const CARD = { width: 360, height: 200 };
@@ -16,6 +16,10 @@ describe('hoverCardPlacement', () => {
     expect(place(at(100, 600))).toEqual({ bottom: 204, left: 100, maxHeight: 588 });
   });
 
+  it('keeps the card below the window top when the chip is partly scrolled above it', () => {
+    expect(place(at(100, -50))).toEqual({ top: 8, left: 100, maxHeight: 784 });
+  });
+
   it('keeps the card inside the viewport at its inline end', () => {
     expect(place(at(900, 100)).left).toBe(632);
   });
@@ -30,17 +34,14 @@ describe('hoverCardPlacement', () => {
   });
 });
 
-describe('splitLabels', () => {
-  const labels = (count: number) =>
-    Array.from({ length: count }, (_, index) => ({ name: `l${index}`, color: '000000' }));
+describe('splitOverflow', () => {
+  const items = (count: number) => Array.from({ length: count }, (_, index) => `i${index}`);
 
-  it('shows five labels and counts the rest', () => {
-    const { shown, more } = splitLabels(labels(7));
-    expect(shown.map((label) => label.name)).toEqual(['l0', 'l1', 'l2', 'l3', 'l4']);
-    expect(more).toBe(2);
+  it('shows the first ones and counts the rest', () => {
+    expect(splitOverflow(items(7), 5)).toEqual({ shown: items(5), more: 2 });
   });
 
-  it('shows all of five or fewer', () => {
-    expect(splitLabels(labels(5))).toEqual({ shown: labels(5), more: 0 });
+  it('shows all when they fit', () => {
+    expect(splitOverflow(items(5), 5)).toEqual({ shown: items(5), more: 0 });
   });
 });

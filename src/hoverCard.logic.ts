@@ -1,5 +1,5 @@
-// What a pull request chip's hover card works out before it draws: where it goes on screen and the
-// labels it shows.
+// What a pull request chip's hover card works out before it draws: where it goes on screen and how
+// much of a long row it shows.
 
 type Box = { left: number; top: number; right: number; bottom: number };
 
@@ -32,7 +32,8 @@ export function hoverCardPlacement({
   const left = Math.max(margin, Math.min(start, viewport.width - card.width - margin));
   const below = (anchor.top + anchor.bottom) / 2 <= viewport.height / 2;
   if (below) {
-    const top = anchor.bottom + gap;
+    // A chip partly scrolled above the window still leaves the card inside it.
+    const top = Math.max(margin, anchor.bottom + gap);
     return { top, left, maxHeight: viewport.height - top - margin };
   }
   return {
@@ -42,9 +43,7 @@ export function hoverCardPlacement({
   };
 }
 
-const SHOWN_LABELS = 5;
-
-/** The labels the card shows, five at most, and the count of the rest. */
-export function splitLabels<T>(labels: readonly T[]): { shown: T[]; more: number } {
-  return { shown: labels.slice(0, SHOWN_LABELS), more: Math.max(0, labels.length - SHOWN_LABELS) };
+/** The first `max` of `items`, which a row of the card shows, and the count of the rest. */
+export function splitOverflow<T>(items: readonly T[], max: number): { shown: T[]; more: number } {
+  return { shown: items.slice(0, max), more: Math.max(0, items.length - max) };
 }

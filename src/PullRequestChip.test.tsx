@@ -579,6 +579,19 @@ describe('PullRequestChip hover card', () => {
     expect(tooltip.querySelectorAll('.mrpr-hover-reviewer')).toHaveLength(1);
   });
 
+  it('shows six reviewers at most, teams among them, and counts the rest', async () => {
+    saveToken();
+    const asked = ['a', 'b', 'c', 'd', 'e', 'f', 'g'].map(user);
+    serve(full({ requested_reviewers: asked, requested_teams: [{ name: 'core' }] }));
+    const { tooltip } = await openCard();
+    const row = () => tooltip.querySelector('.mrpr-hover-reviews');
+    await vi.waitFor(() =>
+      expect(tooltip.querySelectorAll('.mrpr-hover-reviewer')).toHaveLength(6)
+    );
+    expect(text(row())).toContain('+2');
+    expect(text(row())).not.toContain('core');
+  });
+
   it('asks for the reviews only once the card opens, in one request', async () => {
     saveToken();
     serve(full(), [], [approval('bob')]);

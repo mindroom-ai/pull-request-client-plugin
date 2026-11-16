@@ -9,10 +9,11 @@ import {
   joinReviewers,
   latestReviewOutcomes,
   summarizeChecks,
+  type Reviewer,
 } from './detail/detail.logic';
 import type { PullRequest, PullRequestCheck, PullRequestRef } from './github';
 import { useGitHubErrorMessage } from './GitHubErrorState';
-import { hoverCardPlacement, splitLabels } from './hoverCard.logic';
+import { hoverCardPlacement, splitOverflow } from './hoverCard.logic';
 import {
   PullRequestActorAvatar,
   PullRequestActorLabel,
@@ -33,6 +34,10 @@ import { useGitHubToken } from './token';
 export const HOVER_CARD_DELAY_MS = 150;
 
 const FINE_POINTER = '(hover: hover) and (pointer: fine)';
+
+// The most labels and reviewers the card shows before it counts the rest.
+const SHOWN_LABELS = 5;
+const SHOWN_REVIEWERS = 6;
 
 /**
  * Whether the card of the chip `trigger` is open: from `HOVER_CARD_DELAY_MS` after a mouse came to
@@ -236,7 +241,7 @@ function Details({
       : pr.state === 'closed' && pr.closedAt
       ? { at: pr.closedAt, key: 'hoverCard.closed' }
       : { at: pr.updatedAt, key: 'updated' };
-  const labels = splitLabels(pr.labels);
+  const labels = splitOverflow(pr.labels, SHOWN_LABELS);
   const changed = pr.additions > 0 || pr.deletions > 0;
   return (
     <>
@@ -334,34 +339,45 @@ function ReviewsRow({ pullRequest, pr }: { pullRequest: PullRequestRef; pr: Pull
     latestReviewOutcomes(reviews.data.items, pr.headSha),
     pr.requestedReviewers
   );
-  if (reviewers.length === 0 && pr.requestedTeams.length === 0) {
+  // Teams count among the six, so a long list cannot push the rows below out of the card.
+  const { shown, more } = splitOverflow<Reviewer | string>(
+    [...reviewers, ...pr.requestedTeams],
+    SHOWN_REVIEWERS
+  );
+  if (shown.length === 0) {
     return <div className="mrpr-hover-reviews mrpr-hover-muted">{t('hoverCard.noReviews')}</div>;
   }
   return (
     <div className="mrpr-hover-reviews">
-      {reviewers.map((entry) => (
-        <span key={entry.key} className="mrpr-hover-reviewer">
-          <PullRequestActorAvatar actor={entry.actor} />
-          <span className="mrpr-truncate mrpr-actor-login">{entry.actor?.login ?? t('ghost')}</span>
-          {entry.outcome ? (
-            <>
-              <PullRequestReviewOutcomeIcon
-                outcome={entry.outcome}
-                className={entry.stale ? 'mrpr-hover-stale' : ''}
-              />
-              <span className="mrpr-sr-only">{outcomeLabel(entry.outcome, entry.stale)}</span>
-            </>
-          ) : (
-            <>
-              <CircleDashed aria-hidden className="mrpr-icon mrpr-tone-muted" />
-              <span className="mrpr-sr-only">{t('hoverCard.awaitingReview')}</span>
-            </>
-          )}
-        </span>
-      ))}
-      {pr.requestedTeams.map((team) => (
-        <PullRequestLabelChip key={`team:${team}`} label={{ name: team, color: null }} />
-      ))}
+      {shown.map((entry) =>
+        typeof entry === 'string' ? (
+          <PullRequestLabelChip key={`team:${entry}`} label={{ name: entry, color: null }} />
+        ) : (
+          <span key={entry.key} className="mrpr-hover-reviewer">
+            <PullRequestActorAvatar actor={entry.actor} />
+            <span className="mrpr-truncate mrpr-actor-login">
+              {entry.actor?.login ?? t('ghost')}
+            </span>
+            {entry.outcome ? (
+              <>
+                <PullRequestReviewOutcomeIcon
+                  outcome={entry.outcome}
+                  className={entry.stale ? 'mrpr-hover-stale' : ''}
+                />
+                <span className="mrpr-sr-only">{outcomeLabel(entry.outcome, entry.stale)}</span>
+              </>
+            ) : (
+              <>
+                <CircleDashed aria-hidden className="mrpr-icon mrpr-tone-muted" />
+                <span className="mrpr-sr-only">{t('hoverCard.awaitingReview')}</span>
+              </>
+            )}
+          </span>
+        )
+      )}
+      {more > 0 ? (
+        <span className="mrpr-hover-muted">{t('threadPullRequests.more', { count: more })}</span>
+      ) : null}
     </div>
   );
 }

@@ -34,7 +34,7 @@ A pointer that rests on a chip for 150 ms, on a card or in the strip, opens a ca
 - the head and base branches, with a warning when the branch conflicts with its base or is behind it
 - the lines, files, commits and comments
 - the checks' summary, when the chip shows their mark (an open pull request, with a token)
-- each reviewer's latest verdict, and the reviewers and teams still asked for a review, with a token
+- each reviewer's latest verdict, and the reviewers and teams still asked for a review, six at most and the count of the rest, with a token
 - the first five labels and the count of the rest
 - a note that a click opens the pull request in the side panel, when it does
 
