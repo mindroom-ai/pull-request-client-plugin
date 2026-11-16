@@ -101,7 +101,8 @@ export function useHoverCard(trigger: HTMLElement | null, focusable: boolean): b
 
 /**
  * Keeps `card` by its chip (`anchor`) and on screen: placed before the first paint, and again when
- * its content changes its size, the page scrolls or the window resizes.
+ * its width changes (as on a page zoom), the page scrolls or the window resizes. Its height takes
+ * no part: the card grows away from its chip, and its cap comes from the room beside the chip.
  */
 function usePlacement(anchor: HTMLElement, card: HTMLElement | null) {
   useLayoutEffect(() => {
@@ -259,7 +260,7 @@ function Details({
         <span className="mrpr-truncate">
           {forkOwner ? `${forkOwner}:${pr.headRef}` : pr.headRef}
         </span>
-        <span aria-hidden className="mrpr-shrink-0">
+        <span aria-hidden className="mrpr-shrink-0 mrpr-arrow-back">
           →
         </span>
         <span className="mrpr-truncate">{pr.baseRef}</span>

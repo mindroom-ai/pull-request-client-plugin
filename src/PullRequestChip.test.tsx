@@ -523,6 +523,8 @@ describe('PullRequestChip hover card', () => {
     expect(text(row('people'))).toContain('opened 2 days ago');
     expect(text(row('people'))).toContain('updated 3 hours ago');
     expect(text(row('branches'))).toBe('chip-hover-card→main');
+    // The arrow turns around in right-to-left, where the head branch is on the right.
+    expect(row('branches')?.querySelector('[aria-hidden].mrpr-arrow-back')?.textContent).toBe('→');
     expect(text(row('size'))).toContain('+120-30');
     expect(text(row('size'))).toContain('6 files');
     expect(text(row('size'))).toContain('4 commits');
