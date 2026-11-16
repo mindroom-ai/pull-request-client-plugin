@@ -567,6 +567,18 @@ describe('PullRequestChip hover card', () => {
     expect(tooltip.querySelector('.mrpr-hover-base-warning')).toBeNull();
   });
 
+  it('shows the approval of a reviewer asked again after it, as the panel does', async () => {
+    saveToken();
+    serve(full({ requested_reviewers: [user('bob')] }), [], [approval('bob')]);
+    const { tooltip } = await openCard();
+    const bob = () =>
+      [...tooltip.querySelectorAll('.mrpr-hover-reviewer')].find(
+        (entry) => text(entry.querySelector('.mrpr-actor-login')) === 'bob'
+      );
+    await vi.waitFor(() => expect(text(bob())).toContain('Approved'));
+    expect(tooltip.querySelectorAll('.mrpr-hover-reviewer')).toHaveLength(1);
+  });
+
   it('asks for the reviews only once the card opens, in one request', async () => {
     saveToken();
     serve(full(), [], [approval('bob')]);

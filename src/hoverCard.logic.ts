@@ -1,7 +1,5 @@
-// What a pull request chip's hover card works out before it draws: where it goes on screen, the
-// labels it shows and the reviewers it lists.
-import { latestReviewOutcomes, type ReviewOutcome } from './detail/detail.logic';
-import type { Actor, Review } from './github';
+// What a pull request chip's hover card works out before it draws: where it goes on screen and the
+// labels it shows.
 
 type Box = { left: number; top: number; right: number; bottom: number };
 
@@ -49,23 +47,4 @@ const SHOWN_LABELS = 5;
 /** The labels the card shows, five at most, and the count of the rest. */
 export function splitLabels<T>(labels: readonly T[]): { shown: T[]; more: number } {
   return { shown: labels.slice(0, SHOWN_LABELS), more: Math.max(0, labels.length - SHOWN_LABELS) };
-}
-
-// GitHub's login casing varies between its lists.
-const loginKey = (login: string) => login.toLowerCase();
-
-/**
- * The reviewers the card lists: each one's latest verdict (`latestReviewOutcomes`), and those
- * asked for a review that is still to come. A reviewer asked again after a verdict is pending.
- */
-export function hoverCardReviewers(
-  reviews: Review[],
-  headSha: string,
-  requested: Actor[]
-): { verdicts: ReviewOutcome[]; pending: Actor[] } {
-  const asked = new Set(requested.map((actor) => loginKey(actor.login)));
-  const verdicts = latestReviewOutcomes(reviews, headSha).filter(
-    (entry) => !entry.actor || !asked.has(loginKey(entry.actor.login))
-  );
-  return { verdicts, pending: requested };
 }

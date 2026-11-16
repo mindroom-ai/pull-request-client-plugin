@@ -4,10 +4,15 @@ import { useEffect, useLayoutEffect, useState } from 'react';
 import { config, Portal, useTooltipContainer } from 'folds';
 import { usePluginTranslation } from '@mindroom/client-sdk/core';
 import { CircleDashed, TriangleAlert } from 'lucide-react';
-import { checksState, summarizeChecks } from './detail/detail.logic';
+import {
+  checksState,
+  joinReviewers,
+  latestReviewOutcomes,
+  summarizeChecks,
+} from './detail/detail.logic';
 import type { PullRequest, PullRequestCheck, PullRequestRef } from './github';
 import { useGitHubErrorMessage } from './GitHubErrorState';
-import { hoverCardPlacement, hoverCardReviewers, splitLabels } from './hoverCard.logic';
+import { hoverCardPlacement, splitLabels } from './hoverCard.logic';
 import {
   PullRequestActorAvatar,
   PullRequestActorLabel,
@@ -325,33 +330,33 @@ function ReviewsRow({ pullRequest, pr }: { pullRequest: PullRequestRef; pr: Pull
       <div className="mrpr-hover-reviews mrpr-hover-muted">{t('summary.loadingReviewers')}</div>
     );
   }
-  const { verdicts, pending } = hoverCardReviewers(
-    reviews.data.items,
-    pr.headSha,
+  const reviewers = joinReviewers(
+    latestReviewOutcomes(reviews.data.items, pr.headSha),
     pr.requestedReviewers
   );
-  if (verdicts.length === 0 && pending.length === 0 && pr.requestedTeams.length === 0) {
+  if (reviewers.length === 0 && pr.requestedTeams.length === 0) {
     return <div className="mrpr-hover-reviews mrpr-hover-muted">{t('hoverCard.noReviews')}</div>;
   }
   return (
     <div className="mrpr-hover-reviews">
-      {verdicts.map((entry) => (
-        <span key={`verdict:${entry.login}`} className="mrpr-hover-reviewer">
+      {reviewers.map((entry) => (
+        <span key={entry.key} className="mrpr-hover-reviewer">
           <PullRequestActorAvatar actor={entry.actor} />
           <span className="mrpr-truncate mrpr-actor-login">{entry.actor?.login ?? t('ghost')}</span>
-          <PullRequestReviewOutcomeIcon
-            outcome={entry.verdict}
-            className={entry.stale ? 'mrpr-hover-stale' : ''}
-          />
-          <span className="mrpr-sr-only">{outcomeLabel(entry.verdict, entry.stale)}</span>
-        </span>
-      ))}
-      {pending.map((actor) => (
-        <span key={`pending:${actor.login}`} className="mrpr-hover-reviewer">
-          <PullRequestActorAvatar actor={actor} />
-          <span className="mrpr-truncate mrpr-actor-login">{actor.login}</span>
-          <CircleDashed aria-hidden className="mrpr-icon mrpr-tone-muted" />
-          <span className="mrpr-sr-only">{t('hoverCard.awaitingReview')}</span>
+          {entry.outcome ? (
+            <>
+              <PullRequestReviewOutcomeIcon
+                outcome={entry.outcome}
+                className={entry.stale ? 'mrpr-hover-stale' : ''}
+              />
+              <span className="mrpr-sr-only">{outcomeLabel(entry.outcome, entry.stale)}</span>
+            </>
+          ) : (
+            <>
+              <CircleDashed aria-hidden className="mrpr-icon mrpr-tone-muted" />
+              <span className="mrpr-sr-only">{t('hoverCard.awaitingReview')}</span>
+            </>
+          )}
         </span>
       ))}
       {pr.requestedTeams.map((team) => (

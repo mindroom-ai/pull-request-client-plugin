@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Actor, Review } from './github';
-import { hoverCardPlacement, hoverCardReviewers, splitLabels } from './hoverCard.logic';
+import { hoverCardPlacement, splitLabels } from './hoverCard.logic';
 
 const VIEWPORT = { width: 1000, height: 800 };
 const CARD = { width: 360, height: 200 };
@@ -43,36 +42,5 @@ describe('splitLabels', () => {
 
   it('shows all of five or fewer', () => {
     expect(splitLabels(labels(5))).toEqual({ shown: labels(5), more: 0 });
-  });
-});
-
-describe('hoverCardReviewers', () => {
-  const actor = (login: string): Actor => ({
-    login,
-    name: null,
-    avatarUrl: null,
-    url: null,
-    isBot: false,
-  });
-  const review = (id: number, login: string, state: Review['state'], at: string): Review => ({
-    id,
-    state,
-    author: actor(login),
-    body: '',
-    commitId: 'head',
-    submittedAt: at,
-    url: '',
-  });
-
-  it('gives each verdict and the reviewers still asked, a re-requested one as pending', () => {
-    const reviews = [
-      review(1, 'ann', 'CHANGES_REQUESTED', '2026-11-01T00:00:00Z'),
-      review(2, 'ann', 'APPROVED', '2026-11-02T00:00:00Z'),
-      review(3, 'bob', 'APPROVED', '2026-11-02T00:00:00Z'),
-      review(4, 'cid', 'COMMENTED', '2026-11-02T00:00:00Z'),
-    ];
-    const { verdicts, pending } = hoverCardReviewers(reviews, 'head', [actor('Bob'), actor('dee')]);
-    expect(verdicts.map((entry) => [entry.login, entry.verdict])).toEqual([['ann', 'approved']]);
-    expect(pending.map((entry) => entry.login)).toEqual(['Bob', 'dee']);
   });
 });

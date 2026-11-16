@@ -20,6 +20,7 @@ import {
   conversationItems,
   filterConversationItems,
   groupChecks,
+  joinReviewers,
   latestReviewOutcomes,
   summarizeChecks,
   visibleBody,
@@ -155,6 +156,36 @@ const eventKey = (event: TimelineEvent): string | string[] => {
       return event.kind;
   }
 };
+
+describe('joinReviewers', () => {
+  const join = (reviews: Review[], requested: Actor[]) =>
+    joinReviewers(latestReviewOutcomes(reviews, 'head'), requested).map((entry) => [
+      entry.key,
+      entry.outcome,
+      entry.stale,
+    ]);
+
+  it('lists those asked first, each with their own verdict, then the verdicts of the others', () => {
+    expect(
+      join(
+        [
+          review(1, 'bilal', 'CHANGES_REQUESTED', '2026-07-01T00:00:00Z'),
+          review(2, 'cora', 'APPROVED', '2026-07-02T00:00:00Z', { author: null }),
+        ],
+        [actor('dee'), actor('bilal')]
+      )
+    ).toEqual([
+      ['dee', null, false],
+      ['bilal', 'changes-requested', false],
+      ['ghost:2', 'approved', false],
+    ]);
+  });
+
+  it('keeps the approval of a reviewer asked again after it, whatever the casing of the login', () => {
+    const approval = review(1, 'bilal', 'APPROVED', '2026-07-01T00:00:00Z', { commitId: 'old' });
+    expect(join([approval], [actor('Bilal')])).toEqual([['Bilal', 'approved', true]]);
+  });
+});
 
 describe('latestReviewOutcomes', () => {
   it("keeps each reviewer's last word, whatever order the host returned them in", () => {

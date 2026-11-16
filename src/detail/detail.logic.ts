@@ -77,6 +77,50 @@ export function latestReviewOutcomes(reviews: Review[], headSha: string): Review
   );
 }
 
+export type Reviewer = {
+  key: string;
+  actor: Actor | null;
+  outcome: ReviewOutcome['verdict'] | null;
+  stale: boolean;
+};
+
+// GitHub's login casing varies between its lists.
+const reviewerKey = (login: string) => login.toLowerCase();
+
+/**
+ * A pull request's reviewers, as the panel and a chip's hover card list them: those asked for a
+ * review (`requested`), each with their latest verdict if they gave one, then the verdicts of the
+ * others. GitHub drops a reviewer from the requested ones once they review, so one asked again
+ * keeps the verdict they gave before.
+ */
+export function joinReviewers(outcomes: ReviewOutcome[], requested: Actor[]): Reviewer[] {
+  const byLogin = new Map(
+    outcomes.flatMap((entry) =>
+      entry.actor ? [[reviewerKey(entry.actor.login), entry] as const] : []
+    )
+  );
+  const asked = new Set(requested.map((actor) => reviewerKey(actor.login)));
+  return [
+    ...requested.map((actor) => {
+      const entry = byLogin.get(reviewerKey(actor.login));
+      return {
+        key: actor.login,
+        actor,
+        outcome: entry?.verdict ?? null,
+        stale: entry?.stale ?? false,
+      };
+    }),
+    ...outcomes
+      .filter((entry) => !entry.actor || !asked.has(reviewerKey(entry.actor.login)))
+      .map((entry) => ({
+        key: entry.login,
+        actor: entry.actor,
+        outcome: entry.verdict,
+        stale: entry.stale,
+      })),
+  ];
+}
+
 export type ChecksState = 'none' | 'passing' | 'failing' | 'pending';
 
 /** The checks taken together: failing over pending over passing. */
