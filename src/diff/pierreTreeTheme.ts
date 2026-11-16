@@ -17,6 +17,8 @@ export const PIERRE_TREE_UNSAFE_CSS = `
   [data-truncate-content='visible'] { overflow: hidden; text-overflow: ellipsis; }
   [data-truncate-marker] { display: none; }
   button[data-type='item'], button[data-type='item']::before { border-radius: 6px; }
+  /* A folder's changed lines, which line up from row to row. */
+  [data-item-section='decoration'] > span { gap: 0.35em; font-variant-numeric: tabular-nums; }
 `;
 
 export function pierreTreeStyle(colorScheme: 'light' | 'dark'): CSSProperties {

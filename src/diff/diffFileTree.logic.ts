@@ -11,7 +11,12 @@ import {
 
 import { resolveFileDiffPath } from './diffRendering';
 
-export interface DiffFileTreeEntry {
+export interface DiffFileTreeLines {
+  readonly additions: number;
+  readonly deletions: number;
+}
+
+export interface DiffFileTreeEntry extends DiffFileTreeLines {
   readonly path: string;
   readonly status: GitStatus;
 }
@@ -69,6 +74,28 @@ export function collectDirectoryPaths(paths: ReadonlyArray<string>): ReadonlyArr
     }
   }
   return [...directories];
+}
+
+/**
+ * The added and deleted lines of each directory, summed over the files under it, keyed by Pierre's
+ * `dir/` paths. A file aliased by `diffFileTreeModel` changes only its own name, so these keys
+ * are the model's directories too.
+ */
+export function diffFileTreeDirectoryLines(
+  entries: ReadonlyArray<Pick<DiffFileTreeEntry, 'path' | 'additions' | 'deletions'>>
+): ReadonlyMap<string, DiffFileTreeLines> {
+  const lines = new Map<string, { additions: number; deletions: number }>();
+  for (const entry of entries) {
+    let directory = '';
+    for (const segment of entry.path.split('/').slice(0, -1)) {
+      directory += `${segment}/`;
+      const sum = lines.get(directory) ?? { additions: 0, deletions: 0 };
+      sum.additions += entry.additions;
+      sum.deletions += entry.deletions;
+      lines.set(directory, sum);
+    }
+  }
+  return lines;
 }
 
 export function diffFileTreePositions(paths: ReadonlyArray<string>): ReadonlyMap<string, number> {

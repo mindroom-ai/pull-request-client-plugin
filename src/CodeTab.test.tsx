@@ -74,21 +74,50 @@ vi.mock('@pierre/diffs/react', async () => {
 
 vi.mock('@pierre/trees/react', async () => {
   const { useState, useSyncExternalStore } = await import('react');
-  type Options = { onSelectionChange?: (paths: readonly string[]) => void };
+  type Decoration = { text: string; title?: string; parts?: { text: string; color?: string }[] };
+  type Options = {
+    onSelectionChange?: (paths: readonly string[]) => void;
+    renderRowDecoration?: (context: {
+      item: { kind: 'directory' | 'file'; name: string; path: string };
+    }) => Decoration | null;
+  };
   type Entry = { path: string; status: string };
   const createModel = (options: Options) => {
-    let state = { paths: [] as readonly string[], statuses: new Map<string, string>() };
+    let state = {
+      paths: [] as readonly string[],
+      statuses: new Map<string, string>(),
+      folders: [] as [string, Decoration | null][],
+    };
     const listeners = new Set<() => void>();
+    // Like Pierre, it draws the folders' decorations when it draws its rows: on a change of
+    // paths or git status, or when its composition is set.
     const update = (next: Partial<typeof state>) => {
-      state = { ...state, ...next };
+      const paths = next.paths ?? state.paths;
+      const directories = paths.flatMap((path) => {
+        const segments = path.split('/').slice(0, -1);
+        return segments.map((_, index) => `${segments.slice(0, index + 1).join('/')}/`);
+      });
+      const folders = [...new Set(directories)].map((path): [string, Decoration | null] => [
+        path,
+        options.renderRowDecoration?.({ item: { kind: 'directory', name: path, path } }) ?? null,
+      ]);
+      state = { ...state, ...next, folders };
       listeners.forEach((listener) => listener());
     };
     return {
       options,
       state: () => state,
       resetPaths: (paths: readonly string[]) => update({ paths }),
-      setGitStatus: (entries: readonly Entry[] = []) =>
-        update({ statuses: new Map(entries.map((entry) => [entry.path, entry.status])) }),
+      // Pierre draws nothing again for the git status it has.
+      setGitStatus: (entries: readonly Entry[] = []) => {
+        const statuses = new Map(entries.map((entry) => [entry.path, entry.status]));
+        const same =
+          statuses.size === state.statuses.size &&
+          [...statuses].every(([path, status]) => state.statuses.get(path) === status);
+        if (!same) update({ statuses });
+      },
+      getComposition: () => undefined,
+      setComposition: () => update({}),
       // The tree adds and removes paths in batches; this applies the files' ones, in order.
       batch: (operations: readonly { type: string; path: string }[]) => {
         let paths = state.paths;
@@ -121,17 +150,33 @@ vi.mock('@pierre/trees/react', async () => {
     },
     useFileTreeSelector: (model: Model, selector: (model: Model) => unknown) => selector(model),
     FileTree: ({ model, 'aria-label': label }: { model: Model; 'aria-label'?: string }) => {
-      const { paths, statuses } = useSyncExternalStore(model.subscribe, model.state);
+      const { paths, statuses, folders } = useSyncExternalStore(model.subscribe, model.state);
       return (
-        <ul aria-label={label}>
-          {paths.map((path) => (
-            <li key={path} data-status={statuses.get(path)}>
-              <button type="button" onClick={() => model.options.onSelectionChange?.([path])}>
-                {path}
-              </button>
-            </li>
-          ))}
-        </ul>
+        <>
+          <ul aria-label={label}>
+            {paths.map((path) => (
+              <li key={path} data-status={statuses.get(path)}>
+                <button type="button" onClick={() => model.options.onSelectionChange?.([path])}>
+                  {path}
+                </button>
+              </li>
+            ))}
+          </ul>
+          <div data-testid="tree-folders">
+            {folders.map(([path, decoration]) =>
+              decoration === null ? null : (
+                <span
+                  key={path}
+                  data-path={path}
+                  title={decoration.title}
+                  data-colors={decoration.parts?.map((part) => part.color).join(' ')}
+                >
+                  {decoration.text}
+                </span>
+              )
+            )}
+          </div>
+        </>
       );
     },
   };
@@ -337,6 +382,13 @@ const chooseCommit = async (tabView: Awaited<ReturnType<typeof show>>, name: Reg
 
 const treeItems = (tree: HTMLElement) =>
   [...tree.querySelectorAll('li')].map((item) => [item.textContent, item.dataset.status]);
+// The changed lines the tree shows on its folders, by folder.
+const folderLines = (tab: TabView) =>
+  Object.fromEntries(
+    [...tab.getByTestId('tree-folders').querySelectorAll<HTMLElement>('[data-path]')].map(
+      (folder) => [folder.dataset.path, folder.textContent]
+    )
+  );
 
 beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -753,6 +805,45 @@ describe('CodeTab', () => {
       expect(diffNames()).toEqual(['README.md', 'src/a.ts', 'src/a.test.ts']);
       expect(tab.getByText('No diff to show')).toBeTruthy();
       expect(tab.getByText('4 files')).toBeTruthy();
+    });
+
+    it("a folder's changed lines leave out the hidden test files", async () => {
+      const tab = await show({
+        files: [
+          file({ path: 'src/lib/a.ts', additions: 1200, deletions: 2 }),
+          file({ path: 'src/a.test.ts', additions: 30, deletions: 5 }),
+          file({ path: 'docs/moved.md', status: 'renamed', additions: 0, deletions: 0 }),
+          file({ path: 'README.md', additions: 100, deletions: 100 }),
+        ],
+      });
+      // Root files count in no folder, and a folder with no changed lines shows none.
+      expect(folderLines(tab)).toEqual({
+        'src/': `+${(1230).toLocaleString()} \u22127`,
+        'src/lib/': `+${(1200).toLocaleString()} \u22122`,
+      });
+      const src = tab.getByTestId('tree-folders').querySelector<HTMLElement>('[data-path="src/"]');
+      expect(src?.title).toBe('1230 lines added, 7 removed');
+      expect(src?.dataset.colors).toBe('var(--pr-added) var(--pr-removed)');
+
+      await click(tab.getByRole('button', { name: 'Hide test files' }));
+      expect(folderLines(tab)).toEqual({
+        'src/': `+${(1200).toLocaleString()} \u22122`,
+        'src/lib/': `+${(1200).toLocaleString()} \u22122`,
+      });
+    });
+
+    // Pierre draws its rows again for other paths or statuses, not for other counts alone.
+    it("draws a folder's new lines when the same files come back with other counts", async () => {
+      const client = new QueryClient();
+      const ui = (additions: number, deletions: number) => (
+        <QueryClientProvider client={client}>
+          <Holder files={[file({ path: 'src/a.ts', additions, deletions })]} />
+        </QueryClientProvider>
+      );
+      const tab = await renderPluginComponent(ui(3, 1), { id: 'pull-requests', plugin });
+      expect(folderLines(tab)).toEqual({ 'src/': '+3 \u22121' });
+      tab.rerender(ui(8, 4));
+      expect(folderLines(tab)).toEqual({ 'src/': '+8 \u22124' });
     });
 
     it('offers no test file toggle without test files', async () => {

@@ -2,15 +2,20 @@
 // The changed files as a tree, in Pierre's file tree, with a header that folds every folder.
 import { IconButton, IconTooltip, useThemeKind } from '@mindroom/client-sdk/ui';
 import { usePluginTranslation } from '@mindroom/client-sdk/core';
-import type { GitStatusEntry } from '@pierre/trees';
+import type {
+  FileTreeRowDecoration,
+  FileTreeRowDecorationContext,
+  GitStatusEntry,
+} from '@pierre/trees';
 import { FileTree, useFileTree, useFileTreeSelector } from '@pierre/trees/react';
 import { ChevronsDownUp, ChevronsUpDown } from 'lucide-react';
-import { useEffect, useInsertionEffect, useRef, useState } from 'react';
+import { useEffect, useInsertionEffect, useMemo, useRef, useState } from 'react';
 
 import {
   buildDiffFileTreeUpdates,
   compareDiffFileTreeEntries,
   collectDirectoryPaths,
+  diffFileTreeDirectoryLines,
   diffFileTreeModel,
   diffFileTreePositions,
   type DiffFileTreeEntry,
@@ -90,6 +95,7 @@ export function DiffFileTree({ entries, onSelectFile, ariaLabel }: DiffFileTreeP
     path: presented.modelPath(entry.path),
     status: entry.status,
   }));
+  const directoryLines = useMemo(() => diffFileTreeDirectoryLines(entries), [entries]);
   const syncingSelectionRef = useRef(false);
   const mountedPresentationRef = useRef<ReturnType<typeof diffFileTreeModel> | null>(null);
 
@@ -102,6 +108,26 @@ export function DiffFileTree({ entries, onSelectFile, ariaLabel }: DiffFileTreeP
     }
   });
 
+  // A folder's changed lines; a file's are in its diff's header. The tree model keeps the first
+  // renderer it was given, and draws after this component's commit, so this reads the latest counts.
+  const renderDirectoryLines = useStableCallback(
+    ({ item }: FileTreeRowDecorationContext): FileTreeRowDecoration | null => {
+      if (item.kind !== 'directory') return null;
+      const lines = directoryLines.get(item.path);
+      if (lines === undefined || (lines.additions === 0 && lines.deletions === 0)) return null;
+      const added = `+${lines.additions.toLocaleString()}`;
+      const removed = `\u2212${lines.deletions.toLocaleString()}`;
+      return {
+        text: `${added} ${removed}`,
+        title: t('code.folderLines', { count: lines.additions, deletions: lines.deletions }),
+        parts: [
+          { text: added, color: 'var(--pr-added)' },
+          { text: removed, color: 'var(--pr-removed)' },
+        ],
+      };
+    }
+  );
+
   const { model } = useFileTree({
     density: 'compact',
     flattenEmptyDirectories: true,
@@ -109,6 +135,7 @@ export function DiffFileTree({ entries, onSelectFile, ariaLabel }: DiffFileTreeP
     icons,
     onSelectionChange: handleSelectionChange,
     paths: [],
+    renderRowDecoration: renderDirectoryLines,
     search: false,
     sort: ordering.sort,
     unsafeCSS: PIERRE_TREE_UNSAFE_CSS,
@@ -170,6 +197,12 @@ export function DiffFileTree({ entries, onSelectFile, ariaLabel }: DiffFileTreeP
     }
     model.setGitStatus(gitStatus);
   }, [directoryPaths, gitStatus, model, modelPaths, ordering, positions, presented]);
+
+  // Pierre draws its rows again on a change of paths or git status, not of counts alone, as when
+  // another commit changed the same files. Setting its composition again draws them again.
+  useEffect(() => {
+    model.setComposition(model.getComposition());
+  }, [directoryLines, model, t]);
 
   const foldLabel = allDirectoriesExpanded ? t('code.collapseFolders') : t('code.expandFolders');
   return (
