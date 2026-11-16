@@ -16,6 +16,7 @@ import {
   sendStateEvent,
   type MatrixSession,
 } from '@mindroom/e2e/matrix';
+import { touch } from '@mindroom/e2e/touch';
 
 // A thread's pull requests in a production build with this plugin, against the disposable
 // homeserver, with GitHub's API answered by the page (no request leaves the test). The links are
@@ -26,7 +27,8 @@ import {
 // a link written or cleared while the room is open shows on its card at once, also after a gap in
 // the room's sync; the room's six threads leave the SDK's emitters within their listener limit; and
 // a thread's worktree, which MindRoom's `thread-worktree` backend plugin writes, shows as its
-// branch on its card and in the strip until it is cleared.
+// branch on its card and in the strip until it is cleared; and a thread's pull requests show as its
+// details in the card's hover card and, on a phone, in the menu a long press opens.
 // Set MRPR_SHOTS=<directory> to save the screenshots of the pull request.
 
 const LINK_EVENT = 'com.mindroom.thread.pull_request';
@@ -35,6 +37,13 @@ const PASSWORD = 'thread-pull-requests-password';
 const RUN = Date.now().toString(36);
 const DESKTOP = { width: 1280, height: 800 };
 const PHONE = { width: 390, height: 844 };
+const PHONE_CONTEXT = {
+  viewport: PHONE,
+  deviceScaleFactor: 2,
+  hasTouch: true,
+  isMobile: true,
+  serviceWorkers: 'block',
+} as const;
 
 test.use({ viewport: DESKTOP, deviceScaleFactor: 2, serviceWorkers: 'block' });
 
@@ -502,13 +511,14 @@ const openRoom = async (page: Page) => {
   await expect(card(page, roots.sessions)).toBeVisible({ timeout: 120_000 });
 };
 
-const shot = async (page: Page, name: string) => {
+/** Saves a screenshot; `keepPointer` leaves the pointer where it is, as a hover card needs. */
+const shot = async (page: Page, name: string, { keepPointer = false } = {}) => {
   const directory = process.env.MRPR_SHOTS;
   if (!directory) return;
   // A new session's "Catching up..." pill over the room goes with its next sync; no hover or
-  // tooltip either.
+  // tooltip either, unless the shot is of one.
   await expect(page.getByText(/^Catching up/)).toHaveCount(0, { timeout: 60_000 });
-  await page.mouse.move(0, 0);
+  if (!keepPointer) await page.mouse.move(0, 0);
   await page.screenshot({ path: join(directory, `${name}.png`) });
 };
 
@@ -600,14 +610,7 @@ test('a link written or cleared while the room is open shows on its card at once
 
 test('on a phone a card shows one chip and the count of the rest', async ({ browser, baseURL }) => {
   test.setTimeout(4 * 60_000);
-  const context = await browser.newContext({
-    baseURL,
-    viewport: PHONE,
-    deviceScaleFactor: 2,
-    hasTouch: true,
-    isMobile: true,
-    serviceWorkers: 'block',
-  });
+  const context = await browser.newContext({ baseURL, ...PHONE_CONTEXT });
   const page = await context.newPage();
   try {
     const unanswered = await stubGitHub(page);
@@ -651,6 +654,72 @@ test('on a phone a card shows one chip and the count of the rest', async ({ brow
     await shot(page, 'phone-branch-repo');
     await writeWorktree(roots.webhooks, {});
     await expect(branch).toHaveCount(0);
+    expect(unanswered).toEqual([]);
+    expect(warnings).toEqual([]);
+  } finally {
+    await context.close();
+  }
+});
+
+/** Expects `details` to show the pull requests `pulls` in order, each by its title from GitHub. */
+const expectDetailsTitles = async (details: Locator, pulls: Pull[]) => {
+  const blocks = details.locator('.mrpr-details-pull-request');
+  await expect(blocks).toHaveCount(pulls.length);
+  await expect(blocks.locator('.mrpr-details-title')).toHaveText(
+    pulls.map((pull) => pull.title),
+    { timeout: 30_000 }
+  );
+};
+
+test("resting the pointer on a card shows all its pull requests' details", async ({ page }) => {
+  test.setTimeout(4 * 60_000);
+  const unanswered = await stubGitHub(page);
+  const warnings = listenerWarnings(page);
+  await openRoom(page);
+  const details = page.locator('[data-thread-card-details]');
+  const [rateLimit] = THREADS.release.pulls;
+
+  // All three pull requests, also the one the card's chips leave to their count.
+  await card(page, roots.release).hover();
+  await expectDetailsTitles(details, THREADS.release.pulls);
+  await expect(
+    details
+      .locator('.mrpr-details-pull-request')
+      .first()
+      .getByText(`${rateLimit.branch} → main`, { exact: true })
+  ).toBeVisible();
+  await shot(page, 'details-light', { keepPointer: true });
+
+  await page.mouse.move(0, 0);
+  await expect(details).toHaveCount(0);
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await expect(page.locator('html')).toHaveAttribute('data-theme-kind', 'dark');
+  await card(page, roots.release).hover();
+  await expectDetailsTitles(details, THREADS.release.pulls);
+  await shot(page, 'details-dark', { keepPointer: true });
+  expect(unanswered).toEqual([]);
+  expect(warnings).toEqual([]);
+});
+
+test('on a phone a long press on a card opens its menu with the details', async ({
+  browser,
+  baseURL,
+}) => {
+  test.setTimeout(4 * 60_000);
+  const context = await browser.newContext({ baseURL, ...PHONE_CONTEXT });
+  const page = await context.newPage();
+  try {
+    const unanswered = await stubGitHub(page);
+    const warnings = listenerWarnings(page);
+    await openRoom(page);
+    await touch(card(page, roots.sessions), [
+      { type: 'start' },
+      { type: 'wait', ms: 700 },
+      { type: 'end' },
+    ]);
+    const details = page.getByRole('menu').locator('[data-thread-details]');
+    await expectDetailsTitles(details, [PULLS.sessionStore, PULLS.tokenEndpoint]);
+    await shot(page, 'phone-details-menu', { keepPointer: true });
     expect(unanswered).toEqual([]);
     expect(warnings).toEqual([]);
   } finally {
