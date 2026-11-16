@@ -23,6 +23,7 @@ import {
 // thread's card in the Compact view shows a chip per pull request, two at most (one on a phone) and
 // the count of the rest; a click on a chip opens the thread and the pull request in the side
 // panel; the strip under the room header has the thread's chips as buttons, the panel's pressed;
+// a mouse that rests on a chip, on a card or in the strip, opens its hover card beside it;
 // a link written or cleared while the room is open shows on its card at once, also after a gap in
 // the room's sync; the room's six threads leave the SDK's emitters within their listener limit; and
 // a thread's worktree, which MindRoom's `thread-worktree` backend plugin writes, shows as its
@@ -52,6 +53,8 @@ type Pull = {
   body: string;
   labels?: string[];
   approvedBy?: string;
+  /** Asked for a review that has not come yet. */
+  reviewer?: string;
   comment?: { author: string; body: string };
 };
 
@@ -66,6 +69,7 @@ const PULLS = {
     author: 'acme-builder',
     body: 'Moves the session store from Postgres to Redis behind the `SessionStore` interface.',
     labels: ['backend', 'performance'],
+    reviewer: 'platform-lead',
     comment: {
       author: 'platform-lead',
       body: 'Keep the Postgres fallback until the cache is warm after a deploy.',
@@ -171,7 +175,7 @@ const apiPull = (pull: Pull) => {
     body: pull.body,
     user: gitHubUser(pull.author),
     labels: (pull.labels ?? []).map((name) => ({ name, color: '0e8a16' })),
-    requested_reviewers: [],
+    requested_reviewers: pull.reviewer ? [gitHubUser(pull.reviewer)] : [],
     requested_teams: [],
     mergeable_state: done ? null : 'clean',
     auto_merge: null,
@@ -503,13 +507,13 @@ const openRoom = async (page: Page) => {
   await expect(card(page, roots.sessions)).toBeVisible({ timeout: 120_000 });
 };
 
-const shot = async (page: Page, name: string) => {
+const shot = async (page: Page, name: string, { keepPointer = false } = {}) => {
   const directory = process.env.MRPR_SHOTS;
   if (!directory) return;
   // A new session's "Catching up..." pill over the room goes with its next sync; no hover or
-  // tooltip either.
+  // tooltip either, unless the shot is of one.
   await expect(page.getByText(/^Catching up/)).toHaveCount(0, { timeout: 60_000 });
-  await page.mouse.move(0, 0);
+  if (!keepPointer) await page.mouse.move(0, 0);
   await page.screenshot({ path: join(directory, `${name}.png`) });
 };
 
@@ -571,6 +575,99 @@ test('a chip on a card opens the thread and its pull request; the strip switches
   await expect(panel(page).getByText(/^Loading/)).toHaveCount(0);
   await expect(page.getByText(THREADS.sessions.replies[2][1], { exact: true })).toBeVisible();
   await shot(page, 'thread-panel');
+  expect(unanswered).toEqual([]);
+  expect(warnings).toEqual([]);
+});
+
+const hoverCard = (page: Page) => page.getByRole('tooltip');
+
+/**
+ * Expects the hover card inside the window and beside `chip`: below a chip in the upper half of
+ * the window, above one in the lower half; as tall as its content, which ends where it does (but
+ * for its padding); and with its author's login whole.
+ */
+const expectBeside = async (page: Page, chip: Locator) => {
+  const { emptyBelow, loginCut } = await hoverCard(page).evaluate((element) => {
+    const last = element.lastElementChild?.getBoundingClientRect().bottom ?? 0;
+    const login = element.querySelector('.mrpr-hover-people .mrpr-actor-login');
+    return {
+      emptyBelow: element.getBoundingClientRect().bottom - last,
+      loginCut: login ? login.scrollWidth > login.clientWidth : false,
+    };
+  });
+  expect(emptyBelow).toBeLessThan(16);
+  expect(loginCut).toBe(false);
+  const card = await hoverCard(page).boundingBox();
+  const at = await chip.boundingBox();
+  const window = page.viewportSize();
+  if (!card || !at || !window) throw new Error('No box for the hover card or its chip');
+  expect(card.x).toBeGreaterThanOrEqual(0);
+  expect(card.y).toBeGreaterThanOrEqual(0);
+  expect(card.x + card.width).toBeLessThanOrEqual(window.width);
+  expect(card.y + card.height).toBeLessThanOrEqual(window.height);
+  if (at.y + at.height / 2 <= window.height / 2) {
+    expect(card.y).toBeGreaterThanOrEqual(at.y + at.height);
+  } else {
+    expect(card.y + card.height).toBeLessThanOrEqual(at.y);
+  }
+};
+
+/** Saves the shot `name` in the light theme and in the dark one, and goes back to the light. */
+const shotBothThemes = async (page: Page, name: string) => {
+  await shot(page, `${name}-light`, { keepPointer: true });
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await expect(page.locator('html')).toHaveAttribute('data-theme-kind', 'dark');
+  await shot(page, `${name}-dark`, { keepPointer: true });
+  await page.emulateMedia({ colorScheme: 'light' });
+  await expect(page.locator('html')).toHaveAttribute('data-theme-kind', 'light');
+};
+
+test("a chip's hover card shows its pull request, on a card and in the strip", async ({ page }) => {
+  test.setTimeout(4 * 60_000);
+  const unanswered = await stubGitHub(page);
+  const warnings = listenerWarnings(page);
+  await openRoom(page);
+  const [sessionStore, tokenEndpoint] = THREADS.sessions.pulls;
+  const chips = cardChips(page, roots.sessions);
+  await expectChips(chips, [sessionStore, tokenEndpoint]);
+
+  // On a card: the pull request, its checks and its reviewer's verdict, which it asks for now.
+  await chips.nth(1).hover();
+  await expect(hoverCard(page)).toContainText(tokenEndpoint.title);
+  await expect(hoverCard(page)).toContainText('All checks have passed');
+  await expect(hoverCard(page)).toContainText(PULLS.tokenEndpoint.approvedBy);
+  await expect(hoverCard(page)).toContainText('Click to open in the side panel');
+  await expectBeside(page, chips.nth(1));
+  await shotBothThemes(page, 'hover-card');
+  await page.mouse.move(0, 0);
+  await expect(hoverCard(page)).toHaveCount(0);
+
+  // A closed pull request lower in the room: its close, and no checks.
+  const [, ipRateLimit] = THREADS.release.pulls;
+  const release = cardChips(page, roots.release).nth(1);
+  await release.scrollIntoViewIfNeeded();
+  await release.hover();
+  await expect(hoverCard(page)).toContainText(ipRateLimit.title);
+  await expect(hoverCard(page)).toContainText('Closed');
+  await expect(hoverCard(page)).toContainText(/closed \d+ hours? ago/);
+  await expect(hoverCard(page).locator('.mrpr-hover-checks')).toHaveCount(0);
+  await expectBeside(page, release);
+  await shot(page, 'hover-card-closed', { keepPointer: true });
+  await page.mouse.move(0, 0);
+
+  // In the strip of the open thread, with the reviewer still asked.
+  await chips.first().click();
+  await expect(banner(page)).toContainText(THREADS.sessions.topic, { timeout: 30_000 });
+  const buttons = strip(page).getByRole('button');
+  await expectChips(buttons, [sessionStore, tokenEndpoint]);
+  await buttons.first().hover();
+  await expect(hoverCard(page)).toContainText(sessionStore.title);
+  await expect(hoverCard(page).locator('.mrpr-hover-reviewer')).toContainText(
+    PULLS.sessionStore.reviewer
+  );
+  await expect(hoverCard(page)).toContainText('Click to open in the side panel');
+  await expectBeside(page, buttons.first());
+  await shotBothThemes(page, 'hover-strip');
   expect(unanswered).toEqual([]);
   expect(warnings).toEqual([]);
 });
