@@ -202,6 +202,29 @@ describe('ThreadCardPullRequests', () => {
     expect(page.navigateRoomThread).not.toHaveBeenCalled();
   });
 
+  it("says in a chip's hover card that a click opens the side panel, only in a room page", async () => {
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: true, media: query }));
+    // The card's text, once a mouse rested on the chip; the card goes when the mouse leaves.
+    const hintOf = async (view: Awaited<ReturnType<typeof show>>) => {
+      const chip = chips(view)[0]!;
+      await act(async () => {
+        chip.dispatchEvent(new MouseEvent('mouseenter'));
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      });
+      const card = document.querySelector('[role="tooltip"]');
+      expect(card).not.toBeNull();
+      const hint = card?.querySelector('.mrpr-hover-hint')?.textContent ?? null;
+      await act(async () => chip.dispatchEvent(new MouseEvent('mouseleave')));
+      view.unmount();
+      return hint;
+    };
+    expect(await hintOf(await show(roomWith([{ number: 1 }])))).toBe(
+      'Click to open in the side panel'
+    );
+    page.panel = undefined;
+    expect(await hintOf(await show(roomWith([{ number: 1 }])))).toBeNull();
+  });
+
   it('has no button, link or tab stop', async () => {
     const view = await show(roomWith([{ number: 1 }, { number: 2 }, { number: 3 }]));
     expect(chips(view)).toHaveLength(2);

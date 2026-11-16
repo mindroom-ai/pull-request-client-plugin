@@ -1,10 +1,12 @@
-// A pull request in one line: its state's icon, its number and the mark of its checks. A thread's
-// card draws it as a span inside the card's button; the strip under the room header as a button.
+// A pull request in one line: its state's icon, its number and the mark of its checks, with a card
+// of its details while a mouse rests on it. A thread's card draws it as a span inside the card's
+// button; the strip under the room header as a button.
 import { useEffect, useState } from 'react';
 import { usePluginTranslation } from '@mindroom/client-sdk/core';
 import { GitPullRequestArrow } from 'lucide-react';
 import { checksState } from './detail/detail.logic';
 import type { PullRequestRef } from './github';
+import { PullRequestHoverCard, useHoverCard } from './PullRequestHoverCard';
 import { pullRequestChecksStatePresentation, resolvePullRequestState } from './presentation';
 import { useChecks, usePullRequest } from './queries';
 import { pluginRootStyle } from './theme';
@@ -31,6 +33,7 @@ export function PullRequestChip({
   showRepository,
   selected,
   onSelect,
+  opensPanel = false,
 }: {
   pullRequest: PullRequestRef;
   /** Whether the repository's name shows before the number. */
@@ -38,6 +41,8 @@ export function PullRequestChip({
   selected?: boolean;
   /** Given, the chip is a button that calls it; absent, the chip is a span for a thread card. */
   onSelect?: () => void;
+  /** Whether a click on a thread card's chip opens the pull request in the side panel. */
+  opensPanel?: boolean;
 }) {
   const t = usePluginTranslation('pull-requests');
   const [element, setElement] = useState<HTMLElement | null>(null);
@@ -45,7 +50,8 @@ export function PullRequestChip({
   const queried = useOnScreenOnce(element) ? pullRequest : undefined;
   // A chip asks again when it shows after its answer went stale, not when the tab regains focus:
   // every chip seen so far would ask at once, and without a token that spends the hourly limit.
-  const pr = usePullRequest(queried, NO_FOCUS_REFETCH).data;
+  const query = usePullRequest(queried, NO_FOCUS_REFETCH);
+  const pr = query.data;
   const { token } = useGitHubToken();
   // Only an open pull request, draft or not, has checks worth asking for, and only with a token:
   // without one, GitHub allows 60 requests an hour, kept for the pull requests and the panel.
@@ -65,13 +71,14 @@ export function PullRequestChip({
     ? t('chip.label', { ...values, state: t(`state.${state.key}`) })
     : t('chip.labelWithoutState', values);
   const name = pr?.title ? `${label}\n${pr.title}` : label;
+  // The hover card stands in for a title, which would show a second tooltip, a slow one.
+  const hoverCardOpen = useHoverCard(element, onSelect !== undefined);
   // The chip is drawn outside the card and the panel, so it sets the variables it draws with.
   const root = {
     ref: setElement,
     className: selected ? 'mrpr-chip mrpr-chip-selected' : 'mrpr-chip',
     style: pluginRootStyle(),
     'aria-label': name,
-    title: name,
   };
   const content = (
     <>
@@ -83,13 +90,27 @@ export function PullRequestChip({
       ) : null}
     </>
   );
-  return onSelect ? (
-    <button {...root} type="button" aria-pressed={selected} onClick={onSelect}>
-      {content}
-    </button>
-  ) : (
-    <span {...root} role="img">
-      {content}
-    </span>
+  return (
+    <>
+      {onSelect ? (
+        <button {...root} type="button" aria-pressed={selected} onClick={onSelect}>
+          {content}
+        </button>
+      ) : (
+        <span {...root} role="img">
+          {content}
+        </span>
+      )}
+      {hoverCardOpen && element ? (
+        <PullRequestHoverCard
+          anchor={element}
+          pullRequest={pullRequest}
+          pr={pr}
+          error={query.error}
+          checks={withChecks ? { items: checks.data?.items, failed: checks.isError } : undefined}
+          opensPanel={onSelect !== undefined || opensPanel}
+        />
+      ) : null}
+    </>
   );
 }

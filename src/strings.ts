@@ -215,6 +215,16 @@ export const en = {
     label: 'Pull request {{repository}} #{{number}}: {{state}}',
     labelWithoutState: 'Pull request {{repository}} #{{number}}',
   },
+  // The card a chip shows while a mouse rests on it.
+  hoverCard: {
+    merged: 'merged {{time}}',
+    closed: 'closed {{time}}',
+    conflicts: 'Conflicts with {{base}}',
+    behind: 'Behind {{base}}',
+    awaitingReview: 'Awaiting review',
+    noReviews: 'No reviews yet',
+    openInPanel: 'Click to open in the side panel',
+  },
   // A thread's pull requests: the count of those its card leaves out, and the name of the row of
   // their chips under the room header.
   threadPullRequests: {

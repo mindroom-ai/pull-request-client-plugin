@@ -2,6 +2,20 @@ import { usePluginTranslation } from '@mindroom/client-sdk/core';
 import { GitHubError } from './github';
 import { TokenForm, useGitHubToken, usePanelTokenFormFor } from './token';
 
+/** Why GitHub gave no answer, in one sentence, by the error and whether a token is stored. */
+export function useGitHubErrorMessage(error: unknown): string {
+  const t = usePluginTranslation('pull-requests');
+  const { token } = useGitHubToken();
+  const kind = error instanceof GitHubError ? error.kind : 'failed';
+  const status = error instanceof GitHubError ? error.status : 0;
+  if (kind === 'failed') {
+    return status === 0 ? t('error.failed') : t('error.failedStatus', { status });
+  }
+  return kind === 'notFound' && token !== undefined
+    ? t('error.notFoundWithToken')
+    : t(`error.${kind}`);
+}
+
 /**
  * What the card and the panel say when GitHub's answer is no pull request: why, and what to do.
  * A part inside the panel's tabs is `compact`: the reason and a retry, and, where a token would
@@ -19,18 +33,10 @@ export function GitHubErrorState({
   const t = usePluginTranslation('pull-requests');
   const { token, forget } = useGitHubToken();
   const focusTokenForm = usePanelTokenFormFor(compact ? error : undefined);
+  const message = useGitHubErrorMessage(error);
   const hasToken = token !== undefined;
   const kind = error instanceof GitHubError ? error.kind : 'failed';
-  const status = error instanceof GitHubError ? error.status : 0;
   const savedTokenNotFound = kind === 'notFound' && hasToken;
-  const message =
-    kind === 'failed'
-      ? status === 0
-        ? t('error.failed')
-        : t('error.failedStatus', { status })
-      : savedTokenNotFound
-      ? t('error.notFoundWithToken')
-      : t(`error.${kind}`);
   const retry = (
     <button className="mrpr-button" type="button" onClick={onRetry}>
       {t('error.retry')}

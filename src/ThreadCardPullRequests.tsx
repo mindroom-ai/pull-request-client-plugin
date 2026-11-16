@@ -76,7 +76,11 @@ function CardChips({
               : undefined
           }
         >
-          <PullRequestChip pullRequest={pullRequest} showRepository={showRepository} />
+          <PullRequestChip
+            pullRequest={pullRequest}
+            showRepository={showRepository}
+            opensPanel={Boolean(panel)}
+          />
         </span>
       ))}
       {more > 0 ? (

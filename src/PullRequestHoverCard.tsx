@@ -1,0 +1,354 @@
+// The card a pull request chip shows while a mouse rests on it: the pull request at a glance. It
+// only reads: it holds no control and takes no pointer, since a card's chip sits in a button.
+import { useEffect, useLayoutEffect, useState } from 'react';
+import { config, Portal, useTooltipContainer } from 'folds';
+import { usePluginTranslation } from '@mindroom/client-sdk/core';
+import { CircleDashed, TriangleAlert } from 'lucide-react';
+import { checksState, summarizeChecks } from './detail/detail.logic';
+import type { PullRequest, PullRequestCheck, PullRequestRef } from './github';
+import { useGitHubErrorMessage } from './GitHubErrorState';
+import { hoverCardPlacement, hoverCardReviewers, splitLabels } from './hoverCard.logic';
+import {
+  PullRequestActorAvatar,
+  PullRequestActorLabel,
+  PullRequestDiffStat,
+  PullRequestLabelChip,
+  PullRequestMetaLine,
+  PullRequestReviewOutcomeIcon,
+  pullRequestChecksStatePresentation,
+  RelativeTime,
+  resolvePullRequestState,
+  usePullRequestReviewOutcomeLabel,
+} from './presentation';
+import { useReviews } from './queries';
+import { pluginRootStyle } from './theme';
+
+/** How long a mouse rests on a chip before its card opens. */
+export const HOVER_CARD_DELAY_MS = 150;
+
+const FINE_POINTER = '(hover: hover) and (pointer: fine)';
+
+/**
+ * Whether the card of the chip `trigger` is open: from `HOVER_CARD_DELAY_MS` after a mouse came to
+ * rest on it, or after the keyboard focused it (a `focusable` chip, a button), until the pointer
+ * leaves, a click, Escape or the focus leaving. A screen that cannot hover with a fine pointer opens
+ * none, and neither does a tap: browsers send a mouseenter with each tap.
+ */
+export function useHoverCard(trigger: HTMLElement | null, focusable: boolean): boolean {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!trigger) return undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let touched = false;
+    const show = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => setOpen(true), HOVER_CARD_DELAY_MS);
+    };
+    const hide = () => {
+      clearTimeout(timer);
+      setOpen(false);
+    };
+    // A tap sends its pointer events before the mouseenter it also sends.
+    const onPointer = (event: PointerEvent) => {
+      touched = event.pointerType === 'touch';
+    };
+    const onMouseEnter = () => {
+      if (!touched && window.matchMedia?.(FINE_POINTER).matches) show();
+    };
+    // A click focuses a button without the focus ring; only the keyboard's focus shows the card.
+    const onFocus = () => {
+      if (!touched && trigger.matches(':focus-visible')) show();
+    };
+    const listeners: [string, EventListener][] = [
+      ['pointerenter', onPointer as EventListener],
+      ['pointerdown', onPointer as EventListener],
+      ['mouseenter', onMouseEnter],
+      ['mouseleave', hide],
+      ['click', hide],
+      ...(focusable
+        ? ([
+            ['focus', onFocus],
+            ['blur', hide],
+          ] as [string, EventListener][])
+        : []),
+    ];
+    for (const [type, listener] of listeners) trigger.addEventListener(type, listener);
+    return () => {
+      clearTimeout(timer);
+      for (const [type, listener] of listeners) trigger.removeEventListener(type, listener);
+    };
+  }, [trigger, focusable]);
+  useEffect(() => {
+    if (!open) return undefined;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [open]);
+  return open;
+}
+
+/**
+ * Keeps `card` by its chip (`anchor`) and on screen: placed before the first paint, and again when
+ * its content changes its size, the page scrolls or the window resizes.
+ */
+function usePlacement(anchor: HTMLElement, card: HTMLElement | null) {
+  useLayoutEffect(() => {
+    if (!card) return undefined;
+    const place = () => {
+      // Sized in rem, so the gap and the margin follow the page's zoom.
+      const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+      const { width, height } = card.getBoundingClientRect();
+      const placement = hoverCardPlacement({
+        anchor: anchor.getBoundingClientRect(),
+        card: { width, height },
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+        gap: 0.25 * rem,
+        margin: 0.5 * rem,
+        rightToLeft: getComputedStyle(anchor).direction === 'rtl',
+      });
+      // The edge it is not held by stays unset: set too, it would stretch the card to the chip.
+      const px = (value: number | undefined) => (value === undefined ? '' : `${value}px`);
+      Object.assign(card.style, {
+        top: px(placement.top),
+        bottom: px(placement.bottom),
+        left: px(placement.left),
+        maxHeight: px(placement.maxHeight),
+        visibility: 'visible',
+      });
+    };
+    place();
+    const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(place);
+    observer?.observe(card);
+    const scroll = { capture: true, passive: true };
+    window.addEventListener('scroll', place, scroll);
+    window.addEventListener('resize', place);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('scroll', place, scroll);
+      window.removeEventListener('resize', place);
+    };
+  }, [anchor, card]);
+}
+
+export function PullRequestHoverCard({
+  anchor,
+  pullRequest,
+  pr,
+  error,
+  checks,
+  opensPanel,
+}: {
+  anchor: HTMLElement;
+  pullRequest: PullRequestRef;
+  /** The chip's pull request, undefined until GitHub sent it. */
+  pr: PullRequest | undefined;
+  /** Why GitHub sent no pull request, if it refused. */
+  error: unknown;
+  /** The checks the chip asked for, undefined when it asks for none. */
+  checks: { items: PullRequestCheck[] | undefined; failed: boolean } | undefined;
+  /** Whether a click on the chip opens the pull request in the side panel. */
+  opensPanel: boolean;
+}) {
+  const t = usePluginTranslation('pull-requests');
+  const [card, setCard] = useState<HTMLDivElement | null>(null);
+  usePlacement(anchor, card);
+  const state = pr && resolvePullRequestState(pr);
+  return (
+    <Portal container={useTooltipContainer()}>
+      <div
+        ref={setCard}
+        role="tooltip"
+        className="mrpr-root mrpr-hover"
+        style={{
+          ...pluginRootStyle(),
+          zIndex: config.zIndex.Max,
+          boxShadow: config.shadow.E200,
+          borderRadius: config.radii.R400,
+        }}
+      >
+        <div className="mrpr-hover-head">
+          <span className="mrpr-truncate">{`${pullRequest.owner}/${pullRequest.repo} #${pullRequest.number}`}</span>
+          {state ? (
+            <span className="mrpr-state">
+              <state.Icon aria-hidden className={`mrpr-icon ${state.toneClassName}`} />
+              {t(`state.${state.key}`)}
+            </span>
+          ) : null}
+          {pr?.autoMerge ? (
+            <span className="mrpr-badge mrpr-badge-outline">
+              {t('badge.autoMerge', { method: pr.autoMerge.method })}
+            </span>
+          ) : null}
+        </div>
+        {pr ? (
+          <Details pullRequest={pullRequest} pr={pr} checks={checks} />
+        ) : error ? (
+          <ErrorLine error={error} />
+        ) : (
+          <p className="mrpr-status">{t('loading')}</p>
+        )}
+        {opensPanel ? <p className="mrpr-hover-hint">{t('hoverCard.openInPanel')}</p> : null}
+      </div>
+    </Portal>
+  );
+}
+
+function ErrorLine({ error }: { error: unknown }) {
+  return <p className="mrpr-status">{useGitHubErrorMessage(error)}</p>;
+}
+
+function Details({
+  pullRequest,
+  pr,
+  checks,
+}: {
+  pullRequest: PullRequestRef;
+  pr: PullRequest;
+  checks: { items: PullRequestCheck[] | undefined; failed: boolean } | undefined;
+}) {
+  const t = usePluginTranslation('pull-requests');
+  const forkOwner =
+    pr.headRepo && pr.headRepo !== pr.baseRepo ? pr.headRepo.split('/')[0] : undefined;
+  // How the branch stands against its base matters only while the pull request can merge.
+  const warning =
+    pr.state !== 'open'
+      ? undefined
+      : pr.mergeableState === 'dirty'
+      ? t('hoverCard.conflicts', { base: pr.baseRef })
+      : pr.mergeableState === 'behind'
+      ? t('hoverCard.behind', { base: pr.baseRef })
+      : undefined;
+  const ended =
+    pr.state === 'merged' && pr.mergedAt
+      ? { at: pr.mergedAt, key: 'hoverCard.merged' }
+      : pr.state === 'closed' && pr.closedAt
+      ? { at: pr.closedAt, key: 'hoverCard.closed' }
+      : { at: pr.updatedAt, key: 'updated' };
+  const labels = splitLabels(pr.labels);
+  const changed = pr.additions > 0 || pr.deletions > 0;
+  return (
+    <>
+      <p className="mrpr-hover-title">{pr.title}</p>
+      <div className="mrpr-hover-people">
+        <PullRequestMetaLine>
+          <PullRequestActorLabel key="author" actor={pr.author} />
+          <span key="opened" className="mrpr-shrink-0">
+            <RelativeTime timestamp={pr.createdAt} label={(time) => t('opened', { time })} />
+          </span>
+          <span key="ended" className="mrpr-shrink-0">
+            <RelativeTime timestamp={ended.at} label={(time) => t(ended.key, { time })} />
+          </span>
+        </PullRequestMetaLine>
+      </div>
+      <div className="mrpr-hover-branches">
+        <span className="mrpr-truncate">
+          {forkOwner ? `${forkOwner}:${pr.headRef}` : pr.headRef}
+        </span>
+        <span aria-hidden className="mrpr-shrink-0">
+          →
+        </span>
+        <span className="mrpr-truncate">{pr.baseRef}</span>
+      </div>
+      {warning ? (
+        <div className="mrpr-hover-base-warning">
+          <TriangleAlert aria-hidden className="mrpr-icon mrpr-tone-warning" />
+          {warning}
+        </div>
+      ) : null}
+      <div className="mrpr-hover-size">
+        <PullRequestMetaLine>
+          {changed ? (
+            <PullRequestDiffStat key="diff" additions={pr.additions} deletions={pr.deletions} />
+          ) : null}
+          <span key="files">{t('code.fileCount', { count: pr.changedFiles })}</span>
+          <span key="commits">{t('timeline.commits', { count: pr.commitCount })}</span>
+          <span key="comments">
+            {t('timeline.comments', { count: pr.commentCount + pr.reviewCommentCount })}
+          </span>
+        </PullRequestMetaLine>
+      </div>
+      {checks && !checks.failed ? <ChecksRow items={checks.items} /> : null}
+      <ReviewsRow pullRequest={pullRequest} pr={pr} />
+      {labels.shown.length > 0 ? (
+        <div className="mrpr-hover-labels">
+          {labels.shown.map((label) => (
+            <PullRequestLabelChip key={label.name} label={label} />
+          ))}
+          {labels.more > 0 ? (
+            <span className="mrpr-hover-muted">
+              {t('threadPullRequests.more', { count: labels.more })}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function ChecksRow({ items }: { items: PullRequestCheck[] | undefined }) {
+  const t = usePluginTranslation('pull-requests');
+  if (!items) {
+    return <div className="mrpr-hover-checks mrpr-hover-muted">{t('checksLine.loading')}</div>;
+  }
+  const state = checksState(items);
+  const mark = state === 'none' ? undefined : pullRequestChecksStatePresentation(state);
+  const summary = summarizeChecks(items);
+  return (
+    <div className="mrpr-hover-checks">
+      {mark ? <mark.Icon aria-hidden className={`mrpr-icon ${mark.toneClassName}`} /> : null}
+      {t(`checks.${summary.key}`, summary)}
+    </div>
+  );
+}
+
+/**
+ * Each reviewer's latest verdict and those still asked for a review, asked of GitHub only while
+ * the card is open. The row keeps its place while they load, and goes when GitHub refuses.
+ */
+function ReviewsRow({ pullRequest, pr }: { pullRequest: PullRequestRef; pr: PullRequest }) {
+  const t = usePluginTranslation('pull-requests');
+  const outcomeLabel = usePullRequestReviewOutcomeLabel();
+  const reviews = useReviews(pullRequest, true);
+  if (reviews.isError) return null;
+  if (!reviews.data) {
+    return (
+      <div className="mrpr-hover-reviews mrpr-hover-muted">{t('summary.loadingReviewers')}</div>
+    );
+  }
+  const { verdicts, pending } = hoverCardReviewers(
+    reviews.data.items,
+    pr.headSha,
+    pr.requestedReviewers
+  );
+  if (verdicts.length === 0 && pending.length === 0 && pr.requestedTeams.length === 0) {
+    return <div className="mrpr-hover-reviews mrpr-hover-muted">{t('hoverCard.noReviews')}</div>;
+  }
+  return (
+    <div className="mrpr-hover-reviews">
+      {verdicts.map((entry) => (
+        <span key={`verdict:${entry.login}`} className="mrpr-hover-reviewer">
+          <PullRequestActorAvatar actor={entry.actor} />
+          <span className="mrpr-truncate mrpr-actor-login">{entry.actor?.login ?? t('ghost')}</span>
+          <PullRequestReviewOutcomeIcon
+            outcome={entry.verdict}
+            className={entry.stale ? 'mrpr-hover-stale' : ''}
+          />
+          <span className="mrpr-sr-only">{outcomeLabel(entry.verdict, entry.stale)}</span>
+        </span>
+      ))}
+      {pending.map((actor) => (
+        <span key={`pending:${actor.login}`} className="mrpr-hover-reviewer">
+          <PullRequestActorAvatar actor={actor} />
+          <span className="mrpr-truncate mrpr-actor-login">{actor.login}</span>
+          <CircleDashed aria-hidden className="mrpr-icon mrpr-tone-muted" />
+          <span className="mrpr-sr-only">{t('hoverCard.awaitingReview')}</span>
+        </span>
+      ))}
+      {pr.requestedTeams.map((team) => (
+        <PullRequestLabelChip key={`team:${team}`} label={{ name: team, color: null }} />
+      ))}
+    </div>
+  );
+}
