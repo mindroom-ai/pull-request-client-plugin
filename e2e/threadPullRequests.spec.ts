@@ -750,6 +750,18 @@ test("a thread's worktree shows as its branch on its card and in the strip until
   await expect(branch).toHaveAttribute('aria-label', label);
   await expect(card(page, roots.webhooks).locator('.mrpr-thread-card-chips')).toHaveCount(0);
   await shot(page, 'branch-card');
+
+  // A worktree outside the workspace, by its absolute path, with its repository's name before
+  // the branch's.
+  const outside = '/srv/billing-worktrees/webhook-retries';
+  await writeWorktree(roots.webhooks, { ...worktree, path: outside, repo: 'billing' });
+  await expect(branch.locator('.mrpr-chip-repo')).toHaveText('billing', { timeout: 30_000 });
+  await expect(branch.locator('.mrpr-branch-chip-name')).toHaveText(worktree.branch);
+  await expect(branch).toHaveAttribute(
+    'aria-label',
+    `Worktree ${outside}, repository billing, branch webhook-retries`
+  );
+  await shot(page, 'branch-card-repo');
   await writeWorktree(roots.webhooks, {});
   await expect(branch).toHaveCount(0);
 

@@ -4,8 +4,8 @@ import { describe, expect, it } from 'vitest';
 import { BranchChip } from './BranchChip';
 import plugin from './index';
 
-const show = (path: string, branch: string) =>
-  renderPluginComponent(<BranchChip worktree={{ path, branch }} />, {
+const show = (path: string, branch: string, repo = '') =>
+  renderPluginComponent(<BranchChip worktree={{ path, branch, repo }} />, {
     id: 'pull-requests',
     plugin,
   });
@@ -31,6 +31,29 @@ describe('BranchChip', () => {
     const chip = view.getByRole('img', { name: `Worktree ${path}` });
     expect(chip.textContent).toBe(name);
     expect(chip.getAttribute('title')).toBe(`Worktree ${path}`);
+  });
+
+  it("shows the repository's name before the branch's, and names it", async () => {
+    const path = '/srv/mindroom-chat-worktrees/redis-sessions';
+    const view = await show(path, 'redis-sessions', 'mindroom-chat');
+    const label = `Worktree ${path}, repository mindroom-chat, branch redis-sessions`;
+    const chip = view.getByRole('img', { name: label });
+    expect(chip.getAttribute('title')).toBe(label);
+    expect([...chip.querySelectorAll('span')].map((part) => part.textContent)).toEqual([
+      'mindroom-chat',
+      'redis-sessions',
+    ]);
+    expect(chip.querySelector('.mrpr-chip-repo')?.textContent).toBe('mindroom-chat');
+  });
+
+  it("shows the repository's name before the last part of the path without a branch", async () => {
+    const view = await show('mindroom-chat-worktrees/redis-sessions', '', 'mindroom-chat');
+    const label = 'Worktree mindroom-chat-worktrees/redis-sessions, repository mindroom-chat';
+    const chip = view.getByRole('img', { name: label });
+    expect([...chip.querySelectorAll('span')].map((part) => part.textContent)).toEqual([
+      'mindroom-chat',
+      'redis-sessions',
+    ]);
   });
 
   it('sets the variables it draws with', async () => {

@@ -16,8 +16,11 @@ export type ThreadPullRequestLink = {
   setAt: string;
 };
 
-/** A directory relative to the agent's workspace, and its branch: empty when it has none. */
-export type ThreadWorktree = { path: string; branch: string };
+/**
+ * A directory relative to the agent's workspace, or the absolute path of one outside it, with its
+ * branch and its repository's name: each empty when the worktree's event has none.
+ */
+export type ThreadWorktree = { path: string; branch: string; repo: string };
 
 /**
  * A room's links by thread, each thread's in the order they were set, and its worktrees by thread;
@@ -77,13 +80,16 @@ export function parseThreadWorktree(
   content: unknown
 ): ({ threadId: string } & ThreadWorktree) | undefined {
   if (typeof content !== 'object' || content === null) return undefined;
-  const { path, branch } = content as { path?: unknown; branch?: unknown };
+  const { path, branch, repo } = content as { path?: unknown; branch?: unknown; repo?: unknown };
   if (typeof path !== 'string' || path === '') return undefined;
-  // Only a path inside the workspace, in POSIX form.
-  if (path.startsWith('/') || path.includes('\\') || path.split('/').includes('..')) {
-    return undefined;
-  }
-  return { threadId: stateKey, path, branch: typeof branch === 'string' ? branch : '' };
+  // Only a path in POSIX form that names one directory.
+  if (path.includes('\\') || path.split('/').includes('..')) return undefined;
+  return {
+    threadId: stateKey,
+    path,
+    branch: typeof branch === 'string' ? branch : '',
+    repo: typeof repo === 'string' ? repo : '',
+  };
 }
 
 /** The room's state events the snapshot is built from: the links', then the worktrees'. */
@@ -111,7 +117,8 @@ function readRoom(room: Room): RoomPullRequests {
   for (const event of room.currentState.getStateEvents(THREAD_WORKTREE_EVENT_TYPE)) {
     const worktree = parseThreadWorktree(event.getStateKey() ?? '', event.getContent());
     if (worktree !== undefined) {
-      worktrees.set(worktree.threadId, { path: worktree.path, branch: worktree.branch });
+      const { path, branch, repo } = worktree;
+      worktrees.set(worktree.threadId, { path, branch, repo });
     }
   }
   return { byThread, worktrees, repositories: repositories.size };

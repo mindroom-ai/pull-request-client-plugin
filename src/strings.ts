@@ -223,10 +223,12 @@ export const en = {
     moreLabel_other: '{{count}} more pull requests',
     strip: 'Pull requests of this thread',
   },
-  // The name and tooltip of a thread's worktree, by whether it has a branch.
+  // The name and tooltip of a thread's worktree, by whether it has a repository and a branch.
   branch: {
     label: 'Worktree {{path}}, branch {{branch}}',
     labelWithoutBranch: 'Worktree {{path}}',
+    labelWithRepository: 'Worktree {{path}}, repository {{repo}}, branch {{branch}}',
+    labelWithRepositoryWithoutBranch: 'Worktree {{path}}, repository {{repo}}',
   },
   error: {
     notFound: 'GitHub did not find this pull request. A private repository needs a token.',

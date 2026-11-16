@@ -28,9 +28,9 @@ A thread's agent can also work in a git worktree of its workspace. MindRoom's ba
 
 - type: `com.mindroom.thread.worktree`
 - state key: the thread's root event ID, as it is (not JSON)
-- content: `{"path","branch","set_by","set_at"}`: the worktree's directory relative to the agent's workspace (POSIX separators, no `..` part), its branch (empty when it has none), who set it, and when; a thread without a worktree has the content `{}`
+- content: `{"path","branch","repo","set_by","set_at"}`: the worktree's directory, relative to the agent's workspace or absolute for one outside it (POSIX separators, no `..` part), its branch and its repository's name (each empty when it has none), who set it, and when; a thread without a worktree has the content `{}`
 
-The worktree shows as its branch: the branch icon and the branch's name, or the last part of the path when the branch is empty, with the path in its tooltip.
+The worktree shows as its branch: the branch icon, the repository's name when the event has one, and the branch's name, or the last part of the path when the branch is empty, with the path in its tooltip. The repository's name tells the threads of a room that works on several repositories apart.
 
 - On a thread's card in the Compact view: in the place of the chips, when no pull request is linked to the thread; with linked pull requests, the card shows only their chips. A click on the branch opens the thread, as anywhere else on the card.
 - Under the room header, while a thread is open: before the chips of its pull requests, as text, not a button; alone when the thread has no linked pull request.
