@@ -22,13 +22,17 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
+      # No step pushes or fetches again, so neither checkout keeps its token for the code the run installs and tests.
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       # The app's checkout at the plugin's top, where the plugin's configs look for it
       # (MindRoom Chat docs/development.md, "A client plugin in its own repository").
       - uses: actions/checkout@v7
         with:
           repository: mindroom-ai/mindroom-chat
           path: .mindroom-chat
+          persist-credentials: false
       - uses: actions/setup-node@v7
         with:
           node-version: 24
