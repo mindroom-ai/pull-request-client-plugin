@@ -12,7 +12,9 @@ export function BranchChip({ worktree }: { worktree: ThreadWorktree }) {
   const { path, branch, repo } = worktree;
   // The path's last part, also of a path that ends in a slash.
   const name = branch || (path.split('/').filter(Boolean).pop() ?? path);
-  const key = `branch.label${repo ? 'WithRepository' : ''}${branch ? '' : 'WithoutBranch'}` as const;
+  const key = `branch.label${repo ? 'WithRepository' : ''}${
+    branch ? '' : 'WithoutBranch'
+  }` as const;
   const label = t(key, { path, branch, repo });
   // The chip is drawn outside the card and the panel, so it sets the variables it draws with.
   return (
