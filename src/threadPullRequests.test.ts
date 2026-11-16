@@ -10,6 +10,7 @@ import plugin from './index';
 import {
   parseThreadPullRequestLink,
   parseThreadWorktree,
+  threadHasDetails,
   THREAD_PULL_REQUEST_EVENT_TYPE,
   THREAD_WORKTREE_EVENT_TYPE,
   useRoomPullRequests,
@@ -17,6 +18,7 @@ import {
   type RoomPullRequests,
   type ThreadPullRequests,
 } from './threadPullRequests';
+import { linkedRoom } from './testing/linkedRoom';
 
 const URL_412 = 'https://github.com/mindroom-ai/mindroom-chat/pull/412';
 const key = (thread: string, ref: string) => JSON.stringify([thread, ref]);
@@ -412,5 +414,20 @@ describe('thread worktrees', () => {
     expect(worktree).toBeUndefined();
     await mount(room, '$t2');
     expect(worktree?.branch).toBe('redis-sessions');
+  });
+});
+
+describe('threadHasDetails', () => {
+  it('says a thread has details when it has a linked pull request or a worktree', () => {
+    const room = linkedRoom(
+      '!r:x',
+      [{ thread: '$pr', number: 1 }],
+      [{ thread: '$tree', path: 'worktrees/a' }]
+    );
+    expect(['$pr', '$tree', '$none'].map((id) => threadHasDetails(room, id))).toEqual([
+      true,
+      true,
+      false,
+    ]);
   });
 });

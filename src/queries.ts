@@ -29,6 +29,10 @@ const keyOf = (ref: PullRequestRef | undefined, tokenSet: boolean) =>
 /** What a caller can change of a query's refetching; the chips leave out the refetch on window focus. */
 export type RefetchOptions = { refetchOnWindowFocus?: boolean };
 
+// A chip asks again when it shows after its answer went stale, not when the tab regains focus:
+// every chip seen so far would ask at once, and without a token that spends the hourly limit.
+export const NO_FOCUS_REFETCH = { refetchOnWindowFocus: false };
+
 export function usePullRequest(ref: PullRequestRef | undefined, options: RefetchOptions = {}) {
   const { token } = useGitHubToken();
   const storedToken = useStoredToken();
