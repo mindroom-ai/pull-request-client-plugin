@@ -1598,6 +1598,11 @@ button.mrpr-chip:focus-visible {
   gap: 2px;
   min-inline-size: 0;
 }
+/* A pull request's meta line wraps between its parts, so its author's whole login shows. */
+.mrpr-details .mrpr-meta {
+  flex-wrap: wrap;
+  row-gap: 0;
+}
 /* A row's icon sits in the middle of its first line, also beside a path that wraps. */
 .mrpr-details-row {
   display: flex;
