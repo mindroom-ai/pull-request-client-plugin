@@ -34,7 +34,7 @@ A pointer that rests on a chip for 150 ms, on a card or in the strip, opens a ca
 - the head and base branches, with a warning when the branch conflicts with its base or is behind it
 - the lines, files, commits and comments
 - the checks' summary, when the chip shows their mark (an open pull request, with a token)
-- each reviewer's latest verdict, and the reviewers and teams still asked for a review
+- each reviewer's latest verdict, and the reviewers and teams still asked for a review, with a token
 - the first five labels and the count of the rest
 - a note that a click opens the pull request in the side panel, when it does
 
@@ -93,7 +93,7 @@ The page answers GitHub's API itself, so no request leaves the test. With `MRPR_
 
 Public pull requests need no token. For a private repository, or to avoid GitHub's rate limit for requests without one, a person can enter a GitHub token in the plugin's panel. The token is kept in the browser's localStorage for the signed-in account, where any script running on the page can read it. Requests go to `https://api.github.com` and nowhere else; the token is sent only there, and only when one is stored. The plugin only reads (`GET`).
 
-The chips of a thread's pull requests ask GitHub for each pull request once it has been on screen: one request each, and two more for its checks when a token is stored. A chip's hover card asks for the reviews when it opens, one request more, and uses that answer for two minutes; a chip that is only on screen asks for none. A chip asks again when it shows after its answer is more than two minutes old, and not when the tab regains focus. Without a token, GitHub allows 60 requests an hour for the address, shared with the panel, and the chips show no checks marks. After GitHub answers with its rate limit, the plugin asks it nothing more until the limit resets.
+The chips of a thread's pull requests ask GitHub for each pull request once it has been on screen: one request each, and two more for its checks when a token is stored. With a token, a chip's hover card asks for the reviews when it opens, usually one request (one per 100 reviews), and uses that answer for two minutes; a chip that is only on screen asks for none, and without a token the card asks for no reviews and shows none. A chip asks again when it shows after its answer is more than two minutes old, and not when the tab regains focus. Without a token, GitHub allows 60 requests an hour for the address, shared with the panel, and the chips show no checks marks. After GitHub answers with its rate limit, the plugin asks it nothing more until the limit resets.
 
 Use a fine-grained token with read-only access to these permissions of the repositories, as GitHub's [permissions required for fine-grained personal access tokens](https://docs.github.com/en/rest/authentication/permissions-required-for-fine-grained-personal-access-tokens) lists them for the endpoints the plugin calls (every fine-grained token also has Metadata: read):
 

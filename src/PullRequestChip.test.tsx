@@ -567,7 +567,8 @@ describe('PullRequestChip hover card', () => {
     expect(tooltip.querySelector('.mrpr-hover-base-warning')).toBeNull();
   });
 
-  it('asks for the reviews only once the card opens', async () => {
+  it('asks for the reviews only once the card opens, in one request', async () => {
+    saveToken();
     serve(full(), [], [approval('bob')]);
     pointer(true);
     const { view, client } = await show();
@@ -576,10 +577,21 @@ describe('PullRequestChip hover card', () => {
     expect(requested('/reviews')).toBe(false);
     hover(chip);
     await view.findByRole('tooltip');
-    await vi.waitFor(() => expect(requested('/reviews')).toBe(true));
+    await answered(client, '/reviews');
+    expect(fetchMock.mock.calls.filter(([url]) => url.includes('/reviews')).length).toBe(1);
+  });
+
+  it('asks for no reviews without a token, and leaves their row out', async () => {
+    serve(full(), [], [approval('bob')]);
+    const { tooltip, client } = await openCard();
+    await answered(client, '/pulls/412');
+    await settle();
+    expect(requested('/reviews')).toBe(false);
+    expect(tooltip.querySelector('.mrpr-hover-reviews')).toBeNull();
   });
 
   it('keeps the reviews row while they load, and leaves it out when they fail', async () => {
+    saveToken();
     let answer: (response: Response) => void = () => {};
     fetchMock.mockImplementation(async (url) => {
       if (url.includes('/reviews?')) return new Promise<Response>((resolve) => (answer = resolve));
@@ -594,6 +606,7 @@ describe('PullRequestChip hover card', () => {
   });
 
   it('says so when there are no reviews and nobody is asked', async () => {
+    saveToken();
     serve(full({ requested_reviewers: [], requested_teams: [] }));
     const { tooltip } = await openCard();
     await vi.waitFor(() =>
