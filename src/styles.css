@@ -1458,25 +1458,31 @@ button.mrpr-timeline-row:hover .mrpr-timeline-title {
 }
 
 /* A pull request's chip, drawn outside the card and the panel: a span on a thread's card and a
-   button under the room header. It keeps its size and its one line wherever it sits. */
+   button under the room header. It keeps its one line wherever it sits, and has the size of the
+   card's tag pills and their +N count (the client's ThreadTagPill and OverflowChip): sized in rem,
+   it grows and shrinks with them when the client's page zoom scales the root font size. */
 .mrpr-chip {
   box-sizing: border-box;
   display: inline-flex;
   flex: none;
   align-items: center;
-  gap: 4px;
-  block-size: 18px;
+  gap: 0.25rem;
   margin: 0;
-  padding: 0 6px;
+  padding: 0.1rem 0.4rem;
   border: 1px solid var(--pr-border);
   border-radius: 9999px;
   background: var(--pr-surface);
   color: var(--pr-fg);
   font: inherit;
-  font-size: 11px;
-  line-height: 16px;
+  font-size: 0.65rem;
+  line-height: 1.4;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+/* A chip's icons scale with its text: 12px beside the 11px text the chip used to have. */
+.mrpr-chip .mrpr-icon {
+  inline-size: 1.1em;
+  block-size: 1.1em;
 }
 /* A long repository name ends in an ellipsis, so it cannot crowd a phone card's row; the chip's
    title has the whole name. */
@@ -1525,14 +1531,13 @@ button.mrpr-chip:focus-visible {
   display: inline-flex;
   flex: none;
   align-items: center;
-  block-size: 18px;
-  padding: 0 6px;
+  padding: 0.1rem 0.4rem;
   border: 1px solid var(--pr-border);
   border-radius: 9999px;
   background: var(--pr-surface);
   color: var(--pr-muted);
-  font-size: 11px;
-  line-height: 16px;
+  font-size: 0.65rem;
+  line-height: 1.4;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
