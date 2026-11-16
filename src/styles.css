@@ -1624,7 +1624,8 @@ button.mrpr-chip:focus-visible {
   -webkit-line-clamp: 2;
   line-clamp: 2;
 }
-/* A worktree's branch and path wrap anywhere, so the whole path shows in the card's width. */
+/* A pull request's branches and a worktree's branch and path wrap anywhere, so they show whole in
+   the card's width. */
 .mrpr-details-wrap {
   min-inline-size: 0;
   overflow-wrap: anywhere;

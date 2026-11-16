@@ -161,12 +161,21 @@ describe('ThreadDetails', () => {
     expect(await deleted.view.findByText('fix-typo → main')).toBeTruthy();
   });
 
-  it('middle-truncates long branch names', async () => {
+  it('middle-truncates long branch names, on a line that wraps rather than cut the base', async () => {
     const ref = 'feature/a-very-long-branch-name-for-details';
-    serve({ 412: pull({ head: { sha: SHA, ref, repo: { full_name: REPOSITORY } } }) });
+    const base = 'release/2026.11-api-hardening-and-cleanup';
+    serve({
+      412: pull({
+        head: { sha: SHA, ref, repo: { full_name: REPOSITORY } },
+        base: { ref: base, repo: { full_name: REPOSITORY } },
+      }),
+    });
     const { view } = await show(roomWith([{ number: 412 }]));
-    expect(await view.findByText(`${middleTruncate(ref, 24)} → main`)).toBeTruthy();
+    const line = await view.findByText(`${middleTruncate(ref, 24)} → ${middleTruncate(base, 24)}`);
     expect(middleTruncate(ref, 24)).not.toBe(ref);
+    expect(middleTruncate(base, 24)).not.toBe(base);
+    expect(line.classList.contains('mrpr-details-wrap')).toBe(true);
+    expect(line.classList.contains('mrpr-truncate')).toBe(false);
   });
 
   it("middle-truncates a fork's head together with its owner", async () => {

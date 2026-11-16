@@ -96,7 +96,8 @@ function LoadedPullRequestDetails({ pr }: { pr: PullRequest }) {
       <p className="mrpr-details-title">{pr.title}</p>
       <div className="mrpr-details-row">
         <GitBranch aria-hidden className="mrpr-icon mrpr-details-icon" />
-        <span className="mrpr-truncate">{branches}</span>
+        {/* Each side fits on a line, so the line wraps and the ends of both show. */}
+        <span className="mrpr-details-wrap">{branches}</span>
       </div>
       <PullRequestMetaLine>
         {/* Without a changed line the stat draws nothing, so it is left out with its separator. */}
