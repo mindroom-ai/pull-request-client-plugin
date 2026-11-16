@@ -78,12 +78,14 @@ function LoadedPullRequestDetails({ pr }: { pr: PullRequest }) {
   // A fork that was deleted has no repository: its head shows without an owner.
   const forkOwner =
     pr.headRepo !== null && pr.headRepo !== pr.baseRepo ? pr.headRepo.split('/')[0] : undefined;
-  const headBranch = middleTruncate(pr.headRef, BRANCH_MAX);
   const head =
     forkOwner === undefined
-      ? headBranch
-      : t('details.forkHead', { owner: forkOwner, branch: headBranch });
-  const branches = t('details.branches', { head, base: middleTruncate(pr.baseRef, BRANCH_MAX) });
+      ? pr.headRef
+      : t('details.forkHead', { owner: forkOwner, branch: pr.headRef });
+  const branches = t('details.branches', {
+    head: middleTruncate(head, BRANCH_MAX),
+    base: middleTruncate(pr.baseRef, BRANCH_MAX),
+  });
   return (
     <>
       <p className="mrpr-details-title">{pr.title}</p>

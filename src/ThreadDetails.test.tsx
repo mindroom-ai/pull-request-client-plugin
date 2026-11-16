@@ -168,6 +168,19 @@ describe('ThreadDetails', () => {
     expect(middleTruncate(ref, 24)).not.toBe(ref);
   });
 
+  it("middle-truncates a fork's head together with its owner", async () => {
+    const owner = 'a-very-long-contributor-name';
+    serve({
+      412: pull({
+        head: { sha: SHA, ref: 'fix-typo', repo: { full_name: `${owner}/mindroom-chat` } },
+      }),
+    });
+    const { view } = await show(roomWith([{ number: 412 }]));
+    const head = middleTruncate(`${owner}:fix-typo`, 24);
+    expect(await view.findByText(`${head} → main`)).toBeTruthy();
+    expect(head).not.toBe(`${owner}:fix-typo`);
+  });
+
   it('shows the worktree with its branch and its path, and the path alone without a branch', async () => {
     const withBranch = await show(
       roomWith([], [{ path: 'worktrees/redis-sessions', branch: 'redis-sessions' }])
