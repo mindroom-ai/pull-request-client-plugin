@@ -60,6 +60,21 @@ describe('orderDiffFiles', () => {
       'z.cts',
       'a.ts',
     ]);
+    // `.mts` ends in `.ts` too: read as `.ts`, the path would not line up, and the last segment
+    // is ambiguous here.
+    expect(
+      order([
+        file('lib/a.ts', ['import { z } from "./z.mts";']),
+        file('lib/z.mts'),
+        file('other/z.ts'),
+      ])
+    ).toEqual(['lib/z.mts', 'lib/a.ts', 'other/z.ts']);
+    expect(
+      order([
+        file('src/a.mts', ['import { b } from "~/lib/b.logic.mjs";']),
+        file('lib/b.logic.mts'),
+      ])
+    ).toEqual(['lib/b.logic.mts', 'src/a.mts']);
   });
 
   it("falls back to the specifier's last segment when the path does not line up", () => {
