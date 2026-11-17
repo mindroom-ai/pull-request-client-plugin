@@ -101,6 +101,8 @@ const pullRequest: PullRequest = {
   labels: [],
   requestedReviewers: [],
   requestedTeams: [],
+  nodeId: 'PR_node',
+  mergeable: true,
   mergeableState: 'clean',
   autoMerge: null,
   headSha: 'head',

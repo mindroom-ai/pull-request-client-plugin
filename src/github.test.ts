@@ -2,6 +2,7 @@ import { parsePatchFiles } from '@pierre/diffs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   GitHubError,
+  GitHubWriteError,
   fetchBehindBy,
   fetchChecks,
   fetchCommitFiles,
@@ -10,10 +11,14 @@ import {
   fetchPullRequest,
   fetchPullRequestFiles,
   fetchReviewComments,
+  fetchRepository,
   fetchReviews,
   filePatch,
   parsePullRequestUrl,
   pullRequestUrl,
+  runPullRequestAction,
+  type PullRequest,
+  type PullRequestAction,
   type PullRequestFile,
 } from './github';
 
@@ -120,6 +125,8 @@ describe('fetchPullRequest', () => {
       labels: [],
       requestedReviewers: [],
       requestedTeams: [],
+      nodeId: '',
+      mergeable: null,
       mergeableState: null,
       autoMerge: null,
       headSha: '',
@@ -425,6 +432,8 @@ describe('the new pull request fields', () => {
           labels: [{ name: 'bug', color: 'd73a4a' }, { color: 'x' }],
           requested_reviewers: [{ login: 'r', avatar_url: 'https://a/r.png' }],
           requested_teams: [{ name: 'core' }],
+          node_id: 'PR_kw1',
+          mergeable: false,
           mergeable_state: 'behind',
           auto_merge: { merge_method: 'squash' },
           head: { ref: 'topic', sha: 'abc', repo: { full_name: 'fork/b' } },
@@ -442,6 +451,8 @@ describe('the new pull request fields', () => {
       labels: [{ name: 'bug', color: 'd73a4a' }],
       requestedReviewers: [{ login: 'r', name: null, avatarUrl: 'https://a/r.png' }],
       requestedTeams: ['core'],
+      nodeId: 'PR_kw1',
+      mergeable: false,
       mergeableState: 'behind',
       autoMerge: { method: 'squash' },
       headSha: 'abc',
@@ -874,5 +885,316 @@ describe('fetchCommitFiles', () => {
     expect(String(fetchMock.mock.calls[0]![0])).toBe(
       'https://api.github.com/repos/a/b/commits/abc'
     );
+  });
+});
+
+const writeRef = { owner: 'o', repo: 'r', number: 7 };
+
+const writePull: PullRequest = {
+  title: 'T',
+  state: 'open',
+  draft: false,
+  body: '',
+  images: { byUrl: {}, byAttachment: {} },
+  author: null,
+  labels: [],
+  requestedReviewers: [],
+  requestedTeams: [],
+  nodeId: 'PR_kw7',
+  mergeable: true,
+  mergeableState: 'clean',
+  autoMerge: null,
+  headSha: 'head7',
+  headRepo: 'fork/r',
+  baseRepo: 'o/r',
+  mergedAt: null,
+  closedAt: null,
+  commentCount: 0,
+  reviewCommentCount: 0,
+  commitCount: 1,
+  createdAt: '',
+  updatedAt: '',
+  baseRef: 'main',
+  headRef: 'feat/a b#1',
+  additions: 0,
+  deletions: 0,
+  changedFiles: 0,
+  url: 'https://github.com/o/r/pull/7',
+};
+
+type Sent = { method: string; url: string; body: unknown; authorization: string | null };
+
+/** What `fetch` was asked, for each call, with the body parsed back. */
+function sentRequests(fetchMock: ReturnType<typeof vi.fn>): Sent[] {
+  return fetchMock.mock.calls.map(([url, init]) => {
+    const { method, body, headers } = init as RequestInit;
+    return {
+      method: String(method),
+      url: String(url),
+      body: typeof body === 'string' ? JSON.parse(body) : body,
+      authorization: new Headers(headers).get('Authorization'),
+    };
+  });
+}
+
+async function send(action: PullRequestAction): Promise<Sent> {
+  const fetchMock = vi.fn(() => Promise.resolve(json({ data: {} })));
+  vi.stubGlobal('fetch', fetchMock);
+  await runPullRequestAction(writeRef, writePull, action, 'squash', 'tok');
+  const sent = sentRequests(fetchMock);
+  expect(sent).toHaveLength(1);
+  expect(sent[0]!.authorization).toBe('Bearer tok');
+  return sent[0]!;
+}
+
+describe('runPullRequestAction', () => {
+  it('merges with the method and the loaded head sha', async () => {
+    expect(await send('merge')).toMatchObject({
+      method: 'PUT',
+      url: 'https://api.github.com/repos/o/r/pulls/7/merge',
+      body: { merge_method: 'squash', sha: 'head7' },
+    });
+  });
+
+  it.each([
+    ['close', 'closed'],
+    ['reopen', 'open'],
+  ] as const)('%ss by state', async (action, state) => {
+    expect(await send(action)).toMatchObject({
+      method: 'PATCH',
+      url: 'https://api.github.com/repos/o/r/pulls/7',
+      body: { state },
+    });
+  });
+
+  it('updates the branch by merge with the expected head sha', async () => {
+    expect(await send('update-branch')).toMatchObject({
+      method: 'PUT',
+      url: 'https://api.github.com/repos/o/r/pulls/7/update-branch',
+      body: { expected_head_sha: 'head7' },
+    });
+  });
+
+  it('deletes the head branch in the head repository, each segment encoded', async () => {
+    expect(await send('delete-branch')).toMatchObject({
+      method: 'DELETE',
+      url: 'https://api.github.com/repos/fork/r/git/refs/heads/feat/a%20b%231',
+      body: undefined,
+    });
+  });
+
+  it('asks GitHub nothing to delete the branch of a deleted fork', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const deletedFork = { ...writePull, headRepo: null };
+    await expect(
+      runPullRequestAction(writeRef, deletedFork, 'delete-branch', 'squash', 'tok')
+    ).rejects.toMatchObject({ kind: 'refused', status: 0 });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['ready', 'markPullRequestReadyForReview'],
+    ['draft', 'convertPullRequestToDraft'],
+    ['disable-auto-merge', 'disablePullRequestAutoMerge'],
+  ] as const)('%s runs %s on the node id', async (action, mutation) => {
+    const sent = await send(action);
+    expect(sent).toMatchObject({
+      method: 'POST',
+      url: 'https://api.github.com/graphql',
+      body: { variables: { pullRequestId: 'PR_kw7' } },
+    });
+    expect((sent.body as { query: string }).query).toContain(mutation);
+  });
+
+  it('enables auto-merge with the method and the expected head', async () => {
+    const sent = await send('enable-auto-merge');
+    expect(sent).toMatchObject({
+      method: 'POST',
+      url: 'https://api.github.com/graphql',
+      body: {
+        variables: { pullRequestId: 'PR_kw7', mergeMethod: 'SQUASH', expectedHeadOid: 'head7' },
+      },
+    });
+    expect((sent.body as { query: string }).query).toContain('enablePullRequestAutoMerge');
+  });
+
+  it('updates the branch by rebase with the expected head', async () => {
+    const sent = await send('update-branch-rebase');
+    expect(sent).toMatchObject({
+      method: 'POST',
+      url: 'https://api.github.com/graphql',
+      body: {
+        variables: { pullRequestId: 'PR_kw7', expectedHeadOid: 'head7', updateMethod: 'REBASE' },
+      },
+    });
+    expect((sent.body as { query: string }).query).toContain('updatePullRequestBranch');
+  });
+
+  it('does not touch the read rate limit', async () => {
+    // A write refused for its limit does not hold back the reads after it.
+    const limited = { status: 403, headers: { 'x-ratelimit-remaining': '0' } };
+    vi.stubGlobal('fetch', () => Promise.resolve(new Response('', limited)));
+    await expect(
+      runPullRequestAction(writeRef, writePull, 'close', 'squash', 'tok')
+    ).rejects.toBeInstanceOf(GitHubWriteError);
+    vi.stubGlobal('fetch', () => Promise.resolve(json(apiPull)));
+    await expect(fetchPullRequest(writeRef, 'tok')).resolves.toMatchObject({ title: 'T' });
+  });
+});
+
+const apiRepository = {
+  viewerPermission: 'WRITE',
+  mergeCommitAllowed: false,
+  squashMergeAllowed: true,
+  rebaseMergeAllowed: true,
+  autoMergeAllowed: true,
+  defaultBranchRef: { name: 'main' },
+};
+
+describe('fetchRepository', () => {
+  it("maps the repository's settings", async () => {
+    const fetchMock = vi.fn(() => Promise.resolve(json({ data: { repository: apiRepository } })));
+    vi.stubGlobal('fetch', fetchMock);
+    expect(await fetchRepository('o', 'r', 'tok')).toEqual({
+      canWrite: true,
+      mergeMethods: ['squash', 'rebase'],
+      autoMergeAllowed: true,
+      defaultBranch: 'main',
+    });
+    const [sent] = sentRequests(fetchMock);
+    expect(sent).toMatchObject({
+      method: 'POST',
+      url: 'https://api.github.com/graphql',
+      body: { variables: { owner: 'o', repo: 'r' } },
+      authorization: 'Bearer tok',
+    });
+  });
+
+  it('keeps the merge methods in order', async () => {
+    const all = { mergeCommitAllowed: true, squashMergeAllowed: true, rebaseMergeAllowed: true };
+    vi.stubGlobal('fetch', () =>
+      Promise.resolve(json({ data: { repository: { ...apiRepository, ...all } } }))
+    );
+    expect((await fetchRepository('o', 'r', 'tok')).mergeMethods).toEqual([
+      'merge',
+      'squash',
+      'rebase',
+    ]);
+  });
+
+  it.each([
+    ['ADMIN', true],
+    ['MAINTAIN', true],
+    ['WRITE', true],
+    ['TRIAGE', false],
+    ['READ', false],
+  ])('with %s can write: %s', async (viewerPermission, canWrite) => {
+    vi.stubGlobal('fetch', () =>
+      Promise.resolve(json({ data: { repository: { ...apiRepository, viewerPermission } } }))
+    );
+    expect((await fetchRepository('o', 'r', 'tok')).canWrite).toBe(canWrite);
+  });
+});
+
+describe('the write error kinds', () => {
+  async function failure(response: Response | Error, token = 'tok') {
+    vi.stubGlobal('fetch', () =>
+      response instanceof Error ? Promise.reject(response) : Promise.resolve(response)
+    );
+    const error = await runPullRequestAction(writeRef, writePull, 'close', 'squash', token).catch(
+      (e: unknown) => e
+    );
+    expect(error).toBeInstanceOf(GitHubWriteError);
+    return error as GitHubWriteError;
+  }
+
+  async function graphqlFailure(response: Response, token = 'tok') {
+    vi.stubGlobal('fetch', () => Promise.resolve(response));
+    const error = await fetchRepository('o', 'r', token).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(GitHubWriteError);
+    return error as GitHubWriteError;
+  }
+
+  it('is no access when the token may not write', async () => {
+    const body = { message: 'Resource not accessible by personal access token' };
+    expect(await failure(json(body, { status: 403 }))).toMatchObject({
+      kind: 'noAccess',
+      status: 403,
+    });
+    expect((await failure(new Response('', { status: 404 }))).kind).toBe('noAccess');
+  });
+
+  it('is a bad token on 401', async () => {
+    expect(await failure(json({ message: 'Bad credentials' }, { status: 401 }))).toMatchObject({
+      kind: 'badToken',
+      status: 401,
+    });
+  });
+
+  it.each([405, 409, 422])("is refused on %s, with GitHub's message", async (status) => {
+    const error = await failure(json({ message: 'Pull Request is not mergeable' }, { status }));
+    expect(error).toMatchObject({
+      kind: 'refused',
+      status,
+      detail: 'Pull Request is not mergeable',
+    });
+  });
+
+  it('is failed on any other status', async () => {
+    expect(await failure(new Response('', { status: 500 }))).toMatchObject({
+      kind: 'failed',
+      status: 500,
+    });
+  });
+
+  it('is failed with status 0 when GitHub cannot be reached', async () => {
+    expect(await failure(new TypeError('Failed to fetch'))).toMatchObject({
+      kind: 'failed',
+      status: 0,
+    });
+  });
+
+  it("is refused on GraphQL's errors, though the answer is 200", async () => {
+    const error = await graphqlFailure(json({ errors: [{ message: 'Head branch was modified' }] }));
+    expect(error).toMatchObject({
+      kind: 'refused',
+      status: 200,
+      detail: 'Head branch was modified',
+    });
+  });
+
+  it.each(['FORBIDDEN', 'NOT_FOUND'])("is no access on GraphQL's %s", async (type) => {
+    const error = await graphqlFailure(json({ errors: [{ type, message: 'No' }] }));
+    expect(error.kind).toBe('noAccess');
+  });
+
+  it('maps GraphQL statuses as REST', async () => {
+    expect((await graphqlFailure(new Response('', { status: 401 }))).kind).toBe('badToken');
+    expect((await graphqlFailure(new Response('', { status: 403 }))).kind).toBe('noAccess');
+    expect((await graphqlFailure(new Response('', { status: 404 }))).kind).toBe('noAccess');
+  });
+
+  it('is failed when GraphQL sends no repository', async () => {
+    expect(await graphqlFailure(json({ data: { repository: null } }))).toMatchObject({
+      kind: 'failed',
+    });
+  });
+
+  it('never puts the token in a message or a detail', async () => {
+    const echo = { message: 'Token secret is not allowed' };
+    const errors = [
+      await failure(json(echo, { status: 401 }), 'secret'),
+      await failure(json(echo, { status: 403 }), 'secret'),
+      await failure(json(echo, { status: 422 }), 'secret'),
+      await failure(json(echo, { status: 500 }), 'secret'),
+      await failure(new TypeError('secret'), 'secret'),
+      await graphqlFailure(json({ errors: [echo] }), 'secret'),
+      await graphqlFailure(json(echo, { status: 403 }), 'secret'),
+    ];
+    for (const error of errors) {
+      expect(error.message).not.toContain('secret');
+      expect(error.detail ?? '').not.toContain('secret');
+    }
   });
 });

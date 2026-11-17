@@ -53,6 +53,8 @@ const pull = (over: Partial<PullRequest> = {}): PullRequest => ({
   labels: [],
   requestedReviewers: [],
   requestedTeams: [],
+  nodeId: 'PR_node',
+  mergeable: true,
   mergeableState: null,
   autoMerge: null,
   headSha: HEAD,
