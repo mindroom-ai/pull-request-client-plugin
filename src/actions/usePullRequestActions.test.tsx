@@ -5,7 +5,7 @@ import { renderPluginComponent } from '@mindroom/client-sdk/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PullRequest, PullRequestRef } from '../github';
 import plugin from '../index';
-import { usePullRequest } from '../queries';
+import { usePullRequest, usePullRequestFiles } from '../queries';
 import { useGitHubToken } from '../token';
 import { resetPullRequestActions, usePullRequestActions } from './usePullRequestActions';
 
@@ -116,6 +116,8 @@ const answerHeld = async () => {
 
 let writeAnswer: () => Promise<Response>;
 let pullAnswer: () => Promise<Response>;
+let filesAnswer: () => Promise<Response>;
+const fileReads = () => fetchMock.mock.calls.filter(([url]) => url.includes('/files'));
 
 let actions: ReturnType<typeof usePullRequestActions>;
 function Probe({
@@ -207,10 +209,12 @@ beforeEach(() => {
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   writeAnswer = async () => respond({ merged: true });
   pullAnswer = async () => respond(apiPull());
+  filesAnswer = async () => respond([]);
   shown = undefined;
   fetchMock.mockReset();
   fetchMock.mockImplementation(async (url, init) => {
     if (isRepositoryQuery(url, init)) return respond({ data: { repository } });
+    if (url.includes('/files')) return filesAnswer();
     return isPullRead(url, init) ? pullAnswer() : writeAnswer();
   });
   vi.stubGlobal('fetch', fetchMock);
@@ -410,7 +414,9 @@ describe('usePullRequestActions', () => {
     const invalidate = vi.spyOn(client, 'invalidateQueries');
     act(() => actions.perform('merge'));
     await waitUntil(() => expect(actions.result).toEqual({ action: 'merge', outcome: 'done' }));
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['pull-requests', 'pr', 'o', 'r', 7] });
+    expect(invalidate).toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: ['pull-requests', 'pr', 'o', 'r', 7] })
+    );
     expect(actions.pending).toBeNull();
     act(() => actions.dismissResult());
     expect(actions.result).toBeNull();
@@ -466,6 +472,33 @@ describe('usePullRequestActions', () => {
     await waitUntil(() => expect(both[0]!.repo).toBeDefined());
     await waitUntil(() => expect(both[1]!.repo).toBeDefined());
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('unlocks once the pull request itself is read again, without waiting for its files', async () => {
+    function Files() {
+      usePullRequestFiles(refA, true);
+      return null;
+    }
+    await renderPluginComponent(
+      <QueryClientProvider client={client}>
+        <Panel />
+        <Files />
+      </QueryClientProvider>,
+      { id: 'pull-requests', plugin }
+    );
+    await waitUntil(() => expect(shown).toBeDefined());
+    await loaded();
+    await waitUntil(() => expect(fileReads()).toHaveLength(1));
+    // A large pull request: its files take long to read again.
+    filesAnswer = () => hold(() => respond([]));
+    pullAnswer = async () =>
+      respond(apiPull({ state: 'closed', merged_at: '2026-11-16T00:00:00Z' }));
+    act(() => actions.perform('merge'));
+    await waitUntil(() => expect(actions.pending).toBeNull());
+    expect(shown?.state).toBe('merged');
+    expect(actions.result).toEqual({ action: 'merge', outcome: 'done' });
+    // Asked again all the same.
+    expect(fileReads()).toHaveLength(2);
   });
 
   it('unlocks when the read after the write fails', async () => {
@@ -554,7 +587,9 @@ describe('usePullRequestActions', () => {
     expect(result?.outcome === 'failed' && result.error.detail).toBe(
       'Pull Request is not mergeable'
     );
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['pull-requests', 'pr', 'o', 'r', 7] });
+    expect(invalidate).toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: ['pull-requests', 'pr', 'o', 'r', 7] })
+    );
   });
 
   it.each([
@@ -582,7 +617,9 @@ describe('usePullRequestActions', () => {
       await waitUntil(() => expect(actions.result?.outcome).toBe('failed'));
       const result = actions.result;
       expect(result?.outcome === 'failed' && result.error.kind).toBe(kind);
-      expect(invalidate).toHaveBeenCalledWith({ queryKey: ['pull-requests', 'pr', 'o', 'r', 7] });
+      expect(invalidate).toHaveBeenCalledWith(
+        expect.objectContaining({ queryKey: ['pull-requests', 'pr', 'o', 'r', 7] })
+      );
     }
   );
 

@@ -431,9 +431,9 @@ describe('HeaderActions', () => {
         },
       ],
     });
-    // The branch is gone, so the menu offers it no more.
+    // The branch is gone, so the menu offers it no more, once that is read.
     await openMenu(view);
-    expect(view.queryByText('Delete branch')).toBeNull();
+    await waitUntil(() => expect(view.queryByText('Delete branch')).toBeNull());
   });
 
   it.each([

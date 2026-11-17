@@ -13,7 +13,7 @@ import {
   type PullRequestRef,
   type Repository,
 } from '../github';
-import { pullRequestKey, useRepository } from '../queries';
+import { refreshPullRequest, useRepository } from '../queries';
 import { useGitHubToken, useStoredToken } from '../token';
 import { resolveMergeMethod } from './actions.logic';
 
@@ -127,7 +127,7 @@ export function usePullRequestActions(
         // moved, and a failed answer may come after GitHub took the write. The action runs on
         // until that state is read: unlocked before, the controls would offer the pull request
         // as it was (a second merge of a merged one, which GitHub then refuses).
-        await queryClient.invalidateQueries({ queryKey: pullRequestKey(ref) });
+        await refreshPullRequest(queryClient, ref);
       } finally {
         // The outcome stays with its own pull request, to show when that one is shown again.
         setEntry(key, { pending: null, result });
