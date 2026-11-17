@@ -1,6 +1,6 @@
 import { parsePatchFiles } from '@pierre/diffs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { MindroomServerError } from '@mindroom/client-sdk/server';
+import { MindroomServerError, type MindroomServer } from '@mindroom/client-sdk/server';
 import {
   GitHubError,
   type GitHubViaServer,
@@ -24,6 +24,19 @@ import {
   type PullRequestAction,
   type PullRequestFile,
 } from './github';
+import { githubServer } from './testing/mindroomServer';
+
+/** What the stand-in MindRoom server answers a GitHub request for `path` with, as a refusal. */
+const getRefused = (server: MindroomServer, path: string) =>
+  server
+    .request('/api/github/request', {
+      method: 'POST',
+      body: JSON.stringify({ method: 'GET', path }),
+    })
+    .then(
+      () => undefined,
+      (error: unknown) => error
+    );
 
 const ref = { owner: 'a', repo: 'b', number: 1 };
 
@@ -704,6 +717,19 @@ describe('fetchBehindBy', () => {
 });
 
 describe('commit paths', () => {
+  it('compares with a base branch whose name has a slash through MindRoom', async () => {
+    const github = vi.fn((url: string) =>
+      Promise.resolve(json(url.includes('/compare/release/1.0...abc123') ? { behind_by: 2 } : {}))
+    );
+    const { server } = githubServer(github);
+    const via = { server, disconnected: vi.fn() };
+    expect(await fetchBehindBy(ref, 'release/1.0', 'abc123', via)).toBe(2);
+    // The stand-in refuses what MindRoom refuses, such as an encoded slash.
+    await expect(
+      getRefused(server, '/repos/a/b/compare/release%2F1.0...abc123')
+    ).resolves.toMatchObject({ status: 400, body: { error: 'github_path_not_allowed' } });
+  });
+
   it('encodes the head sha and a commit sha like the base branch', async () => {
     const fetchMock = stubRoutes({ '/compare/': { behind_by: 0 }, '/commits/': { files: [] } });
     await fetchChecks(ref, 'a/b?c', undefined);
@@ -712,7 +738,8 @@ describe('commit paths', () => {
     expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
       'https://api.github.com/repos/a/b/commits/a%2Fb%3Fc/check-runs?per_page=100',
       'https://api.github.com/repos/a/b/commits/a%2Fb%3Fc/status?per_page=100',
-      'https://api.github.com/repos/a/b/compare/x%2Fy...a%2Fb%3Fc',
+      // A branch's own slashes stay, as MindRoom refuses a segment that decodes to one.
+      'https://api.github.com/repos/a/b/compare/x/y...a%2Fb%3Fc',
       'https://api.github.com/repos/a/b/commits/a%2Fb%3Fc',
     ]);
   });

@@ -7,6 +7,32 @@ import { vi } from 'vitest';
 type GitHub = (url: string, init?: RequestInit) => Promise<Response>;
 type Payload = { method: string; path: string; body?: unknown; accept?: string };
 
+// MindRoom's rule for the paths it sends to GitHub (`github_requests.py`, `_path_kind`): `/graphql`
+// or under `/repos/<owner>/<repo>`, with an optional query, of RFC 3986 path characters, 4096 at
+// most, and no segment that decodes to `.` or `..`, or to anything holding `/`, `\` or a control.
+const PCHAR = "(?:[A-Za-z0-9\\-._~!$&'()*+,;=:@]|%[0-9A-Fa-f]{2})";
+const PATH = new RegExp(`^(/graphql|/repos(?:/${PCHAR}+){2,})(?:\\?(?:${PCHAR}|[/?])*)?$`);
+// eslint-disable-next-line no-control-regex
+const REFUSED = /[/\\\u0000-\u001f\u007f-\u009f]/;
+
+/** Whether MindRoom sends a request for `path` on to GitHub. */
+export function allowedPath(path: string): boolean {
+  const match = path.length <= 4096 ? PATH.exec(path) : null;
+  if (!match) return false;
+  return match[1]!
+    .split('/')
+    .slice(1)
+    .every((segment) => {
+      let decoded: string;
+      try {
+        decoded = decodeURIComponent(segment);
+      } catch {
+        return false;
+      }
+      return decoded !== '.' && decoded !== '..' && !REFUSED.test(decoded);
+    });
+}
+
 const PASSED = ['x-ratelimit-remaining', 'x-ratelimit-reset', 'retry-after', 'x-github-request-id'];
 
 /**
@@ -28,6 +54,9 @@ export function githubServer(
       throw new MindroomServerError('Conflict', 409, { error: 'github_not_connected' });
     }
     const { method, path: githubPath, body, accept } = JSON.parse(String(init?.body)) as Payload;
+    if (!allowedPath(githubPath)) {
+      throw new MindroomServerError('Bad Request', 400, { error: 'github_path_not_allowed' });
+    }
     const headers = { Accept: accept ?? 'application/vnd.github+json' };
     const response = await github(
       `https://api.github.com${githubPath}`,

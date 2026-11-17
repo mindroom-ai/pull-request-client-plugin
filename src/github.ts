@@ -683,9 +683,11 @@ export async function fetchBehindBy(
   token: GitHubAuth | undefined,
   signal?: AbortSignal
 ): Promise<number> {
+  // Each part of the branch's name on its own: MindRoom refuses an encoded slash.
+  const base = baseRef.split('/').map(encodeURIComponent).join('/');
   const raw = record(
     await getJson(
-      `${repoPath(ref)}/compare/${encodeURIComponent(baseRef)}...${encodeURIComponent(headSha)}`,
+      `${repoPath(ref)}/compare/${base}...${encodeURIComponent(headSha)}`,
       token,
       signal
     )
