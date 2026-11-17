@@ -722,7 +722,7 @@ describe('commit paths', () => {
       Promise.resolve(json(url.includes('/compare/release/1.0...abc123') ? { behind_by: 2 } : {}))
     );
     const { server } = githubServer(github);
-    const via = { server, disconnected: vi.fn() };
+    const via = { server, account: 'a', disconnected: vi.fn() };
     expect(await fetchBehindBy(ref, 'release/1.0', 'abc123', via)).toBe(2);
     // The stand-in refuses what MindRoom refuses, such as an encoded slash.
     await expect(
@@ -1446,6 +1446,7 @@ describe('through MindRoom', () => {
     };
     return {
       server: { origin, request: request as GitHubViaServer['server']['request'] },
+      account: 'octo',
       disconnected: vi.fn(),
       sent,
       paths,
@@ -1498,6 +1499,23 @@ describe('through MindRoom', () => {
       expect((await fetchPullRequest(ref, undefined)).title).toBe('T');
       await expect(fetchPullRequest(ref, limited)).rejects.toEqual(LIMITED);
       expect(limited.sent).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("holds one account's rate limit on a server to that account alone", async () => {
+    vi.useFakeTimers({ now: Date.parse('2026-01-01T00:00:00Z'), toFake: ['Date'] });
+    try {
+      const reset = String(Date.now() / 1000 + 600);
+      const headers = { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': reset };
+      const alice = viaServer(() => answered({ message: 'limit' }, 403, headers));
+      await expect(fetchPullRequest(ref, alice)).rejects.toEqual(
+        new GitHubError('rateLimited', 403)
+      );
+      // Another account at the same origin is another budget.
+      const bob = { ...viaServer(() => answered(apiPull)), account: 'bob' };
+      expect((await fetchPullRequest(ref, bob)).title).toBe('T');
     } finally {
       vi.useRealTimers();
     }

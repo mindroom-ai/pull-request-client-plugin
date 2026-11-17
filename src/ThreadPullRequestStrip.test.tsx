@@ -19,7 +19,7 @@ const page = vi.hoisted(() => ({
 const roomServer = vi.hoisted(() => ({ current: undefined as unknown }));
 vi.mock('@mindroom/client-sdk/server', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@mindroom/client-sdk/server')>()),
-  useMindroomServer: () => roomServer.current,
+  useMindroomServerStatus: () => ({ server: roomServer.current, pending: false }),
 }));
 
 vi.mock('@mindroom/client-sdk/core', async (importOriginal) => {

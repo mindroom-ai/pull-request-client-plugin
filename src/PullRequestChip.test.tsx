@@ -98,7 +98,7 @@ const show = async (
   });
   const view = await renderPluginComponent(
     <QueryClientProvider client={client}>
-      <GitHubServerContext.Provider value={server}>
+      <GitHubServerContext.Provider value={{ server, pending: false }}>
         <PullRequestChip pullRequest={REF} showRepository={false} {...props} />
       </GitHubServerContext.Provider>
     </QueryClientProvider>,
@@ -213,7 +213,7 @@ describe('PullRequestChip', () => {
       .findAll({ queryKey: ['pull-requests'], predicate: ({ state }) => state.dataUpdatedAt > 0 });
     expect(keys.length).toBeGreaterThan(0);
     expect(keys.map(({ queryKey }) => queryKey[5])).toEqual(
-      keys.map(() => 'server:https://mindroom.example.org')
+      keys.map(() => 'server:https://mindroom.example.org:octo')
     );
     expect(JSON.stringify(keys.map(({ queryKey }) => queryKey))).not.toContain('ghp_');
   });

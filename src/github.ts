@@ -117,6 +117,8 @@ function errorKind(response: Response, hasToken: boolean): GitHubErrorKind {
  */
 export type GitHubViaServer = {
   server: Pick<MindroomServer, 'origin' | 'request'>;
+  /** Whose connection it is, never a token: the signed-in account and the GitHub login. */
+  account: string;
   /** Told when the server answers that the account is no longer connected. */
   disconnected(): void;
 };
@@ -129,15 +131,15 @@ type RateLimit = { who: string; status: number; resetsAt: number };
 // The rate limit GitHub last answered, for requests with a token, for those through each MindRoom
 // server, and for those without either (which it counts against the address), while it lasts.
 // Until it resets, a request gets the same answer from here without asking, so the chips of a busy
-// room do not keep spending what the panel needs. A request with another token than the one
-// limited starts afresh: a new token is a new budget.
+// room do not keep spending what the panel needs. A request with another token, or through another
+// account's connection, than the one limited starts afresh: it is a new budget.
 const rateLimits = new Map<string, RateLimit>();
 
 /** The budget a request spends, and who within it: a token's own, or a server's. */
 function budgetOf(token: GitHubAuth | undefined): { budget: string; who: string } {
   if (token === undefined) return { budget: 'anonymous', who: '' };
   if (typeof token === 'string') return { budget: 'token', who: token };
-  return { budget: `server:${token.server.origin}`, who: token.server.origin };
+  return { budget: `server:${token.server.origin}`, who: token.account };
 }
 
 type GitHubInit = {
