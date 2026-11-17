@@ -811,5 +811,62 @@ describe('PullRequestPanel', () => {
       expect(view.queryByRole('button', { name: 'Merge' })).toBeNull();
       expect(headerRow(view)?.textContent).toContain('Open on GitHub');
     });
+
+    it.each([
+      ['WRITE', true],
+      ['READ', false],
+    ])(
+      'the base warning offers the update with %s permission: %s',
+      async (viewerPermission, offered) => {
+        localStorage.setItem(
+          'mindroom.plugin:%40plugin-tester%3Aexample.org/pull-requests/githubToken',
+          'tok'
+        );
+        const repository = {
+          viewerPermission,
+          mergeCommitAllowed: true,
+          squashMergeAllowed: false,
+          rebaseMergeAllowed: false,
+          autoMergeAllowed: false,
+          defaultBranchRef: { name: 'main' },
+        };
+        const head = {
+          ref: 'feature',
+          sha: 'abc123',
+          repo: { full_name: 'mindroom-ai/mindroom-chat' },
+        };
+        const base = { ref: 'main', repo: { full_name: 'mindroom-ai/mindroom-chat' } };
+        fetchMock.mockImplementation(async (url, init) => {
+          if (url === GRAPHQL) return respond({ data: { repository } });
+          if (init?.method === 'PUT')
+            return respond({ message: 'Updating pull request branch.' }, 202);
+          if (url.includes('/compare/')) return respond({ behind_by: 2 });
+          if (url.includes('/check-runs')) return respond({ check_runs: [] });
+          if (url.includes('/status?')) return respond({ statuses: [] });
+          if (url.includes('/files') || url.includes('/commits') || url.includes('/comments'))
+            return respond([]);
+          if (url.includes('/reviews')) return respond([]);
+          return respond(pull({ head, base }));
+        });
+        const view = await show();
+        await waitUntil(() =>
+          expect(fetchMock.mock.calls.some(([url]) => url === GRAPHQL)).toBe(true)
+        );
+        await click(await view.findByRole('button', { name: 'Warnings for main' }));
+        expect(await view.findByText('feature is 2 commits behind main')).toBeTruthy();
+        if (!offered) {
+          // The repository answered, and still no update shows.
+          await act(async () => {});
+          expect(view.queryByRole('button', { name: 'Update branch' })).toBeNull();
+          return;
+        }
+        await click(await view.findByRole('button', { name: 'Update branch' }));
+        const puts = fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT');
+        expect(puts.map(([url]) => url)).toEqual([
+          'https://api.github.com/repos/mindroom-ai/mindroom-chat/pulls/200/update-branch',
+        ]);
+        expect(JSON.parse(String(puts[0][1]?.body))).toEqual({ expected_head_sha: 'abc123' });
+      }
+    );
   });
 });

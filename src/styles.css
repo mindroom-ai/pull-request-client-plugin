@@ -830,7 +830,8 @@
   background: color-mix(in srgb, var(--pr-primary) 26%, transparent);
 }
 .mrpr-button-primary:disabled,
-.mrpr-dialog-actions .mrpr-button:disabled {
+.mrpr-dialog-actions .mrpr-button:disabled,
+.mrpr-popover-actions .mrpr-button:disabled {
   cursor: default;
   opacity: 0.6;
 }
@@ -896,7 +897,8 @@
 /* A finger needs a larger target than a pointer. */
 @media (any-pointer: coarse) {
   .mrpr-button-primary,
-  .mrpr-dialog-actions .mrpr-button {
+  .mrpr-dialog-actions .mrpr-button,
+  .mrpr-popover-actions .mrpr-button {
     min-block-size: 44px;
     padding-inline: 14px;
   }
@@ -1044,6 +1046,12 @@
 }
 .mrpr-popover-line + .mrpr-popover-line {
   margin-block-start: 2px;
+}
+.mrpr-popover-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-block-start: 8px;
 }
 .mrpr-breakdown {
   display: grid;

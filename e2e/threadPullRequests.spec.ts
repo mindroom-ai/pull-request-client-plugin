@@ -28,8 +28,9 @@ import { touch } from '@mindroom/e2e/touch';
 // a link written or cleared while the room is open shows on its card at once, also after a gap in
 // the room's sync; the room's six threads leave the SDK's emitters within their listener limit; and
 // a thread's worktree, which MindRoom's `thread-worktree` backend plugin writes, shows as its
-// branch on its card and in the strip until it is cleared; and a thread's pull requests show as its
-// details in the card's hover card and, on a phone, in the menu a long press opens.
+// branch on its card and in the strip until it is cleared; a thread's pull requests show as its
+// details in the card's hover card and, on a phone, in the menu a long press opens; and a viewer
+// who can write merges a pull request from the panel's header with two clicks.
 // Set MRPR_SHOTS=<directory> to save the screenshots of the pull request.
 
 const LINK_EVENT = 'com.mindroom.thread.pull_request';
@@ -255,8 +256,11 @@ const CHECK_RUNS: Record<Checks, [string, 'success' | 'failure' | null][]> = {
   none: [],
 };
 
-/** GitHub's answer to a GET of `pathname`, or undefined for a path these pull requests lack. */
-const gitHubAnswer = (pathname: string): unknown => {
+/**
+ * GitHub's answer to a GET of `pathname`, or undefined for a path these pull requests lack; the
+ * pull requests in `merged` (by path) have been merged in the page since it loaded.
+ */
+const gitHubAnswer = (pathname: string, merged: ReadonlySet<string>): unknown => {
   const [, repo, kind, id, part] =
     /^\/repos\/acme\/([^/]+)\/([a-z]+)\/([^/]+)(?:\/([a-z-]+))?$/.exec(pathname) ?? [];
   if (kind === 'compare') return { behind_by: 0, ahead_by: 3 };
@@ -276,7 +280,9 @@ const gitHubAnswer = (pathname: string): unknown => {
     (candidate) => candidate.repo === repo && String(candidate.number) === id
   );
   if (!pull) return undefined;
-  if (kind === 'pulls' && part === undefined) return apiPull(pull);
+  if (kind === 'pulls' && part === undefined) {
+    return apiPull(merged.has(pathname) ? { ...pull, state: 'merged' } : pull);
+  }
   if (kind === 'pulls' && part === 'reviews') {
     return pull.approvedBy
       ? [
@@ -311,13 +317,30 @@ const gitHubAnswer = (pathname: string): unknown => {
 
 const CORS = {
   'access-control-allow-origin': '*',
-  'access-control-allow-headers': 'accept, authorization, x-github-api-version',
-  'access-control-allow-methods': 'GET',
+  'access-control-allow-headers': 'accept, authorization, content-type, x-github-api-version',
+  'access-control-allow-methods': 'GET, POST, PUT',
 };
 
-/** Answers GitHub's API in the page; the returned list collects the paths it had no answer for. */
-const stubGitHub = async (page: Page): Promise<string[]> => {
+// The repository's settings as GraphQL gives them: the lead may write, with every merge method.
+const REPOSITORY = {
+  viewerPermission: 'WRITE',
+  mergeCommitAllowed: true,
+  squashMergeAllowed: true,
+  rebaseMergeAllowed: true,
+  autoMergeAllowed: true,
+  defaultBranchRef: { name: 'main' },
+};
+
+type Write = { method: string; pathname: string; body: unknown };
+
+/**
+ * Answers GitHub's API in the page; the returned list collects the paths it had no answer for.
+ * It answers the repository's GraphQL query and a merge, which `writes` collects, after which the
+ * pull request reads as merged.
+ */
+const stubGitHub = async (page: Page, writes: Write[] = []): Promise<string[]> => {
   const unanswered: string[] = [];
+  const merged = new Set<string>();
   await page.route('https://api.github.com/**', async (route) => {
     const request = route.request();
     if (request.method() === 'OPTIONS') {
@@ -325,7 +348,25 @@ const stubGitHub = async (page: Page): Promise<string[]> => {
       return;
     }
     const { pathname } = new URL(request.url());
-    const answer = gitHubAnswer(pathname);
+    if (request.method() !== 'GET') {
+      const body: unknown = request.postDataJSON();
+      const query = (body as { query?: unknown } | null)?.query;
+      if (pathname === '/graphql' && typeof query === 'string' && query.includes('repository(')) {
+        await route.fulfill({ headers: CORS, json: { data: { repository: REPOSITORY } } });
+        return;
+      }
+      const pull = /^(\/repos\/acme\/[^/]+\/pulls\/\d+)\/merge$/.exec(pathname)?.[1];
+      if (request.method() === 'PUT' && pull) {
+        writes.push({ method: 'PUT', pathname, body });
+        merged.add(pull);
+        await route.fulfill({ headers: CORS, json: { merged: true, message: 'Merged' } });
+        return;
+      }
+      unanswered.push(`${request.method()} ${pathname}`);
+      await route.fulfill({ status: 404, headers: CORS, json: { message: 'Not Found' } });
+      return;
+    }
+    const answer = gitHubAnswer(pathname, merged);
     if (answer === undefined) unanswered.push(pathname);
     await route.fulfill(
       answer === undefined
@@ -1077,6 +1118,67 @@ test("a thread's worktree shows as its branch on its card and in the strip until
   await writeWorktree(roots.webhooks, {});
   await expect(strip(page)).toHaveCount(0);
   expect(await page.evaluate(() => 'mrprSamePage' in window)).toBe(true);
+  expect(unanswered).toEqual([]);
+  expect(warnings).toEqual([]);
+});
+
+test("a viewer who can write merges the panel's pull request with two clicks", async ({ page }) => {
+  test.setTimeout(4 * 60_000);
+  const writes: Write[] = [];
+  const unanswered = await stubGitHub(page, writes);
+  const warnings = listenerWarnings(page);
+  await openRoom(page);
+  const { tokenEndpoint } = PULLS;
+  await expectChips(cardChips(page, roots.sessions), THREADS.sessions.pulls);
+  await cardChips(page, roots.sessions).nth(1).click();
+  await expect(panel(page).locator('.mrpr-panel-title')).toHaveText(tokenEndpoint.title, {
+    timeout: 30_000,
+  });
+  const merge = panel(page).getByRole('button', { name: 'Merge', exact: true });
+  await expect(merge).toBeVisible({ timeout: 30_000 });
+  await expect(
+    panel(page).getByRole('button', { name: 'Open checks: All checks have passed' })
+  ).toBeVisible();
+  await expect(panel(page).getByText(/^Loading/)).toHaveCount(0);
+  await shot(page, 'actions-open');
+
+  // The menu: the merge methods, the first chosen, then Close and Refresh.
+  await panel(page).getByRole('button', { name: 'More actions' }).click();
+  const menu = page.getByRole('menu', { name: 'More actions' });
+  await expect(menu.getByRole('menuitemradio')).toHaveText([
+    'Merge',
+    'Squash and merge',
+    'Rebase and merge',
+  ]);
+  await expect(menu.getByRole('menuitemradio', { name: 'Merge', exact: true })).toHaveAttribute(
+    'aria-checked',
+    'true'
+  );
+  await shot(page, 'actions-menu', { keepPointer: true });
+  await page.keyboard.press('Escape');
+  await expect(menu).toHaveCount(0);
+
+  // The first click arms the button, which goes back after 3 s without a second.
+  await merge.click();
+  const confirm = panel(page).getByRole('button', { name: 'Confirm merge?' });
+  await expect(confirm).toBeVisible();
+  await shot(page, 'actions-confirm', { keepPointer: true });
+  await expect(merge).toBeVisible({ timeout: 10_000 });
+  expect(writes).toEqual([]);
+
+  // Two clicks merge, with the head the panel shows, and the refetch shows it merged.
+  await merge.click();
+  await confirm.click();
+  await expect(panel(page).locator('.mrpr-badge-state')).toHaveText('Merged', { timeout: 30_000 });
+  expect(writes).toEqual([
+    {
+      method: 'PUT',
+      pathname: `/repos/acme/${tokenEndpoint.repo}/pulls/${tokenEndpoint.number}/merge`,
+      body: { merge_method: 'merge', sha: headSha(tokenEndpoint) },
+    },
+  ]);
+  await expect(merge).toHaveCount(0);
+  await shot(page, 'actions-merged');
   expect(unanswered).toEqual([]);
   expect(warnings).toEqual([]);
 });

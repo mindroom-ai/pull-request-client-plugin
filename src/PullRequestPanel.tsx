@@ -384,7 +384,15 @@ export default function PullRequestPanel({
             </div>
             <div className="mrpr-branches">
               <span className="mrpr-refs">
-                <BaseBranch baseBranch={pr.baseRef} headBranch={pr.headRef} freshness={freshness} />
+                <BaseBranch
+                  baseBranch={pr.baseRef}
+                  headBranch={pr.headRef}
+                  freshness={freshness}
+                  onUpdate={
+                    actions.repo?.canWrite ? (action) => actions.perform(action) : undefined
+                  }
+                  updating={actions.pending !== null}
+                />
                 <ArrowLeft
                   aria-label={t('receivesChanges')}
                   className="mrpr-arrow mrpr-arrow-back"

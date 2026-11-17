@@ -1,6 +1,7 @@
 // Ported from T3 Code (https://github.com/pingdotgg/t3code, apps/web/src/components/pullRequest/PullRequestBaseBranch.tsx at 8ab427c6), MIT, Copyright (c) 2026 T3 Tools Inc. See NOTICE.
 // The base branch of the header, with a warning button that opens a popover when the pull request
-// has fallen behind it or conflicts with it.
+// has fallen behind it or conflicts with it. A viewer who can write may update a branch that is
+// behind and does not conflict from there, by merging the base in or by rebasing onto it.
 import { useRef, useState, type MouseEvent } from 'react';
 import FocusTrap from 'focus-trap-react';
 import type { RectCords } from 'folds';
@@ -13,11 +14,17 @@ export function BaseBranch({
   baseBranch,
   headBranch,
   freshness,
+  onUpdate,
+  updating = false,
 }: {
   baseBranch: string;
   headBranch: string;
   /** Undefined when the branch is neither behind nor conflicting. */
   freshness: { behind: number; conflicts: boolean } | undefined;
+  /** Given only when the viewer can write; without it the popover only informs. */
+  onUpdate?: (action: 'update-branch' | 'update-branch-rebase') => void;
+  /** An action runs on the pull request, so no other may start. */
+  updating?: boolean;
 }) {
   const t = usePluginTranslation('pull-requests');
   const [anchor, setAnchor] = useState<RectCords>();
@@ -54,7 +61,8 @@ export function BaseBranch({
           <FocusTrap
             focusTrapOptions={{
               initialFocus: false,
-              // The popover holds text only, which the trap needs a focusable stand-in for.
+              // Without the update buttons the popover holds text only, which the trap needs a
+              // focusable stand-in for.
               fallbackFocus: () => contentRef.current ?? document.body,
               returnFocusOnDeactivate: false,
               clickOutsideDeactivates: close,
@@ -79,6 +87,27 @@ export function BaseBranch({
                 ) : null}
                 {freshness.conflicts ? (
                   <p className="mrpr-popover-line">{t('base.conflicts')}</p>
+                ) : null}
+                {/* GitHub cannot update a conflicting branch, so T3 Code offers no update. */}
+                {onUpdate && freshness.behind > 0 && !freshness.conflicts ? (
+                  <div className="mrpr-popover-actions">
+                    <button
+                      type="button"
+                      className="mrpr-button"
+                      disabled={updating}
+                      onClick={() => onUpdate('update-branch')}
+                    >
+                      {t('base.update')}
+                    </button>
+                    <button
+                      type="button"
+                      className="mrpr-button"
+                      disabled={updating}
+                      onClick={() => onUpdate('update-branch-rebase')}
+                    >
+                      {t('base.updateRebase')}
+                    </button>
+                  </div>
                 ) : null}
               </div>
             </Menu>

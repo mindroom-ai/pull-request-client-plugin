@@ -131,6 +131,8 @@ export const en = {
     behind_one: '{{head}} is {{count}} commit behind {{base}}',
     behind_other: '{{head}} is {{count}} commits behind {{base}}',
     conflicts: 'This branch has conflicts that must be resolved',
+    update: 'Update branch',
+    updateRebase: 'Update with rebase',
   },
   breakdown: {
     label: 'Lines changed: +{{additions}} -{{deletions}}',
