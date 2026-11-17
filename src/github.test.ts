@@ -8,7 +8,7 @@ import {
   fetchCommitFiles,
   fetchCommits,
   fetchConversationComments,
-  fetchHeadBranchSha,
+  fetchHeadBranch,
   fetchPullRequest,
   fetchPullRequestFiles,
   fetchReviewComments,
@@ -981,12 +981,16 @@ describe('runPullRequestAction', () => {
     });
   });
 
-  /** Deletes the branch while it points at `oid` in its repository (null: it is gone). */
-  async function deleteBranch(oid: string | null) {
+  /**
+   * Deletes the branch while it points at `oid` in its repository (null: it is gone) and the
+   * pull request, closed when the panel read it, has `state` on GitHub.
+   */
+  async function deleteBranch(oid: string | null, state = 'CLOSED') {
     const node = { ref: oid === null ? null : { target: { oid } } };
+    const read = { node, repository: { pullRequest: { state } } };
     const fetchMock = vi.fn((_url: string, init: RequestInit) =>
       Promise.resolve(
-        json({ data: String(init.body).includes('updateRefs') ? { updateRefs: {} } : { node } })
+        json({ data: String(init.body).includes('updateRefs') ? { updateRefs: {} } : read })
       )
     );
     vi.stubGlobal('fetch', fetchMock);
@@ -1035,6 +1039,17 @@ describe('runPullRequestAction', () => {
     expect(sent).toHaveLength(1);
     expect((sent[0]!.body as { query: string }).query).not.toContain('updateRefs');
   });
+
+  // As T3 Code: deleting the branch of an open pull request closes it.
+  it.each(['head7', null])(
+    'does not delete the branch (at %s) of a pull request that was opened again',
+    async (oid) => {
+      const { outcome, sent } = await deleteBranch(oid, 'OPEN');
+      expect(outcome).toMatchObject({ kind: 'pullRequestOpen' });
+      expect(sent).toHaveLength(1);
+      expect((sent[0]!.body as { query: string }).query).not.toContain('updateRefs');
+    }
+  );
 
   it('does not delete a branch that got commits since the pull request', async () => {
     const { outcome, sent } = await deleteBranch('newer');
@@ -1126,38 +1141,63 @@ describe('runPullRequestAction', () => {
   });
 });
 
-describe('fetchHeadBranchSha', () => {
+describe('fetchHeadBranch', () => {
+  const closed = { pullRequest: { state: 'CLOSED' } };
   const read = (data: unknown) => {
     const fetchMock = vi.fn(() => Promise.resolve(json({ data })));
     vi.stubGlobal('fetch', fetchMock);
     return fetchMock;
   };
 
-  it("reads where the branch points in the pull request's head repository", async () => {
-    const fetchMock = read({ node: { ref: { target: { oid: 'abc' } } } });
-    expect(await fetchHeadBranchSha(writePull, 'tok')).toBe('abc');
+  it("reads where the branch points in the head repository, and the pull request's state now", async () => {
+    const fetchMock = read({ node: { ref: { target: { oid: 'abc' } } }, repository: closed });
+    expect(await fetchHeadBranch(writeRef, writePull, 'tok')).toEqual({
+      sha: 'abc',
+      pullRequestOpen: false,
+    });
     expect(sentRequests(fetchMock)).toMatchObject([
       {
         method: 'POST',
         url: 'https://api.github.com/graphql',
-        body: { variables: { repositoryId: 'R_fork', ref: 'refs/heads/feat/a b#1' } },
+        body: {
+          variables: {
+            repositoryId: 'R_fork',
+            ref: 'refs/heads/feat/a b#1',
+            owner: 'o',
+            repo: 'r',
+            number: 7,
+          },
+        },
         authorization: 'Bearer tok',
       },
     ]);
   });
 
-  it('is null for a branch that is gone', async () => {
-    read({ node: { ref: null } });
-    expect(await fetchHeadBranchSha(writePull, 'tok')).toBeNull();
+  it('has no commit for a branch that is gone', async () => {
+    read({ node: { ref: null }, repository: closed });
+    expect((await fetchHeadBranch(writeRef, writePull, 'tok')).sha).toBeNull();
   });
 
   it.each([
-    ['no repository', { node: null }],
-    ['a node that is no repository', { node: {} }],
-    ['a branch without a commit', { node: { ref: { target: null } } }],
+    ['OPEN', true],
+    ['CLOSED', false],
+    ['MERGED', false],
+  ])('with the pull request %s it is open: %s', async (state, open) => {
+    read({ node: { ref: null }, repository: { pullRequest: { state } } });
+    expect((await fetchHeadBranch(writeRef, writePull, 'tok')).pullRequestOpen).toBe(open);
+  });
+
+  it.each([
+    ['no repository', { node: null, repository: closed }],
+    ['a node that is no repository', { node: {}, repository: closed }],
+    ['a branch without a commit', { node: { ref: { target: null } }, repository: closed }],
+    ['no pull request', { node: { ref: null }, repository: { pullRequest: null } }],
+    ['no state of the pull request', { node: { ref: null }, repository: null }],
   ])('fails on %s, which says nothing about the branch', async (_name, data) => {
     read(data);
-    await expect(fetchHeadBranchSha(writePull, 'tok')).rejects.toMatchObject({ kind: 'failed' });
+    await expect(fetchHeadBranch(writeRef, writePull, 'tok')).rejects.toMatchObject({
+      kind: 'failed',
+    });
   });
 });
 

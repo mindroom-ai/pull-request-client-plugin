@@ -58,6 +58,9 @@ let repository: Record<string, unknown>;
 let checkRuns: Record<string, unknown>[];
 // The commit the pull request's branch points at on GitHub; null once the branch is gone.
 let headBranch: string | null;
+// The pull request's state on GitHub when its branch is asked about, which the panel may not
+// have read yet.
+let stateNow: 'OPEN' | 'CLOSED' | 'MERGED';
 
 const respond = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -80,7 +83,7 @@ const click = (element: HTMLElement) => act(async () => element.click());
 
 const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>();
 const isRepositoryQuery = (url: string, init?: RequestInit) =>
-  url === GRAPHQL && String(init?.body).includes('repository(');
+  url === GRAPHQL && String(init?.body).includes('viewerPermission');
 const isHeadBranchQuery = (url: string, init?: RequestInit) =>
   url === GRAPHQL && String(init?.body).includes('ref(qualifiedName');
 const isRead = (url: string, init?: RequestInit) =>
@@ -155,13 +158,14 @@ beforeEach(() => {
   };
   checkRuns = [];
   headBranch = 'head7';
+  stateNow = 'MERGED';
   writeAnswer = async () => respond({ merged: true });
   fetchMock.mockReset();
   fetchMock.mockImplementation(async (url, init) => {
     if (isRepositoryQuery(url, init)) return respond({ data: { repository } });
     if (isHeadBranchQuery(url, init)) {
       const node = { ref: headBranch === null ? null : { target: { oid: headBranch } } };
-      return respond({ data: { node } });
+      return respond({ data: { node, repository: { pullRequest: { state: stateNow } } } });
     }
     if (url.includes('/check-runs')) return respond({ check_runs: checkRuns });
     if (url.includes('/status')) return respond({ statuses: [] });
@@ -454,6 +458,22 @@ describe('HeaderActions', () => {
     await waitUntil(() =>
       expect(view.getByRole('status').textContent).toContain(
         'Could not delete this branch The branch has new commits since this pull request, so it was not deleted.'
+      )
+    );
+    expect(writes()).toEqual([]);
+  });
+
+  it('leaves the branch of a pull request that was opened again on GitHub, and says so', async () => {
+    // The panel still shows it closed, with Delete branch; deleting it would close it again.
+    stateNow = 'CLOSED';
+    const view = await show({ ...open, state: 'closed', closedAt: '2026-11-15T00:00:00Z' });
+    await openMenu(view);
+    await click(row(view, 'Delete branch'));
+    stateNow = 'OPEN';
+    await click(view.getByRole('dialog').querySelector<HTMLButtonElement>('button:last-of-type')!);
+    await waitUntil(() =>
+      expect(view.getByRole('status').textContent).toContain(
+        'Could not delete this branch This pull request is open again, so its branch was not deleted.'
       )
     );
     expect(writes()).toEqual([]);

@@ -365,9 +365,9 @@ type Write = { method: string; pathname: string; body: unknown };
 /**
  * Answers GitHub's API in the page; the returned list collects the paths it had no answer for.
  * It answers the repository's GraphQL query, GraphQL's read of where a branch points (at its
- * pull request's head, until the branch is deleted) and the writes, which `writes` collects: a
- * merge, after which the pull request reads as merged; a close or a reopen, after which it reads
- * so; GraphQL's update of a branch, whose answer names the pull request's new head, behind no
+ * pull request's head, until the branch is deleted, with that pull request's state) and the
+ * writes, which `writes` collects: a merge, after which the pull request reads as merged; a
+ * close or a reopen, after which it reads so; GraphQL's update of a branch, whose answer names the pull request's new head, behind no
  * more; and GraphQL's deletion of a branch, after which it is gone. A write in `refuse` (by
  * method and path) GitHub refuses with 405 and its message; a pull request in `behind` (by path)
  * starts that many commits behind its base. With `lateUpdate` GitHub makes an update of a branch
@@ -402,7 +402,11 @@ const stubGitHub = async (
     if (request.method() !== 'GET') {
       const body: unknown = request.postDataJSON();
       const query = (body as { query?: unknown } | null)?.query;
-      if (pathname === '/graphql' && typeof query === 'string' && query.includes('repository(')) {
+      if (
+        pathname === '/graphql' &&
+        typeof query === 'string' &&
+        query.includes('viewerPermission')
+      ) {
         await route.fulfill({ headers: CORS, json: { data: { repository: REPOSITORY } } });
         return;
       }
@@ -419,7 +423,14 @@ const stubGitHub = async (
         const ref = gone
           ? null
           : { target: { oid: heads.get(pullPath(branch)) ?? headSha(branch) } };
-        await route.fulfill({ headers: CORS, json: { data: { node: { ref } } } });
+        // With the state of the pull request it asks about, as GitHub has it now.
+        const asked = ALL_PULLS.find(
+          (candidate) => candidate.repo === variables.repo && candidate.number === variables.number
+        );
+        const now = asked ? moved.get(pullPath(asked)) ?? asked.state : undefined;
+        const state = now === 'merged' ? 'MERGED' : now === 'closed' ? 'CLOSED' : 'OPEN';
+        const repository = { pullRequest: asked ? { state } : null };
+        await route.fulfill({ headers: CORS, json: { data: { node: { ref }, repository } } });
         return;
       }
       if (graphql.includes('updateRefs')) {

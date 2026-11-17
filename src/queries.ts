@@ -5,7 +5,7 @@ import {
   fetchCommitFiles,
   fetchCommits,
   fetchConversationComments,
-  fetchHeadBranchSha,
+  fetchHeadBranch,
   fetchPullRequest,
   fetchPullRequestFiles,
   fetchReviewComments,
@@ -122,8 +122,9 @@ export function useHeadBranchSha(ref: PullRequestRef, pr: PullRequest, enabled: 
       const stored = storedToken();
       // Forgotten after the render that enabled the query; no request goes without one.
       if (stored === undefined) throw new GitHubWriteError('badToken', 0);
-      return fetchHeadBranchSha(pr, stored, signal);
+      return fetchHeadBranch(ref, pr, stored, signal);
     },
+    select: (head) => head.sha,
     enabled: enabled && token !== undefined,
     staleTime: STALE_TIME,
     retry,

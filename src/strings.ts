@@ -139,6 +139,7 @@ export const en = {
       rateLimited: "GitHub's rate limit is used up for now. Try again later.",
       server: 'GitHub answered with an error.',
       branchMoved: 'The branch has new commits since this pull request, so it was not deleted.',
+      pullRequestOpen: 'This pull request is open again, so its branch was not deleted.',
       failed: 'Could not reach GitHub.',
     },
     dismiss: 'Dismiss',

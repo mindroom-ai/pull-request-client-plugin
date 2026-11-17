@@ -166,8 +166,8 @@ async function getJson(
   }
 }
 
-// `branchMoved` is this module's own refusal: the branch to delete got commits since its pull
-// request, so it is left alone.
+// `branchMoved` and `pullRequestOpen` are this module's own refusals to delete a branch: it got
+// commits since its pull request, or its pull request was opened again, so it is left alone.
 // `failed` with status 0 is a request GitHub never answered; with another status, an answer
 // that is none of the rest, a server error among them.
 export type GitHubWriteErrorKind =
@@ -176,6 +176,7 @@ export type GitHubWriteErrorKind =
   | 'badToken'
   | 'rateLimited'
   | 'branchMoved'
+  | 'pullRequestOpen'
   | 'failed';
 
 /** A write GitHub refused or did not take, with GitHub's own reason in `detail` when it gave one. */
@@ -898,35 +899,59 @@ const UPDATE_BRANCH = `mutation(
   ) { pullRequest { headRefOid } }
 }`;
 
-const HEAD_BRANCH_QUERY = `query($repositoryId: ID!, $ref: String!) {
+const HEAD_BRANCH_QUERY = `query(
+  $repositoryId: ID!
+  $ref: String!
+  $owner: String!
+  $repo: String!
+  $number: Int!
+) {
   node(id: $repositoryId) {
     ... on Repository {
       ref(qualifiedName: $ref) { target { oid } }
     }
   }
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) { state }
+  }
 }`;
 
 const headBranchRef = (pr: PullRequest) => `refs/heads/${pr.headRef}`;
 
+export type HeadBranch = {
+  /** The commit the branch points at in its own repository, or null when the branch is gone. */
+  sha: string | null;
+  /** Whether the pull request is open on GitHub now, whatever the panel last read of it. */
+  pullRequestOpen: boolean;
+};
+
 /**
- * The commit the pull request's branch points at now, in its own repository, or null when the
- * branch is gone: what T3 Code reads before it deletes a branch. A name alone does not tell the
- * pull request's branch from one pushed to since, or made anew under its name.
+ * The pull request's branch as GitHub has it now, with the pull request's own state: what T3
+ * Code reads before it deletes a branch. A name alone does not tell the pull request's branch
+ * from one pushed to since, or made anew under its name, and the state the panel read does not
+ * tell a pull request that was opened again since.
  */
-export async function fetchHeadBranchSha(
+export async function fetchHeadBranch(
+  ref: PullRequestRef,
   pr: PullRequest,
   token: string,
   signal?: AbortSignal
-): Promise<string | null> {
-  const variables = { repositoryId: pr.headRepoId, ref: headBranchRef(pr) };
+): Promise<HeadBranch> {
+  const { owner, repo, number } = ref;
+  const variables = { repositoryId: pr.headRepoId, ref: headBranchRef(pr), owner, repo, number };
   const data = await graphql(HEAD_BRANCH_QUERY, variables, token, signal);
   const repository = record(data?.node);
-  // Without the repository's `ref` the answer says nothing about the branch, not that it is gone.
-  if (!repository || !('ref' in repository)) throw new GitHubWriteError('failed', 200);
-  if (repository.ref === null) return null;
-  const oid = text(record(record(repository.ref)?.target)?.oid);
-  if (oid === '') throw new GitHubWriteError('failed', 200);
-  return oid;
+  const state = record(record(data?.repository)?.pullRequest)?.state;
+  // Without the repository's `ref` the answer says nothing about the branch, not that it is
+  // gone; and without the pull request's state, not that it is done.
+  if (!repository || !('ref' in repository) || typeof state !== 'string') {
+    throw new GitHubWriteError('failed', 200);
+  }
+  const pullRequestOpen = state === 'OPEN';
+  if (repository.ref === null) return { sha: null, pullRequestOpen };
+  const sha = text(record(record(repository.ref)?.target)?.oid);
+  if (sha === '') throw new GitHubWriteError('failed', 200);
+  return { sha, pullRequestOpen };
 }
 
 // Git's name for no commit: a ref updated to it is deleted.
@@ -941,10 +966,12 @@ const DELETE_BRANCH = `mutation($input: UpdateRefsInput!) {
  * as T3 Code does: a branch that got commits since, or that was made anew under the same name
  * (and may head another pull request), is not this pull request's to delete. GitHub checks
  * `beforeOid` as it deletes, so a push that comes between the read and the write is refused too.
- * A branch already gone is what was asked for.
+ * A branch already gone is what was asked for. And never the branch of a pull request that is
+ * open on GitHub now, though the panel read it as closed: deleting it would close it again.
  */
-async function deleteHeadBranch(pr: PullRequest, token: string): Promise<void> {
-  const sha = await fetchHeadBranchSha(pr, token);
+async function deleteHeadBranch(ref: PullRequestRef, pr: PullRequest, token: string) {
+  const { sha, pullRequestOpen } = await fetchHeadBranch(ref, pr, token);
+  if (pullRequestOpen) throw new GitHubWriteError('pullRequestOpen', 0);
   if (sha === null) return;
   if (sha !== pr.headSha) throw new GitHubWriteError('branchMoved', 0);
   const update = { name: headBranchRef(pr), beforeOid: pr.headSha, afterOid: NO_COMMIT };
@@ -985,7 +1012,7 @@ export async function runPullRequestAction(
       await sendRest('PATCH', pull, { state: 'open' }, token);
       return 'done';
     case 'delete-branch':
-      await deleteHeadBranch(pr, token);
+      await deleteHeadBranch(ref, pr, token);
       return 'done';
     case 'ready':
       await graphql(ON_PULL_REQUEST('markPullRequestReadyForReview'), { pullRequestId }, token);

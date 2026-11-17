@@ -90,7 +90,7 @@ const waitUntil = async (check: () => void) => {
 
 const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>();
 const isRepositoryQuery = (url: string, init?: RequestInit) =>
-  url === GRAPHQL && String(init?.body).includes('repository(');
+  url === GRAPHQL && String(init?.body).includes('viewerPermission');
 const isRead = (url: string, init?: RequestInit) =>
   isRepositoryQuery(url, init) || init?.method === undefined;
 const writes = () =>
