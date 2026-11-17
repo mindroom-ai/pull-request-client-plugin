@@ -41,6 +41,14 @@ export function useGitHubToken(): {
   const token = useSyncExternalStore(subscribe, () => storage.getItem(KEY)) ?? undefined;
   const changed = useCallback(() => {
     notify();
+    // What the old token (or none) was refused says nothing about the new one. A refusal is
+    // not asked again when its part next shows (`retryOnMount: false`), which is right only
+    // for the token that got it, so the refusals are forgotten: they are asked anew then.
+    // Only those with nothing read: what shows stays on screen while it is read again.
+    void queryClient.resetQueries({
+      queryKey: ['pull-requests'],
+      predicate: ({ state }) => state.status === 'error' && state.data === undefined,
+    });
     // Results fetched with the old token (or none) may differ now. The queries read the stored
     // token as they fetch, so this refetch already uses the new one.
     void queryClient.invalidateQueries({ queryKey: ['pull-requests'] });

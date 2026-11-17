@@ -167,6 +167,24 @@ const showPanel = async () => {
   return view;
 };
 
+// The token as the panel's form sets it, which tells every query that it changed.
+let token: ReturnType<typeof useGitHubToken>;
+function Token() {
+  token = useGitHubToken();
+  return null;
+}
+/** Saves another token while nothing else is on screen, as the form of a panel since closed. */
+const saveToken = async (value: string) => {
+  const form = await renderPluginComponent(
+    <QueryClientProvider client={client}>
+      <Token />
+    </QueryClientProvider>,
+    { id: 'pull-requests', plugin }
+  );
+  act(() => token.setToken(value));
+  form.unmount();
+};
+
 // Two runners at once, as two panels (or a panel and its next mount) have them.
 const both: ReturnType<typeof usePullRequestActions>[] = [];
 function Pair({ refs }: { refs: [PullRequestRef, PullRequestRef] }) {
@@ -260,26 +278,88 @@ describe('usePullRequestActions', () => {
     expect(actions.repo?.canWrite).toBe(true);
     first.unmount();
     // Another token is saved while no panel shows the repository: an account that may only read.
-    let token: ReturnType<typeof useGitHubToken> | undefined;
-    function Token() {
-      token = useGitHubToken();
-      return null;
-    }
-    const form = await renderPluginComponent(
-      <QueryClientProvider client={client}>
-        <Token />
-      </QueryClientProvider>,
-      { id: 'pull-requests', plugin }
-    );
     fetchMock.mockImplementation(async () =>
       respond({ data: { repository: { ...repository, viewerPermission: 'READ' } } })
     );
-    act(() => token!.setToken('other'));
-    form.unmount();
+    await saveToken('other');
     expect(fetchMock).toHaveBeenCalledTimes(1);
     await show(refA, pull);
     await waitUntil(() => expect(actions.repo?.canWrite).toBe(false));
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  describe('a repository GitHub refused the token', () => {
+    const refuse = () =>
+      fetchMock.mockImplementation(async () =>
+        respond({ errors: [{ type: 'FORBIDDEN', message: 'Resource not accessible' }] })
+      );
+    const allow = () => fetchMock.mockImplementation(async () => respond({ data: { repository } }));
+    const refused = () =>
+      waitUntil(() =>
+        expect(client.getQueryState(['pull-requests', 'repo', 'o', 'r'])?.status).toBe('error')
+      );
+
+    it('is asked for again, with the new token, in a panel opened after the token changed', async () => {
+      refuse();
+      const first = await show(refA, pull);
+      await refused();
+      first.unmount();
+      // A token that is allowed: what the old one was refused says nothing about it.
+      allow();
+      await saveToken('other');
+      await show(refA, pull);
+      await loaded();
+      expect(actions.repo?.canWrite).toBe(true);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      const headers = new Headers(fetchMock.mock.calls[1]![1]?.headers);
+      expect(headers.get('authorization')).toBe('Bearer other');
+    });
+
+    it('is asked for again at once in a panel that shows it when the token changes', async () => {
+      refuse();
+      await renderPluginComponent(
+        <QueryClientProvider client={client}>
+          <Token />
+          <Probe pullRequestRef={refA} pullRequest={pull} />
+        </QueryClientProvider>,
+        { id: 'pull-requests', plugin }
+      );
+      await refused();
+      allow();
+      act(() => token.setToken('other'));
+      await loaded();
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('is not asked for again while the token is the same', async () => {
+      refuse();
+      const first = await show(refA, pull);
+      await refused();
+      first.unmount();
+      allow();
+      await show(refA, pull);
+      await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+      expect(actions.repo).toBeUndefined();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('keeps what was read on screen while a changed token reads it again', async () => {
+    await renderPluginComponent(
+      <QueryClientProvider client={client}>
+        <Token />
+        <Panel />
+      </QueryClientProvider>,
+      { id: 'pull-requests', plugin }
+    );
+    await waitUntil(() => expect(shown).toBeDefined());
+    pullAnswer = () => hold(() => respond(apiPull({ title: 'Read with the other token' })));
+    act(() => token.setToken('other'));
+    await waitUntil(() => expect(pullReads()).toHaveLength(2));
+    // No flash of the panel's loading state.
+    expect(shown?.title).toBe('T');
+    await answerHeld();
+    await waitUntil(() => expect(shown?.title).toBe('Read with the other token'));
   });
 
   it('forgets the repository with the token', async () => {
