@@ -90,6 +90,10 @@ const REPLACE_FILE_COUNTS_CSS = `
 const NO_THREADS: ReviewThread[] = [];
 const NO_FOLDS: FileDiffFoldChoices = new Map();
 
+/** What a file's viewed mark and fold are against: its patch, or its blob without one. */
+const markText = (file: PullRequestFile) =>
+  file.patch ?? (file.sha === null ? '' : `blob:${file.sha}`);
+
 function treeStatus(status: PullRequestFile['status']): GitStatus {
   if (status === 'removed') return 'deleted';
   if (status === 'renamed' || status === 'copied') return 'renamed';
@@ -280,24 +284,27 @@ export function CodeTab({
   // in the pull request, in a commit's view, and a file only a commit changes has none. A file
   // GitHub sends no patch for is marked against its blob, which changes with its content.
   const markTexts = useMemo(
-    () =>
-      new Map(
-        files.map((file) => [
-          file.path,
-          file.patch ?? (file.sha === null ? '' : `blob:${file.sha}`),
-        ])
-      ),
+    () => new Map(files.map((file) => [file.path, markText(file)])),
     [files]
   );
 
   // A file is folded while it is viewed, as GitHub folds it: a mark from another tab folds it, and
   // a push that changes it opens it. Another commit, or All commits again, drops the reader's
-  // folds.
+  // folds. A fold is kept against the file as it is shown, so a push that changes the file drops
+  // the fold too, as T3 Code keys it by the file's diff.
   const view = shownCommit ?? '';
   const startFolds = (): Folds => ({ view, override: null, choices: NO_FOLDS, anchor: null });
   const [storedFolds, setFolds] = useState(startFolds);
   if (storedFolds.view !== view) setFolds(startFolds());
   const folds = storedFolds.view === view ? storedFolds : startFolds();
+  const foldKeys = useMemo(
+    () =>
+      new Map(
+        (viewFiles ?? []).map((file) => [file.path, `${file.path}#${fnv1a32(markText(file))}`])
+      ),
+    [viewFiles]
+  );
+  const foldKeyOf = useCallback((path: string) => foldKeys.get(path) ?? path, [foldKeys]);
   const isViewedNow = useCallback(
     (path: string) => {
       const text = markTexts.get(path);
@@ -355,7 +362,7 @@ export function CodeTab({
         const path = resolveFileDiffPath(fileDiff);
         const annotations = placed.annotations.get(path) ?? [];
         const collapsed = isFileDiffCollapsed(
-          path,
+          foldKeyOf(path),
           folds.override,
           folds.choices,
           isViewedNow(path)
@@ -374,7 +381,7 @@ export function CodeTab({
           ),
         };
       }),
-    [shownDiffs, placed, folds.override, folds.choices, isViewedNow]
+    [shownDiffs, placed, folds.override, folds.choices, foldKeyOf, isViewedNow]
   );
   const statusByPath = useMemo(
     () => new Map((viewFiles ?? []).map((file) => [file.path, treeStatus(file.status)])),
@@ -415,8 +422,8 @@ export function CodeTab({
     updateFolds((current) => ({
       choices: withFileDiffFold(
         current.choices,
-        path,
-        !isFileDiffCollapsed(path, current.override, current.choices, isViewedNow(path))
+        foldKeyOf(path),
+        !isFileDiffCollapsed(foldKeyOf(path), current.override, current.choices, isViewedNow(path))
       ),
     }));
   // Marking a file viewed folds it and unmarking it unfolds it; Shift-click does so from the
@@ -440,7 +447,11 @@ export function CodeTab({
       anchor: path,
       choices: range.reduce(
         (next, file) =>
-          withFileDiffFold(next, file.path, current.override === null ? undefined : mark),
+          withFileDiffFold(
+            next,
+            foldKeyOf(file.path),
+            current.override === null ? undefined : mark
+          ),
         current.choices
       ),
     }));
@@ -452,7 +463,8 @@ export function CodeTab({
       return patch === undefined ? undefined : viewed.stateOf(path, patch);
     },
     setViewed,
-    foldedOf: (path) => isFileDiffCollapsed(path, folds.override, folds.choices, isViewedNow(path)),
+    foldedOf: (path) =>
+      isFileDiffCollapsed(foldKeyOf(path), folds.override, folds.choices, isViewedNow(path)),
     toggleFolded,
   };
   const allFolded = areAllDiffFilesCollapsed(
@@ -477,7 +489,9 @@ export function CodeTab({
   const reveal = (path: string) => {
     if (items.some((item) => item.id === path)) {
       // A folded file opens as it is revealed, and stays open as its mark changes.
-      updateFolds((current) => ({ choices: withFileDiffFold(current.choices, path, false) }));
+      updateFolds((current) => ({
+        choices: withFileDiffFold(current.choices, foldKeyOf(path), false),
+      }));
       viewerRef.current?.scrollTo({ type: 'item', id: path, align: 'start' });
     } else {
       rowsRef.current.get(path)?.scrollIntoView({ block: 'nearest' });

@@ -786,11 +786,8 @@ describe('CodeTab', () => {
       expect(itemOf('src/app.ts')?.collapsed).toBe(true);
     });
 
-    it('a viewed file a push changes opens, as Changed', async () => {
-      const first = await show();
-      await click(viewedBox(first, 'src/app.ts'));
-      first.unmount();
-
+    // The Code tab stays mounted while a push changes src/app.ts and its files load again.
+    const showPushable = async () => {
       const client = new QueryClient();
       const at = (patch: string) => (
         <QueryClientProvider client={client}>
@@ -805,11 +802,48 @@ describe('CodeTab', () => {
         id: 'pull-requests',
         plugin,
       });
+      return { tab, push: () => tab.rerender(at('@@ -1 +1 @@\n-old\n+newer')) };
+    };
+
+    it('a viewed file a push changes opens, as Changed', async () => {
+      const first = await show();
+      await click(viewedBox(first, 'src/app.ts'));
+      first.unmount();
+
+      const { tab, push } = await showPushable();
       expect(itemOf('src/app.ts')?.collapsed).toBe(true);
-      // The pull request's files load again after a push, while the tab is open.
-      tab.rerender(at('@@ -1 +1 @@\n-old\n+newer'));
+      push();
       expect(viewedBox(tab, 'src/app.ts').getAttribute('aria-label')).toBe('Changed');
       expect(itemOf('src/app.ts')?.collapsed).toBe(false);
+    });
+
+    it('a push drops the fold a reader chose for the file it changes', async () => {
+      const { tab, push } = await showPushable();
+      // After Expand all files, marking a file viewed folds it as the reader's own choice.
+      await click(tab.getByRole('button', { name: 'Collapse all files' }));
+      await click(tab.getByRole('button', { name: 'Expand all files' }));
+      await click(viewedBox(tab, 'src/app.ts'));
+      await click(viewedBox(tab, 'README.md'));
+      expect(itemOf('src/app.ts')?.collapsed).toBe(true);
+      push();
+      expect(viewedBox(tab, 'src/app.ts').getAttribute('aria-label')).toBe('Changed');
+      expect(itemOf('src/app.ts')?.collapsed).toBe(false);
+      // A file the push left as it was keeps its fold.
+      expect(itemOf('README.md')?.collapsed).toBe(true);
+    });
+
+    it('a push drops the fold a reader set by hand on the file it changes', async () => {
+      const { tab, push } = await showPushable();
+      await click(viewedBox(tab, 'src/app.ts'));
+      await click(foldToggle(tab, 'src/app.ts'));
+      await click(foldToggle(tab, 'src/app.ts'));
+      expect(itemOf('src/app.ts')?.collapsed).toBe(true);
+      await click(foldToggle(tab, 'README.md'));
+      expect(itemOf('README.md')?.collapsed).toBe(true);
+      push();
+      expect(viewedBox(tab, 'src/app.ts').getAttribute('aria-label')).toBe('Changed');
+      expect(itemOf('src/app.ts')?.collapsed).toBe(false);
+      expect(itemOf('README.md')?.collapsed).toBe(true);
     });
 
     it('Shift-click marks a range', async () => {
