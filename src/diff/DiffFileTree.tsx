@@ -125,8 +125,14 @@ export function DiffFileTree({ entries, onSelectFile, ariaLabel }: DiffFileTreeP
       const removed = `-${deletions}`;
       return {
         text: `${added} ${removed}`,
-        // The plural follows the number; the text shows it formatted, as the row does.
-        title: t('code.folderLines', { count: lines.additions, additions, deletions }),
+        // The plural follows the number; the text shows it formatted, as the row does. The path is
+        // the whole folder's, which a narrow tree may cut.
+        title: t('code.folderLines', {
+          count: lines.additions,
+          path: presented.selectionPath(item.path).replace(/\/$/, ''),
+          additions,
+          deletions,
+        }),
         parts: [
           { text: added, color: 'var(--pr-added)' },
           { text: removed, color: 'var(--pr-removed)' },

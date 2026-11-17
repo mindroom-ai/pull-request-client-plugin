@@ -21,6 +21,10 @@ export const PIERRE_TREE_UNSAFE_CSS = `
   [data-item-section='decoration'] { flex: none; margin-inline-start: auto; }
   /* Equal digit widths, right-aligned. */
   [data-item-section='decoration'] > span { gap: 0.35em; font-variant-numeric: tabular-nums; }
+  /* In a flattened chain of folders, the earlier ones give way first, down to nothing, and the
+     last one only then, so it stays readable. The " / " between them keep their width. */
+  [data-item-flattened-subitem] { flex: 0 1000 auto; min-width: 0; }
+  [data-item-flattened-subitem]:last-child { flex-shrink: 1; }
 `;
 
 export function pierreTreeStyle(colorScheme: 'light' | 'dark'): CSSProperties {

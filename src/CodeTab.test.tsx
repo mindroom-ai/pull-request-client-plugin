@@ -831,7 +831,7 @@ describe('CodeTab', () => {
         'src/lib/': `+${(1200).toLocaleString()} -2`,
       });
       const src = tab.getByTestId('tree-folders').querySelector<HTMLElement>('[data-path="src/"]');
-      expect(src?.title).toBe(`${(1230).toLocaleString()} lines added, 7 removed`);
+      expect(src?.title).toBe(`src: ${(1230).toLocaleString()} lines added, 7 removed`);
       expect(folderColors(tab, 'src/')).toEqual([
         [`+${(1230).toLocaleString()}`, 'var(--pr-added)'],
         ['-7', 'var(--pr-removed)'],
@@ -855,10 +855,29 @@ describe('CodeTab', () => {
       const tab = await renderPluginComponent(ui(1, 0), { id: 'pull-requests', plugin });
       expect(folderLines(tab)).toEqual({ 'src/': '+1 -0' });
       const src = () => tab.getByTestId('tree-folders').querySelector<HTMLElement>('[data-path]');
-      expect(src()?.title).toBe('1 line added, 0 removed');
+      expect(src()?.title).toBe('src: 1 line added, 0 removed');
       tab.rerender(ui(8, 4));
       expect(folderLines(tab)).toEqual({ 'src/': '+8 -4' });
-      expect(src()?.title).toBe('8 lines added, 4 removed');
+      expect(src()?.title).toBe('src: 8 lines added, 4 removed');
+    });
+
+    // A narrow tree cuts a long or flattened folder's name; its tooltip names the whole folder.
+    it("names the whole folder in its lines' tooltip", async () => {
+      const tab = await show({
+        files: [
+          file({ path: 'packages/sdk/src/components/Button.tsx', additions: 2, deletions: 1 }),
+          file({ path: 'src/a.ts', additions: 3, deletions: 0 }),
+          file({ path: 'src/a.ts/b.ts', additions: 4, deletions: 2 }),
+        ],
+      });
+      const titleOf = (path: string) =>
+        tab.getByTestId('tree-folders').querySelector<HTMLElement>(`[data-path="${path}"]`)?.title;
+      expect(titleOf('packages/sdk/src/components/')).toBe(
+        'packages/sdk/src/components: 2 lines added, 1 removed'
+      );
+      // The folder that shares its path with a file is named without the file's alias.
+      expect(titleOf('src/a.ts/')).toBe('src/a.ts: 4 lines added, 2 removed');
+      expect(titleOf('src/')).toBe('src: 7 lines added, 2 removed');
     });
 
     it("formats a folder's lines in the app's language", async () => {
@@ -874,7 +893,7 @@ describe('CodeTab', () => {
       );
       expect(folderLines(tab)).toEqual({ 'src/': '+1.230 -7' });
       const src = tab.getByTestId('tree-folders').querySelector<HTMLElement>('[data-path="src/"]');
-      expect(src?.title).toBe('1.230 lines added, 7 removed');
+      expect(src?.title).toBe('src: 1.230 lines added, 7 removed');
     });
 
     it('offers no test file toggle without test files', async () => {
