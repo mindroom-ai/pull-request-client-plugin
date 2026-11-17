@@ -29,7 +29,8 @@ const plugin: ClientPlugin = {
       Component: PullRequestPanel,
     },
   ],
-  threadCardBadges: [{ Component: ThreadCardPullRequests }],
+  // Each chip opens its own hover card, so the card's details card stays closed over the chips.
+  threadCardBadges: [{ Component: ThreadCardPullRequests, hoverCard: true }],
   threadDetails: [{ shows: threadHasDetails, Component: ThreadDetails }],
   roomHeaderSlot: [ThreadPullRequestStrip],
   translations: { en },

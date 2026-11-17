@@ -670,6 +670,9 @@ test("a chip's hover card shows its pull request, on a card and in the strip", a
   await expect(hoverCard(page)).toContainText(PULLS.tokenEndpoint.approvedBy);
   await expect(hoverCard(page)).toContainText('Click to open in the side panel');
   await expectBeside(page, chips.nth(1));
+  // The card's details card, which waits 500 ms, stays closed while the chip shows its own.
+  await page.waitForTimeout(1_000);
+  await expect(page.locator('[data-thread-card-details]')).toHaveCount(0);
   await shotBothThemes(page, 'hover-card');
   await page.mouse.move(0, 0);
   await expect(hoverCard(page)).toHaveCount(0);
