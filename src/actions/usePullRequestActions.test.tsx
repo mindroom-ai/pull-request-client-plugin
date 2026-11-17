@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PullRequest, PullRequestRef } from '../github';
 import plugin from '../index';
 import { usePullRequest } from '../queries';
+import { useGitHubToken } from '../token';
 import { resetPullRequestActions, usePullRequestActions } from './usePullRequestActions';
 
 const STORAGE = 'mindroom.plugin:%40plugin-tester%3Aexample.org/pull-requests/';
@@ -226,16 +227,58 @@ describe('usePullRequestActions', () => {
     expect(actions.method).toBe('merge');
   });
 
-  it('does not ask again for a repository GitHub refused', async () => {
+  it('does not ask again for a repository GitHub refused, also in a panel opened again', async () => {
     fetchMock.mockImplementation(async () =>
       respond({ errors: [{ type: 'FORBIDDEN', message: 'Resource not accessible' }] })
     );
-    await show(refA, pull);
+    const first = await show(refA, pull);
     await waitUntil(() =>
       expect(client.getQueryState(['pull-requests', 'repo', 'o', 'r'])?.status).toBe('error')
     );
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(actions.repo).toBeUndefined();
+    first.unmount();
+    await show(refA, pull);
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('reuses the repository in a panel opened again', async () => {
+    const first = await show(refA, pull);
+    await loaded();
+    first.unmount();
+    await show(refA, pull);
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(actions.repo?.canWrite).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('asks for the repository again in a panel opened after the token changed', async () => {
+    const first = await show(refA, pull);
+    await loaded();
+    expect(actions.repo?.canWrite).toBe(true);
+    first.unmount();
+    // Another token is saved while no panel shows the repository: an account that may only read.
+    let token: ReturnType<typeof useGitHubToken> | undefined;
+    function Token() {
+      token = useGitHubToken();
+      return null;
+    }
+    const form = await renderPluginComponent(
+      <QueryClientProvider client={client}>
+        <Token />
+      </QueryClientProvider>,
+      { id: 'pull-requests', plugin }
+    );
+    fetchMock.mockImplementation(async () =>
+      respond({ data: { repository: { ...repository, viewerPermission: 'READ' } } })
+    );
+    act(() => token!.setToken('other'));
+    form.unmount();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await show(refA, pull);
+    await waitUntil(() => expect(actions.repo?.canWrite).toBe(false));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('forgets the repository with the token', async () => {

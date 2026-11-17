@@ -53,7 +53,7 @@ Out: revert, approve workflows, stacks, maintainer edits, title and description 
 ### Data
 
 - `PullRequest` gains `nodeId` (`node_id`, for GraphQL) and `mergeable` (`mergeable`, true/false/null). `mergeableState` is already there (`dirty` means conflicting).
-- New `fetchRepository(owner, repo)`: one GraphQL query, `repository(owner, name) { viewerPermission mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed autoMergeAllowed defaultBranchRef { name } }`, as T3 reads it (the REST repository's `allow_*` flags are not served to every reader). GraphQL always needs a token, which fits: the query runs only with one (no anonymous requests), `staleTime` 10 minutes, one key per repository, `retryOnMount: false`. Without a token, or when `viewerPermission` is not `ADMIN`, `MAINTAIN` or `WRITE`, the header shows no write controls at all (today's header).
+- New `fetchRepository(owner, repo)`: one GraphQL query, `repository(owner, name) { viewerPermission mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed autoMergeAllowed defaultBranchRef { name } }`, as T3 reads it (the REST repository's `allow_*` flags are not served to every reader). GraphQL always needs a token, which fits: the query runs only with one (no anonymous requests), `staleTime` 10 minutes, one key per repository, `retryOnMount: false` (no `refetchOnMount: false`: a panel opened after the token changed must ask again). Without a token, or when `viewerPermission` is not `ADMIN`, `MAINTAIN` or `WRITE`, the header shows no write controls at all (today's header).
 - Allowed methods: the three `*Allowed` flags, in T3's order merge, squash, rebase.
 
 ### Writes
