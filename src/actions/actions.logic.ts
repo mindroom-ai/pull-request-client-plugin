@@ -54,6 +54,32 @@ export function resolveMergeMethod(
 }
 
 /**
+ * Whether the pull request, as loaded, shows what `action` did to it. One read before the
+ * action does not, and nothing on a pull request shows what was done to its branch.
+ */
+export function showsOutcome(pr: PullRequest, action: PullRequestAction): boolean {
+  switch (action) {
+    case 'merge':
+      return pr.state === 'merged';
+    case 'close':
+      return pr.state === 'closed';
+    case 'reopen':
+      return pr.state === 'open';
+    case 'ready':
+      return !pr.draft;
+    case 'draft':
+      return pr.draft;
+    // GitHub merges at once what became mergeable meanwhile.
+    case 'enable-auto-merge':
+      return pr.autoMerge !== null || pr.state === 'merged';
+    case 'disable-auto-merge':
+      return pr.autoMerge === null;
+    default:
+      return false;
+  }
+}
+
+/**
  * Only a branch of this repository, once its pull request is done, and not the default one.
  * Where such a branch points now is worth asking GitHub; for any other nothing is asked.
  */

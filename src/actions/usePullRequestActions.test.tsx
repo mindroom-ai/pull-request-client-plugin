@@ -501,13 +501,30 @@ describe('usePullRequestActions', () => {
     expect(fileReads()).toHaveLength(2);
   });
 
-  it('unlocks when the read after the write fails', async () => {
+  it('unlocks when the read after the write fails, and says the pull request is not read', async () => {
     await showPanel();
     pullAnswer = async () => respond({ message: 'Not Found' }, 404);
     act(() => actions.perform('close'));
-    await waitUntil(() => expect(actions.result).toEqual({ action: 'close', outcome: 'done' }));
+    await waitUntil(() =>
+      expect(actions.result).toEqual({ action: 'close', outcome: 'done', unread: true })
+    );
     expect(actions.pending).toBeNull();
     expect(pullReads()).toHaveLength(2);
+    // What shows is still the pull request from before the action.
+    expect(shown?.state).toBe('open');
+  });
+
+  it('does not take a failed read of before, without a token, for the read after the write', async () => {
+    // As a private pull request looked at before the token was saved.
+    await client
+      .fetchQuery({
+        queryKey: ['pull-requests', 'pr', 'o', 'r', 7, false],
+        queryFn: () => Promise.reject(new Error('Not Found')),
+      })
+      .catch(() => undefined);
+    await showPanel();
+    act(() => actions.perform('close'));
+    await waitUntil(() => expect(actions.result).toEqual({ action: 'close', outcome: 'done' }));
   });
 
   describe('an update of the branch, which GitHub may make after it answers', () => {

@@ -18,8 +18,10 @@ import { useGitHubToken, useStoredToken } from '../token';
 import { resolveMergeMethod } from './actions.logic';
 
 // `requested`: GitHub took an update of the branch, but answered before it had made it.
+// `unread`: GitHub took the action, but the pull request could not be read again after it, so
+// the one on screen is from before.
 export type ActionResult =
-  | { action: PullRequestAction; outcome: ActionOutcome }
+  | { action: PullRequestAction; outcome: ActionOutcome; unread?: true }
   | { action: PullRequestAction; outcome: 'failed'; error: GitHubWriteError };
 
 // What runs on each pull request and what came of its last action, across every panel and
@@ -122,15 +124,18 @@ export function usePullRequestActions(
     if (MERGES.has(action) && method === null) return;
     setEntry(key, { pending: action, result: null });
     const finish = async (result: ActionResult) => {
+      let read = false;
       try {
         // Whatever came, GitHub may hold another state than the one loaded: a refusal says it
         // moved, and a failed answer may come after GitHub took the write. The action runs on
         // until that state is read: unlocked before, the controls would offer the pull request
         // as it was (a second merge of a merged one, which GitHub then refuses).
-        await refreshPullRequest(queryClient, ref);
+        read = await refreshPullRequest(queryClient, ref);
       } finally {
         // The outcome stays with its own pull request, to show when that one is shown again.
-        setEntry(key, { pending: null, result });
+        const outcome =
+          !read && result.outcome !== 'failed' ? { ...result, unread: true as const } : result;
+        setEntry(key, { pending: null, result: outcome });
       }
     };
     // Only the merges read the method, and they do not start without one.

@@ -6,7 +6,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PullRequest, PullRequestRef } from '../github';
 import plugin from '../index';
 import { HeaderActions } from './HeaderActions';
-import { resetPullRequestActions, usePullRequestActions } from './usePullRequestActions';
+import {
+  resetPullRequestActions,
+  usePullRequestActions,
+  type ActionResult,
+} from './usePullRequestActions';
 
 vi.mock('focus-trap-react', async () => ({
   default: (await import('../testing/focusTrapStandIn')).FocusTrapStandIn,
@@ -485,7 +489,9 @@ describe('HeaderActions', () => {
     expect(fetchMock.mock.calls.filter(([url, init]) => isHeadBranchQuery(url, init))).toEqual([]);
   });
 
-  it('says an update whose new head did not show yet was requested, not made', async () => {
+  // The header with an outcome the runner left, on the pull request as the panel has it.
+  const dismissResult = vi.fn();
+  const withResult = (result: ActionResult, pullRequest: PullRequest) => {
     const actions = {
       repo: {
         canWrite: true,
@@ -496,19 +502,45 @@ describe('HeaderActions', () => {
       method: 'merge' as const,
       chooseMethod: () => {},
       pending: null,
-      result: { action: 'update-branch' as const, outcome: 'requested' as const },
+      result,
       perform: () => {},
-      dismissResult: vi.fn(),
+      dismissResult,
     };
-    const view = await renderPluginComponent(
+    return (
       <QueryClientProvider client={client}>
-        <HeaderActions pullRequestRef={ref} pullRequest={open} actions={actions} />
-      </QueryClientProvider>,
+        <HeaderActions pullRequestRef={ref} pullRequest={pullRequest} actions={actions} />
+      </QueryClientProvider>
+    );
+  };
+
+  it('says an update whose new head did not show yet was requested, not made', async () => {
+    const view = await renderPluginComponent(
+      withResult({ action: 'update-branch', outcome: 'requested' }, open),
       { id: 'pull-requests', plugin }
     );
     expect(view.getByRole('status').textContent).toBe('Branch update requested');
     await click(view.getByRole('button', { name: 'Dismiss' }));
-    expect(actions.dismissResult).toHaveBeenCalled();
+    expect(dismissResult).toHaveBeenCalled();
+  });
+
+  it('shows that a merge is done while the panel could not read the merged pull request', async () => {
+    // GitHub merged it, but the read after that failed: the header still has Merge.
+    const unread: ActionResult = { action: 'merge', outcome: 'done', unread: true };
+    const view = await renderPluginComponent(withResult(unread, open), {
+      id: 'pull-requests',
+      plugin,
+    });
+    const status = view.getByRole('status');
+    expect(view.getByRole('button', { name: 'Merge' })).toBeTruthy();
+    expect(status.textContent).toBe('Pull request merged');
+    expect(status.className).toBe('mrpr-action-result');
+    expect(view.getByRole('button', { name: 'Dismiss' })).toBeTruthy();
+    // Once the panel has read it, the header says so itself, and the line is only announced.
+    view.rerender(withResult(unread, merged));
+    expect(view.getByRole('status')).toBe(status);
+    expect(status.textContent).toBe('Pull request merged');
+    expect(status.className).toBe('mrpr-sr-only');
+    expect(view.queryByRole('button', { name: 'Dismiss' })).toBeNull();
   });
 
   it('draws no Merge button on a merged pull request', async () => {

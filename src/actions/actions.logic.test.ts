@@ -7,6 +7,7 @@ import {
   menuActions,
   primaryControl,
   resolveMergeMethod,
+  showsOutcome,
 } from './actions.logic';
 
 const pullRequest: PullRequest = {
@@ -130,6 +131,36 @@ describe('resolveMergeMethod', () => {
   it('is null when the repository allows none', () => {
     expect(resolveMergeMethod([], 'merge', 'merge')).toBeNull();
   });
+});
+
+describe('showsOutcome', () => {
+  it.each([
+    ['merge', { state: 'merged' }, {}],
+    ['close', { state: 'closed' }, {}],
+    ['reopen', {}, { state: 'closed' }],
+    ['ready', {}, { draft: true }],
+    ['draft', { draft: true }, {}],
+    ['enable-auto-merge', armed, {}],
+    ['disable-auto-merge', {}, armed],
+  ] as const)(
+    '%s shows on the pull request it changed, not on the one before',
+    (action, after, before) => {
+      expect(showsOutcome(pr(after), action)).toBe(true);
+      expect(showsOutcome(pr(before), action)).toBe(false);
+    }
+  );
+
+  it('auto-merge that merged at once shows as the merge', () => {
+    expect(showsOutcome(pr({ state: 'merged' }), 'enable-auto-merge')).toBe(true);
+  });
+
+  it.each(['delete-branch', 'update-branch', 'update-branch-rebase'] as const)(
+    '%s shows nowhere on the pull request',
+    (action) => {
+      expect(showsOutcome(pullRequest, action)).toBe(false);
+      expect(showsOutcome(pr({ state: 'merged' }), action)).toBe(false);
+    }
+  );
 });
 
 describe('canDeleteBranch', () => {

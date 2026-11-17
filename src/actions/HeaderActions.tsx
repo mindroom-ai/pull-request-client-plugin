@@ -34,7 +34,7 @@ import {
 } from '../github';
 import { pullRequestKey, repositoryKey, useChecks, useHeadBranchSha } from '../queries';
 import { pluginRootStyle } from '../theme';
-import { mayDeleteBranch, menuActions, primaryControl } from './actions.logic';
+import { mayDeleteBranch, menuActions, primaryControl, showsOutcome } from './actions.logic';
 import { useInlineConfirm } from './useInlineConfirm';
 import type { ActionResult, usePullRequestActions } from './usePullRequestActions';
 
@@ -67,6 +67,17 @@ const SHOWN_DONE: ReadonlySet<PullRequestAction> = new Set([
   'update-branch',
   'update-branch-rebase',
 ]);
+
+/**
+ * Whether a success is only announced, not shown as a line: the header shows it itself. Not
+ * while the pull request could not be read again after the action and the one on screen is
+ * still from before it: the header then offers Merge on a merged pull request, and the line is
+ * all that says it is merged.
+ */
+function isOnlyAnnounced(result: ActionResult | null, pr: PullRequest): boolean {
+  if (result?.outcome !== 'done' || SHOWN_DONE.has(result.action)) return false;
+  return result.unread !== true || showsOutcome(pr, result.action);
+}
 
 export function HeaderActions({
   pullRequestRef,
@@ -348,6 +359,7 @@ export function HeaderActions({
         pending={pending}
         pendingShown={pending !== primaryAction}
         result={result}
+        resultAnnounced={isOnlyAnnounced(result, pr)}
         onDismiss={dismissResult}
       />
       {deleting === url ? (
@@ -370,7 +382,8 @@ export function HeaderActions({
  * What runs, and what came of the last action, as a status region: a screen reader announces
  * every action that starts and how it ended. It shows as a line only what no control on screen
  * says: an action a menu started (`pendingShown`), a failure with why, and a success the header
- * does not show itself; the rest it holds for the screen reader alone, without a Dismiss. The
+ * does not show itself; the rest (`resultAnnounced`) it holds for the screen reader alone,
+ * without a Dismiss. The
  * region stays drawn while it has nothing to say, as some screen readers announce only a change
  * in one already there.
  */
@@ -378,16 +391,17 @@ function ResultLine({
   pending,
   pendingShown,
   result,
+  resultAnnounced,
   onDismiss,
 }: {
   pending: PullRequestAction | null;
   pendingShown: boolean;
   result: ActionResult | null;
+  resultAnnounced: boolean;
   onDismiss: () => void;
 }) {
   const t = usePluginTranslation('pull-requests');
-  const announced =
-    pending === null && result?.outcome === 'done' && !SHOWN_DONE.has(result.action);
+  const announced = pending === null && resultAnnounced;
   const shown = pending === null && !announced ? result : null;
   let content: ReactNode = null;
   if (pending !== null) {

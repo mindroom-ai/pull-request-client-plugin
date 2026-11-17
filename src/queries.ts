@@ -28,15 +28,23 @@ const retry = (count: number, error: Error) =>
  * After a write: everything read of the pull request is stale and asked again, and the promise
  * settles once the pull request itself is read again. Its other parts (the files, the checks,
  * the comments) are not waited for: a large pull request's files take long, and nothing that
- * depends on the write reads them.
+ * depends on the write reads them. Resolves to whether that read worked: false leaves on screen
+ * the pull request from before the write. True also when nothing on screen reads it.
  */
-export function refreshPullRequest(queryClient: QueryClient, ref: PullRequestRef): Promise<void> {
+export async function refreshPullRequest(
+  queryClient: QueryClient,
+  ref: PullRequestRef
+): Promise<boolean> {
   const queryKey = pullRequestKey(ref);
   // The pull request's own query has only the token's presence after the start they all share.
   const own = (query: Query) => query.queryKey.length === queryKey.length + 1;
   // Each query once: asked again by both, the first request would be dropped for the second.
   void queryClient.invalidateQueries({ queryKey, predicate: (query) => !own(query) });
-  return queryClient.invalidateQueries({ queryKey, predicate: own });
+  await queryClient.invalidateQueries({ queryKey, predicate: own });
+  // Only what is on screen was asked again; a failure of an earlier read, as the one without a
+  // token of a private pull request, is not this read's.
+  const shown = queryClient.getQueryCache().findAll({ queryKey, predicate: own, type: 'active' });
+  return shown.every((query) => query.state.status !== 'error');
 }
 
 // Two minutes keeps a panel's worth of requests inside the anonymous rate limit.
