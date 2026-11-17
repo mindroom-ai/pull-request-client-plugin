@@ -1,14 +1,18 @@
 // How the Code tab shows the diffs, kept in the plugin's storage across panels and visits: test
-// files hidden or shown, whitespace changes hidden or shown, a unified or split layout, and long
-// lines wrapped or scrolled. Every open Code tab shows the same choices.
+// files hidden or shown, whitespace changes hidden or shown, a unified or split layout, long
+// lines wrapped or scrolled, and the width of the Files column beside the diffs. Every open Code
+// tab shows the same choices.
 import { useMemo, useSyncExternalStore } from 'react';
 import { usePluginStorage } from '@mindroom/client-sdk/core';
+import { TREE_DEFAULT_WIDTH } from './treeWidth.logic';
 
 export type CodePrefs = {
   hideTests: boolean;
   ignoreWhitespace: boolean;
   diffStyle: 'unified' | 'split';
   wrap: boolean;
+  /** The Files column's width beside the diffs, in pixels, as chosen; it shows clamped. */
+  treeWidth: number;
 };
 
 const KEY = 'code:prefs';
@@ -18,6 +22,7 @@ const DEFAULTS: CodePrefs = {
   ignoreWhitespace: false,
   diffStyle: 'unified',
   wrap: true,
+  treeWidth: TREE_DEFAULT_WIDTH,
 };
 
 /** The stored choices, each one that does not read as a choice taking its default. */
@@ -42,6 +47,10 @@ function readCodePrefs(raw: string | null): CodePrefs {
         ? stored.diffStyle
         : DEFAULTS.diffStyle,
     wrap: flag('wrap'),
+    treeWidth:
+      typeof stored.treeWidth === 'number' && Number.isFinite(stored.treeWidth)
+        ? stored.treeWidth
+        : DEFAULTS.treeWidth,
   };
 }
 

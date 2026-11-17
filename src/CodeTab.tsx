@@ -47,6 +47,7 @@ import {
 } from './diff/diffFold.logic';
 import { DiffFileTree, type DiffFileTreeEntry } from './diff/DiffFileTree';
 import { orderDiffFilesLikeTree } from './diff/diffFileTree.logic';
+import { FileTreeColumn } from './diff/FileTreeColumn';
 import {
   DIFF_THEME_NAMES,
   fnv1a32,
@@ -658,13 +659,13 @@ export function CodeTab({
       ) : viewFiles ? (
         <div className="mrpr-code-body">
           {treeOpen ? (
-            <div className="mrpr-code-tree">
+            <FileTreeColumn>
               <DiffFileTree
                 ariaLabel={t('code.treeLabel', pullRequest)}
                 entries={entries}
                 onSelectFile={reveal}
               />
-            </div>
+            </FileTreeColumn>
           ) : null}
           <div className="mrpr-code-diffs" onClickCapture={onDiffsClickCapture}>
             <FileHeaderContext.Provider value={header}>

@@ -14,6 +14,7 @@ export const en = {
     fileCount_one: '{{count}} file',
     fileCount_other: '{{count}} files',
     treeLabel: 'Files of {{owner}}/{{repo}} #{{number}}',
+    resizeFiles: 'Resize the files',
     collapseFolders: 'Collapse all folders',
     expandFolders: 'Expand all folders',
     scope: 'Diff scope: {{label}}',

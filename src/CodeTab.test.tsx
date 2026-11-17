@@ -922,6 +922,158 @@ describe('CodeTab', () => {
     });
   });
 
+  describe('Files column width', () => {
+    const PREFS_KEY = 'mindroom.plugin:%40plugin-tester%3Aexample.org/pull-requests/code:prefs';
+    let bodyWidth = 1000;
+    beforeEach(() => {
+      bodyWidth = 1000;
+      // jsdom lays nothing out; the Code body is as wide as each test says.
+      vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (
+        this: HTMLElement
+      ) {
+        return this.classList.contains('mrpr-code-body') ? bodyWidth : 0;
+      });
+      // jsdom has no pointer capture.
+      const captured = new Set<number>();
+      Object.assign(HTMLElement.prototype, {
+        setPointerCapture: (id: number) => captured.add(id),
+        hasPointerCapture: (id: number) => captured.has(id),
+        releasePointerCapture: (id: number) => captured.delete(id),
+      });
+    });
+    afterEach(() => {
+      vi.restoreAllMocks();
+      for (const name of ['setPointerCapture', 'hasPointerCapture', 'releasePointerCapture']) {
+        delete (HTMLElement.prototype as unknown as Record<string, unknown>)[name];
+      }
+    });
+
+    const handleOf = (tab: TabView) => tab.getByRole('separator', { name: 'Resize the files' });
+    const shown = (tab: TabView) => {
+      const handle = handleOf(tab);
+      return {
+        now: Number(handle.getAttribute('aria-valuenow')),
+        min: Number(handle.getAttribute('aria-valuemin')),
+        max: Number(handle.getAttribute('aria-valuemax')),
+        style: handle.parentElement?.style.getPropertyValue('--mrpr-tree-width'),
+      };
+    };
+    const stored = () => JSON.parse(localStorage.getItem(PREFS_KEY) ?? 'null');
+    const press = (tab: TabView, key: string) =>
+      act(async () => {
+        handleOf(tab).dispatchEvent(
+          new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })
+        );
+      });
+    const pointer = (tab: TabView, type: string, clientX: number) =>
+      act(async () => {
+        const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX, button: 0 });
+        Object.defineProperty(event, 'pointerId', { value: 1 });
+        handleOf(tab).dispatchEvent(event);
+      });
+
+    it('starts at 240px, between 192px and what leaves the diffs 256px, at most 560px', async () => {
+      const tab = await show();
+      expect(shown(tab)).toEqual({ now: 240, min: 192, max: 560, style: '240px' });
+      tab.unmount();
+      bodyWidth = 640;
+      expect(shown(await show())).toMatchObject({ now: 240, max: 384 });
+    });
+
+    it('the arrow keys step it 16px, Home and End to its bounds, and it persists', async () => {
+      localStorage.setItem(PREFS_KEY, JSON.stringify({ diffStyle: 'split', wrap: false }));
+      const first = await show();
+      await press(first, 'ArrowRight');
+      await press(first, 'ArrowRight');
+      expect(shown(first)).toMatchObject({ now: 272, style: '272px' });
+      await press(first, 'ArrowLeft');
+      expect(shown(first).now).toBe(256);
+      await press(first, 'End');
+      expect(shown(first).now).toBe(560);
+      await press(first, 'Home');
+      expect(shown(first).now).toBe(192);
+      await press(first, 'ArrowRight');
+      expect(stored()).toMatchObject({ diffStyle: 'split', wrap: false, treeWidth: 208 });
+      first.unmount();
+
+      const tab = await show();
+      expect(shown(tab)).toMatchObject({ now: 208, style: '208px' });
+      expect(options()).toMatchObject({ diffStyle: 'split', overflow: 'scroll' });
+    });
+
+    it('ignores the arrows with a modifier', async () => {
+      const tab = await show();
+      await act(async () => {
+        handleOf(tab).dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'ArrowRight', ctrlKey: true, bubbles: true })
+        );
+      });
+      expect(shown(tab).now).toBe(240);
+      expect(stored()).toBeNull();
+    });
+
+    it('a drag resizes it and stores the width where the pointer lets go', async () => {
+      const first = await show();
+      await pointer(first, 'pointerdown', 300);
+      await pointer(first, 'pointermove', 380);
+      await act(() => new Promise((resolve) => requestAnimationFrame(resolve)));
+      // Each frame shows the width without storing it.
+      expect(shown(first)).toMatchObject({ now: 240, style: '320px' });
+      expect(stored()).toBeNull();
+      await pointer(first, 'pointerup', 400);
+      expect(shown(first)).toMatchObject({ now: 340, style: '340px' });
+      expect(stored()).toMatchObject({ treeWidth: 340 });
+      first.unmount();
+      expect(shown(await show()).now).toBe(340);
+    });
+
+    it('a drag stops at the bounds', async () => {
+      const tab = await show();
+      await pointer(tab, 'pointerdown', 300);
+      await pointer(tab, 'pointerup', 0);
+      expect(shown(tab).now).toBe(192);
+      await pointer(tab, 'pointerdown', 300);
+      await pointer(tab, 'pointerup', 2000);
+      expect(shown(tab).now).toBe(560);
+    });
+
+    it('a press that does not move stores nothing', async () => {
+      const tab = await show();
+      await pointer(tab, 'pointerdown', 300);
+      await pointer(tab, 'pointerup', 302);
+      expect(shown(tab)).toMatchObject({ now: 240, style: '240px' });
+      expect(stored()).toBeNull();
+    });
+
+    it('a cancelled pointer keeps the width it reached, as one that lets go', async () => {
+      const tab = await show();
+      await pointer(tab, 'pointerdown', 300);
+      await pointer(tab, 'pointermove', 400);
+      await pointer(tab, 'pointercancel', 450);
+      expect(shown(tab)).toMatchObject({ now: 340, style: '340px' });
+      expect(stored()).toMatchObject({ treeWidth: 340 });
+    });
+
+    it('hiding the files mid-drag abandons the drag', async () => {
+      const tab = await show();
+      await pointer(tab, 'pointerdown', 300);
+      await pointer(tab, 'pointermove', 400);
+      await click(tab.getByRole('button', { name: 'Files' }));
+      expect(stored()).toBeNull();
+      expect(document.body.style.cursor).toBe('');
+      await click(tab.getByRole('button', { name: 'Files' }));
+      expect(shown(tab)).toMatchObject({ now: 240, style: '240px' });
+    });
+
+    it('a narrower body clamps a stored width it keeps', async () => {
+      localStorage.setItem(PREFS_KEY, JSON.stringify({ treeWidth: 500 }));
+      bodyWidth = 600;
+      const tab = await show();
+      expect(shown(tab)).toMatchObject({ now: 344, max: 344, style: '344px' });
+      expect(stored()).toEqual({ treeWidth: 500 });
+    });
+  });
+
   describe('file order and headers', () => {
     it('orders source before its tests and lockfiles last', async () => {
       const tab = await show({

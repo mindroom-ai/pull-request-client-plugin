@@ -24,6 +24,7 @@ const values = () => ({
   ignoreWhitespace: prefs.ignoreWhitespace,
   diffStyle: prefs.diffStyle,
   wrap: prefs.wrap,
+  treeWidth: prefs.treeWidth,
 });
 
 beforeEach(() => {
@@ -39,6 +40,7 @@ describe('useCodePrefs', () => {
       ignoreWhitespace: false,
       diffStyle: 'unified',
       wrap: true,
+      treeWidth: 240,
     });
   });
 
@@ -47,11 +49,13 @@ describe('useCodePrefs', () => {
     act(() => prefs.update({ diffStyle: 'split', hideTests: true }));
     expect(values()).toMatchObject({ diffStyle: 'split', hideTests: true });
     act(() => prefs.update({ wrap: false }));
+    act(() => prefs.update({ treeWidth: 320 }));
     expect(JSON.parse(localStorage.getItem(KEY) ?? 'null')).toEqual({
       hideTests: true,
       ignoreWhitespace: false,
       diffStyle: 'split',
       wrap: false,
+      treeWidth: 320,
     });
     first.unmount();
     await mount();
@@ -60,6 +64,7 @@ describe('useCodePrefs', () => {
       ignoreWhitespace: false,
       diffStyle: 'split',
       wrap: false,
+      treeWidth: 320,
     });
   });
 
@@ -88,8 +93,19 @@ describe('useCodePrefs', () => {
       ignoreWhitespace: false,
       diffStyle: 'unified',
       wrap: true,
+      treeWidth: 240,
     });
     first.unmount();
+    localStorage.setItem(KEY, JSON.stringify({ wrap: false, treeWidth: '300px' }));
+    const second = await mount();
+    expect(values()).toMatchObject({ wrap: false, treeWidth: 240 });
+    second.unmount();
+    localStorage.setItem(KEY, JSON.stringify({ hideTests: true, treeWidth: null }));
+    const third = await mount();
+    expect(values()).toMatchObject({ hideTests: true, treeWidth: 240 });
+    act(() => prefs.update({ treeWidth: 300 }));
+    expect(values()).toMatchObject({ hideTests: true, treeWidth: 300 });
+    third.unmount();
     localStorage.setItem(KEY, 'not json');
     await mount();
     expect(values()).toMatchObject({ hideTests: false, diffStyle: 'unified' });

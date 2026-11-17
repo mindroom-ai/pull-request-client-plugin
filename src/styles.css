@@ -242,15 +242,68 @@
   min-inline-size: 0;
 }
 
+/* The handle that resizes the Files column beside the diffs (FileTreeColumn.tsx), as T3 Code's: a
+   4px strip on the column's inline-end edge, 16px for a coarse pointer, reaching over the diffs'
+   edge. Its line lies on the column's border and shows only while a pointer hovers it, in the
+   border's tone darkened, and while it has the focus or is dragged, in the accent. Above the diffs
+   it is hidden. */
+.mrpr-tree-resize {
+  display: none;
+}
+.mrpr-tree-resize-line {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: -1px;
+  inline-size: 1px;
+  background: transparent;
+  transition: background-color 150ms;
+  pointer-events: none;
+}
+
 @container (min-inline-size: 640px) {
   .mrpr-code-body {
     flex-direction: row;
   }
   .mrpr-code-tree {
-    flex: 0 0 240px;
+    position: relative;
+    flex: 0 0 var(--mrpr-tree-width, 240px);
     max-block-size: none;
     border-block-end: 0;
     border-inline-end: 1px solid var(--pr-border);
+  }
+  /* What the diffs stack inside stays below the handle's reach over their edge. */
+  .mrpr-code-diffs {
+    isolation: isolate;
+  }
+  .mrpr-tree-resize {
+    position: absolute;
+    inset-block: 0;
+    inset-inline-end: 0;
+    z-index: 1;
+    display: block;
+    inline-size: 4px;
+    cursor: col-resize;
+    touch-action: none;
+    user-select: none;
+    outline: none;
+  }
+  .mrpr-tree-resize:focus-visible .mrpr-tree-resize-line,
+  .mrpr-tree-resize:active .mrpr-tree-resize-line {
+    background: color-mix(in srgb, var(--pr-primary) 60%, transparent);
+  }
+}
+@media (any-pointer: coarse) {
+  .mrpr-tree-resize {
+    inset-inline-end: -8px;
+    inline-size: 16px;
+  }
+  .mrpr-tree-resize-line {
+    inset-inline-end: 7px;
+  }
+}
+@media (hover: hover) {
+  .mrpr-tree-resize:hover:not(:focus-visible):not(:active) .mrpr-tree-resize-line {
+    background: color-mix(in srgb, var(--pr-muted) 50%, var(--pr-border));
   }
 }
 

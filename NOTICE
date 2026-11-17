@@ -4,8 +4,9 @@ Copyright (c) 2026 MindRoom
 This plugin is under the MIT License (LICENSE).
 
 Parts of it are ported from T3 Code (https://github.com/pingdotgg/t3code),
-at commit 8ab427c6077f1e8b75ea608a363006ccb697f5f6. Each ported file names
-the T3 Code file it comes from in its first line. T3 Code's notice:
+most at commit 8ab427c6077f1e8b75ea608a363006ccb697f5f6. Each ported file
+names the T3 Code files it comes from and their commit in its first line.
+T3 Code's notice:
 
 MIT License
 
