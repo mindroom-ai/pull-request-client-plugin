@@ -5,7 +5,9 @@ import { parsePullRequestUrl } from './github';
 import { PullRequestCard } from './PullRequestCard';
 import { en } from './strings';
 import { ThreadCardPullRequests } from './ThreadCardPullRequests';
+import { ThreadDetails } from './ThreadDetails';
 import { ThreadPullRequestStrip } from './ThreadPullRequestStrip';
+import { threadHasDetails } from './threadPullRequests';
 import './styles.css';
 
 // The panel loads when it first opens: it carries the diff libraries, which the card does not need.
@@ -28,6 +30,7 @@ const plugin: ClientPlugin = {
     },
   ],
   threadCardBadges: [{ Component: ThreadCardPullRequests }],
+  threadDetails: [{ shows: threadHasDetails, Component: ThreadDetails }],
   roomHeaderSlot: [ThreadPullRequestStrip],
   translations: { en },
 };

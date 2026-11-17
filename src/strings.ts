@@ -230,6 +230,14 @@ export const en = {
     labelWithRepository: 'Worktree {{path}}, repository {{repo}}, branch {{branch}}',
     labelWithRepositoryWithoutBranch: 'Worktree {{path}}, repository {{repo}}',
   },
+  // A thread's details: a pull request's repository and number, its branches, a fork's head and
+  // its author.
+  details: {
+    pullRequest: '{{repository}} #{{number}}',
+    branches: '{{head}} → {{base}}',
+    forkHead: '{{owner}}:{{branch}}',
+    author: '@{{login}}',
+  },
   error: {
     notFound: 'GitHub did not find this pull request. A private repository needs a token.',
     rateLimited: "GitHub's rate limit was reached.",

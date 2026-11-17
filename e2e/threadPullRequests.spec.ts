@@ -16,6 +16,7 @@ import {
   sendStateEvent,
   type MatrixSession,
 } from '@mindroom/e2e/matrix';
+import { touch } from '@mindroom/e2e/touch';
 
 // A thread's pull requests in a production build with this plugin, against the disposable
 // homeserver, with GitHub's API answered by the page (no request leaves the test). The links are
@@ -26,7 +27,8 @@ import {
 // a link written or cleared while the room is open shows on its card at once, also after a gap in
 // the room's sync; the room's six threads leave the SDK's emitters within their listener limit; and
 // a thread's worktree, which MindRoom's `thread-worktree` backend plugin writes, shows as its
-// branch on its card and in the strip until it is cleared.
+// branch on its card and in the strip until it is cleared; and a thread's pull requests show as its
+// details in the card's hover card and, on a phone, in the menu a long press opens.
 // Set MRPR_SHOTS=<directory> to save the screenshots of the pull request.
 
 const LINK_EVENT = 'com.mindroom.thread.pull_request';
@@ -35,6 +37,13 @@ const PASSWORD = 'thread-pull-requests-password';
 const RUN = Date.now().toString(36);
 const DESKTOP = { width: 1280, height: 800 };
 const PHONE = { width: 390, height: 844 };
+const PHONE_CONTEXT = {
+  viewport: PHONE,
+  deviceScaleFactor: 2,
+  hasTouch: true,
+  isMobile: true,
+  serviceWorkers: 'block',
+} as const;
 
 test.use({ viewport: DESKTOP, deviceScaleFactor: 2, serviceWorkers: 'block' });
 
@@ -48,6 +57,10 @@ type Pull = {
   state: 'open' | 'draft' | 'merged' | 'closed';
   checks: Checks;
   branch: string;
+  /** The base branch; `main` when absent. */
+  base?: string;
+  /** The lines it adds and deletes, and the files it changes. */
+  size: [number, number, number];
   author: string;
   body: string;
   labels?: string[];
@@ -63,6 +76,7 @@ const PULLS = {
     state: 'open',
     checks: 'running',
     branch: 'redis-sessions',
+    size: [184, 37, 7],
     author: 'acme-builder',
     body: 'Moves the session store from Postgres to Redis behind the `SessionStore` interface.',
     labels: ['backend', 'performance'],
@@ -78,6 +92,7 @@ const PULLS = {
     state: 'open',
     checks: 'passing',
     branch: 'redis-sessions',
+    size: [42, 9, 3],
     author: 'acme-builder',
     body: 'The token endpoint reads the session through the new store, with the same expiry.',
     labels: ['backend'],
@@ -90,6 +105,7 @@ const PULLS = {
     state: 'draft',
     checks: 'none',
     branch: 'settings-dark-mode',
+    size: [326, 58, 12],
     author: 'acme-builder',
     body: 'Adds the dark colour tokens and the toggle. Tests for the toggle follow.',
     labels: ['frontend'],
@@ -101,6 +117,7 @@ const PULLS = {
     state: 'open',
     checks: 'failing',
     branch: 'checkout-test-clock',
+    size: [11, 4, 1],
     author: 'acme-builder',
     body: 'The checkout test read the wall clock, so a slow runner saw an expired card.',
     labels: ['tests'],
@@ -112,6 +129,7 @@ const PULLS = {
     state: 'merged',
     checks: 'passing',
     branch: 'rate-limit-per-token',
+    size: [268, 15, 9],
     author: 'acme-builder',
     body: 'A token bucket per API token, 600 requests a minute.',
     approvedBy: 'api-reviewer',
@@ -123,6 +141,7 @@ const PULLS = {
     state: 'merged',
     checks: 'passing',
     branch: 'changelog-2026-11-3',
+    size: [23, 0, 1],
     author: 'platform-lead',
     body: 'Release notes for 2026.11.3.',
   },
@@ -132,7 +151,9 @@ const PULLS = {
     title: 'Rate limit the public API per IP address',
     state: 'closed',
     checks: 'none',
-    branch: 'rate-limit-per-ip',
+    branch: 'rate-limit-per-client-ip-address',
+    base: 'release/2026.11-api-hardening',
+    size: [96, 41, 4],
     author: 'acme-builder',
     body: 'Superseded by the limit per token.',
   },
@@ -143,6 +164,7 @@ const PULLS = {
     state: 'open',
     checks: 'passing',
     branch: 'webhook-retries',
+    size: [151, 22, 5],
     author: 'acme-builder',
     body: 'Retries a failed delivery five times with exponential backoff and logs each attempt.',
     labels: ['backend'],
@@ -176,7 +198,7 @@ const apiPull = (pull: Pull) => {
     mergeable_state: done ? null : 'clean',
     auto_merge: null,
     head: { sha: headSha(pull), ref: pull.branch, repo },
-    base: { ref: 'main', repo },
+    base: { ref: pull.base ?? 'main', repo },
     merged_at: pull.state === 'merged' ? ago(95) : null,
     closed_at: done ? ago(95) : null,
     comments: pull.comment ? 1 : 0,
@@ -184,9 +206,9 @@ const apiPull = (pull: Pull) => {
     commits: 3,
     created_at: ago(26 * 60),
     updated_at: ago(42),
-    additions: 184,
-    deletions: 37,
-    changed_files: 7,
+    additions: pull.size[0],
+    deletions: pull.size[1],
+    changed_files: pull.size[2],
     html_url: `https://github.com/acme/${pull.repo}/pull/${pull.number}`,
   };
 };
@@ -502,13 +524,14 @@ const openRoom = async (page: Page) => {
   await expect(card(page, roots.sessions)).toBeVisible({ timeout: 120_000 });
 };
 
-const shot = async (page: Page, name: string) => {
+/** Saves a screenshot; `keepPointer` leaves the pointer where it is, as a hover card needs. */
+const shot = async (page: Page, name: string, { keepPointer = false } = {}) => {
   const directory = process.env.MRPR_SHOTS;
   if (!directory) return;
   // A new session's "Catching up..." pill over the room goes with its next sync; no hover or
-  // tooltip either.
+  // tooltip either, unless the shot is of one.
   await expect(page.getByText(/^Catching up/)).toHaveCount(0, { timeout: 60_000 });
-  await page.mouse.move(0, 0);
+  if (!keepPointer) await page.mouse.move(0, 0);
   await page.screenshot({ path: join(directory, `${name}.png`) });
 };
 
@@ -600,14 +623,7 @@ test('a link written or cleared while the room is open shows on its card at once
 
 test('on a phone a card shows one chip and the count of the rest', async ({ browser, baseURL }) => {
   test.setTimeout(4 * 60_000);
-  const context = await browser.newContext({
-    baseURL,
-    viewport: PHONE,
-    deviceScaleFactor: 2,
-    hasTouch: true,
-    isMobile: true,
-    serviceWorkers: 'block',
-  });
+  const context = await browser.newContext({ baseURL, ...PHONE_CONTEXT });
   const page = await context.newPage();
   try {
     const unanswered = await stubGitHub(page);
@@ -651,6 +667,87 @@ test('on a phone a card shows one chip and the count of the rest', async ({ brow
     await shot(page, 'phone-branch-repo');
     await writeWorktree(roots.webhooks, {});
     await expect(branch).toHaveCount(0);
+    expect(unanswered).toEqual([]);
+    expect(warnings).toEqual([]);
+  } finally {
+    await context.close();
+  }
+});
+
+/** Whether `locator`'s text shows whole, not cut at its element's end. */
+const shownWhole = (locator: Locator) =>
+  locator.evaluate((element) => element.scrollWidth <= element.clientWidth);
+
+/** Expects `details` to show the pull requests `pulls` in order, each by its title from GitHub. */
+const expectDetailsTitles = async (details: Locator, pulls: Pull[]) => {
+  const blocks = details.locator('.mrpr-details-pull-request');
+  await expect(blocks).toHaveCount(pulls.length);
+  await expect(blocks.locator('.mrpr-details-title')).toHaveText(
+    pulls.map((pull) => pull.title),
+    { timeout: 30_000 }
+  );
+};
+
+test("resting the pointer on a card shows all its pull requests' details", async ({ page }) => {
+  test.setTimeout(4 * 60_000);
+  const unanswered = await stubGitHub(page);
+  const warnings = listenerWarnings(page);
+  await openRoom(page);
+  const details = page.locator('[data-thread-card-details]');
+  const [rateLimit] = THREADS.release.pulls;
+  const blocks = details.locator('.mrpr-details-pull-request');
+
+  // All three pull requests, also the one the card's chips leave to their count.
+  await card(page, roots.release).hover();
+  await expectDetailsTitles(details, THREADS.release.pulls);
+  await expect(
+    blocks.first().getByText(`${rateLimit.branch} → main`, { exact: true })
+  ).toBeVisible();
+  // Its size and its author's whole login, which the line wraps for rather than cut.
+  const meta = blocks.first().locator('.mrpr-meta');
+  await expect(meta).toContainText('+268');
+  await expect(meta).toContainText('9 files');
+  const author = meta.getByText('@acme-builder', { exact: true });
+  await expect(author).toBeVisible();
+  expect(await shownWhole(author)).toBe(true);
+  // Two long branches, each shortened in its middle, on a line that wraps so both their ends show.
+  const branches = blocks
+    .nth(2)
+    .getByText('rate-limit-p…-ip-address → release/2026…i-hardening', { exact: true });
+  await expect(branches).toBeVisible();
+  expect(await shownWhole(branches)).toBe(true);
+  await shot(page, 'details-light', { keepPointer: true });
+
+  await page.mouse.move(0, 0);
+  await expect(details).toHaveCount(0);
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await expect(page.locator('html')).toHaveAttribute('data-theme-kind', 'dark');
+  await card(page, roots.release).hover();
+  await expectDetailsTitles(details, THREADS.release.pulls);
+  await shot(page, 'details-dark', { keepPointer: true });
+  expect(unanswered).toEqual([]);
+  expect(warnings).toEqual([]);
+});
+
+test('on a phone a long press on a card opens its menu with the details', async ({
+  browser,
+  baseURL,
+}) => {
+  test.setTimeout(4 * 60_000);
+  const context = await browser.newContext({ baseURL, ...PHONE_CONTEXT });
+  const page = await context.newPage();
+  try {
+    const unanswered = await stubGitHub(page);
+    const warnings = listenerWarnings(page);
+    await openRoom(page);
+    await touch(card(page, roots.sessions), [
+      { type: 'start' },
+      { type: 'wait', ms: 700 },
+      { type: 'end' },
+    ]);
+    const details = page.getByRole('menu').locator('[data-thread-details]');
+    await expectDetailsTitles(details, [PULLS.sessionStore, PULLS.tokenEndpoint]);
+    await shot(page, 'phone-details-menu', { keepPointer: true });
     expect(unanswered).toEqual([]);
     expect(warnings).toEqual([]);
   } finally {

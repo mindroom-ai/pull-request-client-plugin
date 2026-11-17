@@ -1580,3 +1580,58 @@ button.mrpr-chip:focus-visible {
     padding-inline: 8px;
   }
 }
+
+/* A thread's details, in its card's hover card and its menu: rows of 12px text, the pull requests
+   first and the worktree last, a gap between blocks. The icons have the chips' size, a pull
+   request's title takes at most two lines, and its size line is the card's muted 11px meta line. */
+.mrpr-details {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 16px;
+}
+.mrpr-details-pull-request,
+.mrpr-details-worktree {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-inline-size: 0;
+}
+/* A pull request's meta line wraps between its parts, so its author's whole login shows. */
+.mrpr-details .mrpr-meta {
+  flex-wrap: wrap;
+  row-gap: 0;
+}
+/* A row's icon sits in the middle of its first line, also beside a path that wraps. */
+.mrpr-details-row {
+  display: flex;
+  min-inline-size: 0;
+  align-items: flex-start;
+  gap: 6px;
+}
+.mrpr-details .mrpr-icon {
+  flex: none;
+  inline-size: calc(0.65rem * 1.1);
+  block-size: calc(0.65rem * 1.1);
+  margin-block: calc((16px - 0.65rem * 1.1) / 2);
+}
+.mrpr-details-icon {
+  color: var(--pr-muted);
+}
+.mrpr-details-title {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 0;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+/* A pull request's branches and a worktree's branch and path wrap anywhere, so they show whole in
+   the card's width. */
+.mrpr-details-wrap {
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
