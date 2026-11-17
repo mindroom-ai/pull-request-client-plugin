@@ -169,8 +169,11 @@ export type GitHubAccess = {
   pending: boolean;
   /** How a request that starts now goes, for one that runs after the render that started it. */
   current(): GitHubAuth | undefined;
-  /** Asks the server again whether GitHub is connected there, as a part's Try again does. */
-  recheck(): Promise<void>;
+  /**
+   * Asks the server again whether GitHub is connected there, as a part's Try again does; resolves
+   * to whether it names another connection now, after which everything is read again.
+   */
+  recheck(): Promise<boolean>;
 };
 
 /** Whose GitHub account the requests through MindRoom use, while they go that way. */
@@ -215,13 +218,14 @@ export function useGitHubAccess(): GitHubAccess {
     if (!now?.connected) return undefined;
     return viaServer(queryClient, server, `${userId} ${now.login ?? ''}`);
   }, [queryClient, server, storedToken, userId]);
-  const recheck = useCallback(
-    () =>
-      server && storedToken() === undefined
-        ? queryClient.invalidateQueries({ queryKey: statusKey(server.origin) })
-        : Promise.resolve(),
-    [queryClient, server, storedToken]
-  );
+  const recheck = useCallback(async () => {
+    if (!server || storedToken() !== undefined) return false;
+    const key = statusKey(server.origin);
+    const before = queryClient.getQueryData<ServerStatus>(key);
+    await queryClient.invalidateQueries({ queryKey: key });
+    const now = queryClient.getQueryData<ServerStatus>(key);
+    return now !== undefined && (before === undefined || identity(before) !== identity(now));
+  }, [queryClient, server, storedToken]);
   return useMemo(
     () => ({
       via: token !== undefined ? 'token' : connected ? 'server' : undefined,
@@ -240,7 +244,8 @@ export function TokenForm({
   reason,
   inputRef,
 }: {
-  reason: 'notFound' | 'rateLimited' | 'badToken';
+  /** Why it shows; `override`, to use a token instead of MindRoom's connection, has no hint. */
+  reason: 'notFound' | 'rateLimited' | 'badToken' | 'override';
   inputRef?: Ref<HTMLInputElement>;
 }) {
   const t = usePluginTranslation('pull-requests');
@@ -261,7 +266,7 @@ export function TokenForm({
           <GitHubConnectedNote /> {t('token.overrides')}
         </p>
       ) : null}
-      <p className="mrpr-status">{t(`token.hint.${reason}`)}</p>
+      {reason === 'override' ? null : <p className="mrpr-status">{t(`token.hint.${reason}`)}</p>}
       <div className="mrpr-token-row">
         <input
           ref={inputRef}

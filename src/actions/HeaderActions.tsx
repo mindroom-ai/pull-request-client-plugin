@@ -429,6 +429,8 @@ function ResultLine({
                 ? 'actions.hint.server'
                 : kind === 'noAccess' && via === 'server'
                 ? 'actions.hint.noAccessServer'
+                : kind === 'badToken' && via === 'server'
+                ? 'actions.hint.badConnection'
                 : `actions.hint.${kind}`
             );
       const why = [hint, kind === 'badToken' ? null : detail].filter(Boolean).join(' ');

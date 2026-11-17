@@ -944,7 +944,7 @@ describe('with the GitHub account connected in MindRoom', () => {
     roomServer.current = mindroom.server;
     const view = await show();
     expect(
-      await view.findByText('Using your GitHub account connected in MindRoom (@octo)')
+      await view.findByText('Using your GitHub account connected in MindRoom (@octo).')
     ).toBeTruthy();
     await click(await view.findByRole('button', { name: 'Merge' }));
     await click(await view.findByRole('button', { name: 'Confirm merge?' }));
@@ -975,6 +975,40 @@ describe('with the GitHub account connected in MindRoom', () => {
     await waitUntil(() =>
       expect(view.getByRole('status').textContent).toContain(
         'GitHub refused it. The GitHub App connected in MindRoom may not have write access to this repository (Pull requests and Contents: Read and write). Resource not accessible by integration'
+      )
+    );
+    // A token of the person's own can do it instead, from the browser.
+    await click(view.getByRole('button', { name: 'Use a token instead' }));
+    const field = view.getByLabelText('GitHub token');
+    expect(document.activeElement).toBe(field);
+    fetchMock.mockImplementation(github);
+    await act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(
+        field,
+        'ghp_mine'
+      );
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await click(view.getByRole('button', { name: 'Save' }));
+    await waitUntil(() => expect(view.getByRole('button', { name: 'Forget token' })).toBeTruthy());
+    expect(view.queryByText(/connected in MindRoom/)).toBeNull();
+    expect(view.queryByRole('button', { name: 'Use a token instead' })).toBeNull();
+    await waitUntil(() => expect(fetchMock).toHaveBeenCalled());
+    const [, init] = fetchMock.mock.calls.at(-1)!;
+    expect(new Headers(init?.headers).get('authorization')).toBe('Bearer ghp_mine');
+  });
+
+  it('says MindRoom must connect GitHub again when GitHub refuses its account', async () => {
+    const mindroom = githubServer(async (url, init) =>
+      init?.method === 'PUT' ? respond({ message: 'Bad credentials' }, 401) : github(url, init)
+    );
+    roomServer.current = mindroom.server;
+    const view = await show();
+    await click(await view.findByRole('button', { name: 'Merge' }));
+    await click(await view.findByRole('button', { name: 'Confirm merge?' }));
+    await waitUntil(() =>
+      expect(view.getByRole('status').textContent).toContain(
+        'Could not merge this pull request GitHub refused your account connected in MindRoom. Connect GitHub again in MindRoom.'
       )
     );
   });

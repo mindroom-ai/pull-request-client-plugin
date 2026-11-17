@@ -107,10 +107,11 @@ export function usePullRequestFiles(ref: PullRequestRef | undefined, enabled: bo
 
 /**
  * What the viewer may do in the pull request's repository, and how it merges. GraphQL needs a
- * token or MindRoom's connection, so without either nothing is asked. It changes rarely, so a panel opened again within ten
- * minutes reuses it; one opened after the token changed, which makes every answer stale, asks
- * again, as another token is another permission. A refusal is not asked again on mount, until
- * the token changes, which forgets it (`useGitHubToken`).
+ * token or MindRoom's connection, so without either nothing is asked. It changes rarely, so a
+ * panel opened again within ten minutes reuses it; one opened after the token or the connection
+ * changed, which makes every answer stale, asks again, as another account is another permission.
+ * A refusal is not asked again on mount, until the token or the connection changes, which
+ * forgets it (`useGitHubToken`, `useGitHubAccess`).
  */
 export function useRepository(ref: PullRequestRef | undefined) {
   const access = useGitHubAccess();

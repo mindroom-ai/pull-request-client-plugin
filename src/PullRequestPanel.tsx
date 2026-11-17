@@ -314,6 +314,14 @@ function Panel({ roomId, request }: PanelProps) {
   const { token, forget } = useGitHubToken();
   const { via } = useGitHubAccess();
   const tokenForm = usePanelTokenForm();
+  // The token form a person opened to use a token instead of MindRoom's connection, which goes
+  // once a token is saved.
+  const [overriding, setOverriding] = useState(false);
+  const focusTokenForm = tokenForm.context.focus;
+  useEffect(() => {
+    if (via !== 'server') setOverriding(false);
+    else if (overriding) focusTokenForm();
+  }, [focusTokenForm, overriding, via]);
   const [tab, setTab] = useState<Tab>('summary');
   // The Timeline tab's order, which the tab bar's toggle sets.
   const [order, setOrder] = useState<Order>('newest');
@@ -441,15 +449,24 @@ function Panel({ roomId, request }: PanelProps) {
                 </button>
               ) : via === 'server' ? (
                 <span className="mrpr-status">
-                  <GitHubConnectedNote />
+                  <GitHubConnectedNote />{' '}
+                  {tokenForm.reason || overriding ? null : (
+                    <button
+                      type="button"
+                      className="mrpr-link-button"
+                      onClick={() => setOverriding(true)}
+                    >
+                      {t('token.useToken')}
+                    </button>
+                  )}
                 </span>
               ) : null}
             </div>
           </div>
           {/* One token form for every part below that a token would let load. */}
-          {tokenForm.reason ? (
+          {tokenForm.reason || (overriding && via === 'server') ? (
             <div className="mrpr-panel-token">
-              <TokenForm reason={tokenForm.reason} inputRef={tokenForm.inputRef} />
+              <TokenForm reason={tokenForm.reason ?? 'override'} inputRef={tokenForm.inputRef} />
             </div>
           ) : null}
           <TabBar
