@@ -33,6 +33,8 @@ export type PullRequest = {
   autoMerge: { method: 'merge' | 'squash' | 'rebase' } | null;
   headSha: string;
   headRepo: string | null;
+  /** The head repository's GraphQL id, which reading and deleting its branch take; '' without one. */
+  headRepoId: string;
   baseRepo: string;
   mergedAt: string | null;
   closedAt: string | null;
@@ -164,7 +166,9 @@ async function getJson(
   }
 }
 
-export type GitHubWriteErrorKind = 'noAccess' | 'refused' | 'badToken' | 'failed';
+// `branchMoved` is this module's own refusal: the branch to delete got commits since its pull
+// request, so it is left alone.
+export type GitHubWriteErrorKind = 'noAccess' | 'refused' | 'badToken' | 'branchMoved' | 'failed';
 
 /** A write GitHub refused or did not take, with GitHub's own reason in `detail` when it gave one. */
 export class GitHubWriteError extends Error {
@@ -330,6 +334,7 @@ export async function fetchPullRequest(
     autoMerge: autoMerge(record(raw.auto_merge)?.merge_method),
     headSha: text(head?.sha),
     headRepo: textOrNull(record(head?.repo)?.full_name),
+    headRepoId: text(record(head?.repo)?.node_id),
     baseRepo: text(record(base?.repo)?.full_name) || `${ref.owner}/${ref.repo}`,
     mergedAt: textOrNull(raw.merged_at),
     closedAt: textOrNull(raw.closed_at),
@@ -876,6 +881,63 @@ const UPDATE_BRANCH = `mutation(
   ) { clientMutationId }
 }`;
 
+const HEAD_BRANCH_QUERY = `query($repositoryId: ID!, $ref: String!) {
+  node(id: $repositoryId) {
+    ... on Repository {
+      ref(qualifiedName: $ref) { target { oid } }
+    }
+  }
+}`;
+
+const headBranchRef = (pr: PullRequest) => `refs/heads/${pr.headRef}`;
+
+/**
+ * The commit the pull request's branch points at now, in its own repository, or null when the
+ * branch is gone: what T3 Code reads before it deletes a branch. A name alone does not tell the
+ * pull request's branch from one pushed to since, or made anew under its name.
+ */
+export async function fetchHeadBranchSha(
+  pr: PullRequest,
+  token: string,
+  signal?: AbortSignal
+): Promise<string | null> {
+  const variables = { repositoryId: pr.headRepoId, ref: headBranchRef(pr) };
+  const data = await graphql(HEAD_BRANCH_QUERY, variables, token, signal);
+  const repository = record(data?.node);
+  // Without the repository's `ref` the answer says nothing about the branch, not that it is gone.
+  if (!repository || !('ref' in repository)) throw new GitHubWriteError('failed', 200);
+  if (repository.ref === null) return null;
+  const oid = text(record(record(repository.ref)?.target)?.oid);
+  if (oid === '') throw new GitHubWriteError('failed', 200);
+  return oid;
+}
+
+// Git's name for no commit: a ref updated to it is deleted.
+const NO_COMMIT = '0000000000000000000000000000000000000000';
+
+const DELETE_BRANCH = `mutation($input: UpdateRefsInput!) {
+  updateRefs(input: $input) { clientMutationId }
+}`;
+
+/**
+ * Deletes the pull request's branch only while it still ends at the pull request's last commit,
+ * as T3 Code does: a branch that got commits since, or that was made anew under the same name
+ * (and may head another pull request), is not this pull request's to delete. GitHub checks
+ * `beforeOid` as it deletes, so a push that comes between the read and the write is refused too.
+ * A branch already gone is what was asked for.
+ */
+async function deleteHeadBranch(pr: PullRequest, token: string): Promise<void> {
+  const sha = await fetchHeadBranchSha(pr, token);
+  if (sha === null) return;
+  if (sha !== pr.headSha) throw new GitHubWriteError('branchMoved', 0);
+  const update = { name: headBranchRef(pr), beforeOid: pr.headSha, afterOid: NO_COMMIT };
+  await graphql(
+    DELETE_BRANCH,
+    { input: { repositoryId: pr.headRepoId, refUpdates: [update] } },
+    token
+  );
+}
+
 /**
  * One action on a pull request, as it was loaded: the writes that depend on its head send the
  * loaded head sha, so GitHub refuses them if the branch moved since.
@@ -902,13 +964,9 @@ export async function runPullRequestAction(
     case 'update-branch':
       await sendRest('PUT', `${pull}/update-branch`, { expected_head_sha: pr.headSha }, token);
       return;
-    case 'delete-branch': {
-      // A deleted fork has no branch left to delete.
-      if (pr.headRepo === null) throw new GitHubWriteError('refused', 0);
-      const branch = pr.headRef.split('/').map(encodeURIComponent).join('/');
-      await sendRest('DELETE', `/repos/${pr.headRepo}/git/refs/heads/${branch}`, undefined, token);
+    case 'delete-branch':
+      await deleteHeadBranch(pr, token);
       return;
-    }
     case 'ready':
       await graphql(ON_PULL_REQUEST('markPullRequestReadyForReview'), { pullRequestId }, token);
       return;

@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import type { PullRequest, Repository } from '../github';
-import { canDeleteBranch, menuActions, primaryControl, resolveMergeMethod } from './actions.logic';
+import {
+  canDeleteBranch,
+  mayDeleteBranch,
+  menuActions,
+  primaryControl,
+  resolveMergeMethod,
+} from './actions.logic';
 
 const pullRequest: PullRequest = {
   title: 'T',
@@ -19,6 +25,7 @@ const pullRequest: PullRequest = {
   autoMerge: null,
   headSha: 'head',
   headRepo: 'a/b',
+  headRepoId: 'R_ab',
   baseRepo: 'a/b',
   mergedAt: null,
   closedAt: null,
@@ -129,25 +136,47 @@ describe('canDeleteBranch', () => {
   const merged = { state: 'merged' as const };
 
   it("does not offer a fork's branch", () => {
-    expect(canDeleteBranch(pr({ ...merged, headRepo: 'fork/b' }), repository)).toBe(false);
+    const fork = pr({ ...merged, headRepo: 'fork/b' });
+    expect(mayDeleteBranch(fork, repository)).toBe(false);
+    expect(canDeleteBranch(fork, repository, 'head')).toBe(false);
   });
 
   it('does not offer the default branch', () => {
-    expect(canDeleteBranch(pr({ ...merged, headRef: 'main' }), repository)).toBe(false);
+    const main = pr({ ...merged, headRef: 'main' });
+    expect(mayDeleteBranch(main, repository)).toBe(false);
+    expect(canDeleteBranch(main, repository, 'head')).toBe(false);
   });
 
   it('does not offer the branch of an open pull request', () => {
-    expect(canDeleteBranch(pullRequest, repository)).toBe(false);
+    expect(mayDeleteBranch(pullRequest, repository)).toBe(false);
+    expect(canDeleteBranch(pullRequest, repository, 'head')).toBe(false);
   });
 
   it('offers the branch of a merged pull request from the same repository', () => {
-    expect(canDeleteBranch(pr(merged), repository)).toBe(true);
+    expect(mayDeleteBranch(pr(merged), repository)).toBe(true);
+    expect(canDeleteBranch(pr(merged), repository, 'head')).toBe(true);
+  });
+
+  it('does not offer a branch before GitHub told where it points', () => {
+    expect(canDeleteBranch(pr(merged), repository, undefined)).toBe(false);
+  });
+
+  it('does not offer a branch that is gone', () => {
+    expect(canDeleteBranch(pr(merged), repository, null)).toBe(false);
+  });
+
+  it('does not offer a branch that got commits since its pull request', () => {
+    expect(canDeleteBranch(pr(merged), repository, 'newer')).toBe(false);
   });
 });
 
 describe('menuActions', () => {
-  const menu = (subject: PullRequest, inRepo: Repository = repository) =>
-    menuActions(subject, inRepo, primaryControl(subject, inRepo, 'passing'));
+  // The branch still ends where the pull request does, unless a test says otherwise.
+  const menu = (
+    subject: PullRequest,
+    inRepo: Repository = repository,
+    headBranchSha: string | null = subject.headSha
+  ) => menuActions(subject, inRepo, primaryControl(subject, inRepo, 'passing'), headBranchSha);
 
   it('offers auto-merge, draft and close on an open pull request GitHub does not merge yet', () => {
     expect(menu(pr(blocked))).toEqual(['enable-auto-merge', 'draft', 'close']);
@@ -166,6 +195,11 @@ describe('menuActions', () => {
 
   it('offers the branch of a merged pull request', () => {
     expect(menu(pr({ state: 'merged' }))).toEqual(['delete-branch']);
+  });
+
+  it('offers no branch that is gone, as after it was deleted', () => {
+    expect(menu(pr({ state: 'merged' }), repository, null)).toEqual([]);
+    expect(menu(pr({ state: 'closed' }), repository, null)).toEqual(['reopen']);
   });
 
   it('offers reopening a closed pull request and its branch', () => {

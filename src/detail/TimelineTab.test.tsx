@@ -45,6 +45,7 @@ const pull = (over: Partial<PullRequest> = {}): PullRequest => ({
   autoMerge: null,
   headSha: HEAD,
   headRepo: 'mindroom-ai/mindroom-chat',
+  headRepoId: 'R_chat',
   baseRepo: 'mindroom-ai/mindroom-chat',
   mergedAt: null,
   closedAt: null,

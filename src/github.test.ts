@@ -8,6 +8,7 @@ import {
   fetchCommitFiles,
   fetchCommits,
   fetchConversationComments,
+  fetchHeadBranchSha,
   fetchPullRequest,
   fetchPullRequestFiles,
   fetchReviewComments,
@@ -141,6 +142,7 @@ describe('fetchPullRequest', () => {
       autoMerge: null,
       headSha: '',
       headRepo: null,
+      headRepoId: '',
       baseRepo: 'a/b',
       mergedAt: null,
       closedAt: null,
@@ -446,7 +448,7 @@ describe('the new pull request fields', () => {
           mergeable: false,
           mergeable_state: 'behind',
           auto_merge: { merge_method: 'squash' },
-          head: { ref: 'topic', sha: 'abc', repo: { full_name: 'fork/b' } },
+          head: { ref: 'topic', sha: 'abc', repo: { full_name: 'fork/b', node_id: 'R_fork' } },
           base: { ref: 'main', repo: { full_name: 'a/b' } },
           merged_at: null,
           closed_at: '2026-01-04T00:00:00Z',
@@ -467,6 +469,7 @@ describe('the new pull request fields', () => {
       autoMerge: { method: 'squash' },
       headSha: 'abc',
       headRepo: 'fork/b',
+      headRepoId: 'R_fork',
       baseRepo: 'a/b',
       mergedAt: null,
       closedAt: '2026-01-04T00:00:00Z',
@@ -916,6 +919,7 @@ const writePull: PullRequest = {
   autoMerge: null,
   headSha: 'head7',
   headRepo: 'fork/r',
+  headRepoId: 'R_fork',
   baseRepo: 'o/r',
   mergedAt: null,
   closedAt: null,
@@ -985,22 +989,66 @@ describe('runPullRequestAction', () => {
     });
   });
 
-  it('deletes the head branch in the head repository, each segment encoded', async () => {
-    expect(await send('delete-branch')).toMatchObject({
-      method: 'DELETE',
-      url: 'https://api.github.com/repos/fork/r/git/refs/heads/feat/a%20b%231',
-      body: undefined,
+  /** Deletes the branch while it points at `oid` in its repository (null: it is gone). */
+  async function deleteBranch(oid: string | null) {
+    const node = { ref: oid === null ? null : { target: { oid } } };
+    const fetchMock = vi.fn((_url: string, init: RequestInit) =>
+      Promise.resolve(
+        json({ data: String(init.body).includes('updateRefs') ? { updateRefs: {} } : { node } })
+      )
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const outcome = await runPullRequestAction(
+      writeRef,
+      writePull,
+      'delete-branch',
+      'squash',
+      'tok'
+    ).catch((error: unknown) => error);
+    return { outcome, sent: sentRequests(fetchMock) };
+  }
+
+  it('deletes the branch in the head repository only where the pull request left it', async () => {
+    const { outcome, sent } = await deleteBranch('head7');
+    expect(outcome).toBeUndefined();
+    // Never REST's unconditional DELETE of the ref: GitHub checks the commit as it deletes.
+    expect(sent.map(({ method, url }) => `${method} ${url}`)).toEqual([
+      'POST https://api.github.com/graphql',
+      'POST https://api.github.com/graphql',
+    ]);
+    expect(sent[0]!.body).toMatchObject({
+      variables: { repositoryId: 'R_fork', ref: 'refs/heads/feat/a b#1' },
     });
+    expect((sent[1]!.body as { query: string }).query).toContain('updateRefs');
+    expect(sent[1]!.body).toMatchObject({
+      variables: {
+        input: {
+          repositoryId: 'R_fork',
+          refUpdates: [
+            {
+              name: 'refs/heads/feat/a b#1',
+              beforeOid: 'head7',
+              afterOid: '0000000000000000000000000000000000000000',
+            },
+          ],
+        },
+      },
+    });
+    expect(sent.every(({ authorization }) => authorization === 'Bearer tok')).toBe(true);
   });
 
-  it('asks GitHub nothing to delete the branch of a deleted fork', async () => {
-    const fetchMock = vi.fn();
-    vi.stubGlobal('fetch', fetchMock);
-    const deletedFork = { ...writePull, headRepo: null };
-    await expect(
-      runPullRequestAction(writeRef, deletedFork, 'delete-branch', 'squash', 'tok')
-    ).rejects.toMatchObject({ kind: 'refused', status: 0 });
-    expect(fetchMock).not.toHaveBeenCalled();
+  it('counts a branch already gone as deleted, and deletes nothing', async () => {
+    const { outcome, sent } = await deleteBranch(null);
+    expect(outcome).toBeUndefined();
+    expect(sent).toHaveLength(1);
+    expect((sent[0]!.body as { query: string }).query).not.toContain('updateRefs');
+  });
+
+  it('does not delete a branch that got commits since the pull request', async () => {
+    const { outcome, sent } = await deleteBranch('newer');
+    expect(outcome).toMatchObject({ kind: 'branchMoved' });
+    expect(sent).toHaveLength(1);
+    expect((sent[0]!.body as { query: string }).query).not.toContain('updateRefs');
   });
 
   it.each([
@@ -1050,6 +1098,41 @@ describe('runPullRequestAction', () => {
     ).rejects.toBeInstanceOf(GitHubWriteError);
     vi.stubGlobal('fetch', () => Promise.resolve(json(apiPull)));
     await expect(fetchPullRequest(writeRef, 'tok')).resolves.toMatchObject({ title: 'T' });
+  });
+});
+
+describe('fetchHeadBranchSha', () => {
+  const read = (data: unknown) => {
+    const fetchMock = vi.fn(() => Promise.resolve(json({ data })));
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  };
+
+  it("reads where the branch points in the pull request's head repository", async () => {
+    const fetchMock = read({ node: { ref: { target: { oid: 'abc' } } } });
+    expect(await fetchHeadBranchSha(writePull, 'tok')).toBe('abc');
+    expect(sentRequests(fetchMock)).toMatchObject([
+      {
+        method: 'POST',
+        url: 'https://api.github.com/graphql',
+        body: { variables: { repositoryId: 'R_fork', ref: 'refs/heads/feat/a b#1' } },
+        authorization: 'Bearer tok',
+      },
+    ]);
+  });
+
+  it('is null for a branch that is gone', async () => {
+    read({ node: { ref: null } });
+    expect(await fetchHeadBranchSha(writePull, 'tok')).toBeNull();
+  });
+
+  it.each([
+    ['no repository', { node: null }],
+    ['a node that is no repository', { node: {} }],
+    ['a branch without a commit', { node: { ref: { target: null } } }],
+  ])('fails on %s, which says nothing about the branch', async (_name, data) => {
+    read(data);
+    await expect(fetchHeadBranchSha(writePull, 'tok')).rejects.toMatchObject({ kind: 'failed' });
   });
 });
 

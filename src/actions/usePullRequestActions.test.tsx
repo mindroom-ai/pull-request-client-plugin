@@ -29,6 +29,7 @@ const pull: PullRequest = {
   autoMerge: null,
   headSha: 'head7',
   headRepo: 'o/r',
+  headRepoId: 'R_or',
   baseRepo: 'o/r',
   mergedAt: null,
   closedAt: null,

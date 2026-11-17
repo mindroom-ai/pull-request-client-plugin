@@ -67,7 +67,7 @@ One `sendJson(method, path, body, token)` beside `getJson` in `github.ts` (same 
 | Enable / Disable auto-merge | GraphQL `enablePullRequestAutoMerge` (`mergeMethod`, `expectedHeadOid`) / `disablePullRequestAutoMerge` |
 | Close / Reopen | REST `PATCH /repos/{o}/{r}/pulls/{n}` `{state}` |
 | Update branch | merge: REST `PUT .../pulls/{n}/update-branch` `{expected_head_sha}`; rebase: GraphQL `updatePullRequestBranch` `updateMethod: REBASE`, `expectedHeadOid` |
-| Delete branch | REST `DELETE /repos/{headRepo}/git/refs/heads/{headRef}`; offered only when merged or closed, the head repo is the base repo, and the head ref is not the default branch |
+| Delete branch | GraphQL, as T3: read `node(id: headRepoId) { ... on Repository { ref(qualifiedName: "refs/heads/{headRef}") { target { oid } } } }` (gone: done; another commit than `headSha`: refused here), then `updateRefs(input: {repositoryId: headRepoId, refUpdates: [{name, beforeOid: headSha, afterOid: 40 zeros}]})`, so GitHub deletes the branch only where the pull request left it. Never REST's unconditional `DELETE .../git/refs/heads/{headRef}`. Offered only when merged or closed, the head repo is the base repo, the head ref is not the default branch, and the same read (a query under the pull request's key) says the branch still points at `headSha` |
 
 After any success: invalidate the PR's query prefix (`['pull-requests', owner, repo, number]`), so the header, checks and timeline refetch. One action runs per PR at a time (a pending set keyed by the PR, as T3's runner); every control is disabled while one is pending.
 

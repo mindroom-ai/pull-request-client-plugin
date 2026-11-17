@@ -192,6 +192,7 @@ const ALL_PULLS: Pull[] = Object.values(PULLS);
 const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
 const headSha = (pull: Pull) =>
   `${pull.repo === 'api' ? 'a' : 'b'}${String(pull.number).padStart(39, '0')}`;
+const repositoryId = (pull: Pull) => `R_${pull.repo}`;
 const gitHubUser = (login: string) => ({
   login,
   avatar_url: null,
@@ -200,7 +201,7 @@ const gitHubUser = (login: string) => ({
 });
 
 const apiPull = (pull: Pull) => {
-  const repo = { full_name: `acme/${pull.repo}` };
+  const repo = { full_name: `acme/${pull.repo}`, node_id: repositoryId(pull) };
   const done = pull.state === 'merged' || pull.state === 'closed';
   return {
     number: pull.number,
@@ -356,11 +357,13 @@ type Write = { method: string; pathname: string; body: unknown };
 
 /**
  * Answers GitHub's API in the page; the returned list collects the paths it had no answer for.
- * It answers the repository's GraphQL query and the writes, which `writes` collects: a merge,
- * after which the pull request reads as merged; a close or a reopen, after which it reads so; an
- * update of the branch, after which it is behind no more; and a deletion of a branch. A write in
- * `refuse` (by method and path) GitHub refuses with 405 and its message; a pull request in
- * `behind` (by path) starts that many commits behind its base.
+ * It answers the repository's GraphQL query, GraphQL's read of where a branch points (at its
+ * pull request's head, until the branch is deleted) and the writes, which `writes` collects: a
+ * merge, after which the pull request reads as merged; a close or a reopen, after which it reads
+ * so; an update of the branch, after which it is behind no more; and GraphQL's deletion of a
+ * branch, after which it is gone. A write in `refuse` (by method and path) GitHub refuses with
+ * 405 and its message; a pull request in `behind` (by path) starts that many commits behind its
+ * base.
  */
 const stubGitHub = async (
   page: Page,
@@ -373,6 +376,8 @@ const stubGitHub = async (
   const unanswered: string[] = [];
   const moved = new Map<string, Pull['state']>();
   const behindNow = { ...behind };
+  // The branches deleted in the page, as `refs/heads/<name>` after the repository's id.
+  const deleted = new Set<string>();
   await page.route('https://api.github.com/**', async (route) => {
     const request = route.request();
     if (request.method() === 'OPTIONS') {
@@ -387,14 +392,39 @@ const stubGitHub = async (
         await route.fulfill({ headers: CORS, json: { data: { repository: REPOSITORY } } });
         return;
       }
+      const graphql = pathname === '/graphql' && typeof query === 'string' ? query : '';
+      const variables = (body as { variables?: Record<string, unknown> } | null)?.variables ?? {};
+      if (graphql.includes('ref(qualifiedName')) {
+        const branch = ALL_PULLS.find(
+          (candidate) =>
+            repositoryId(candidate) === variables.repositoryId &&
+            `refs/heads/${candidate.branch}` === variables.ref
+        );
+        const gone =
+          !branch || deleted.has(`${String(variables.repositoryId)} ${String(variables.ref)}`);
+        const ref = gone ? null : { target: { oid: headSha(branch) } };
+        await route.fulfill({ headers: CORS, json: { data: { node: { ref } } } });
+        return;
+      }
+      if (graphql.includes('updateRefs')) {
+        writes.push({ method: request.method(), pathname, body });
+        const { repositoryId: repository, refUpdates } = variables.input as {
+          repositoryId: string;
+          refUpdates: { name: string }[];
+        };
+        refUpdates.forEach(({ name }) => deleted.add(`${repository} ${name}`));
+        await route.fulfill({
+          headers: CORS,
+          json: { data: { updateRefs: { clientMutationId: null } } },
+        });
+        return;
+      }
       const write = `${request.method()} ${pathname}`;
       const [, pull, part] =
         /^(\/repos\/acme\/[^/]+\/pulls\/\d+)(?:\/(merge|update-branch))?$/.exec(pathname) ?? [];
-      const branch = /^\/repos\/acme\/[^/]+\/git\/refs\/heads\/.+$/.test(pathname);
       const known =
         (request.method() === 'PUT' && pull && part) ||
-        (request.method() === 'PATCH' && pull && !part) ||
-        (request.method() === 'DELETE' && branch);
+        (request.method() === 'PATCH' && pull && !part);
       if (known) {
         writes.push({ method: request.method(), pathname, body });
         if (write in refuse) {
@@ -409,9 +439,7 @@ const stubGitHub = async (
         }
         // What GitHub answers; the panel reads only the status.
         await route.fulfill(
-          branch
-            ? { status: 204, headers: CORS }
-            : part === 'update-branch'
+          part === 'update-branch'
             ? { status: 202, headers: CORS, json: { message: 'Updating pull request branch.' } }
             : part === 'merge'
             ? { headers: CORS, json: { merged: true, message: 'Merged' } }
@@ -1249,6 +1277,32 @@ test("a viewer who can write merges the panel's pull request with two clicks", a
   await dialog.getByRole('button', { name: 'Cancel' }).click();
   await expect(dialog).toHaveCount(0);
   expect(writes.map(({ method }) => method)).toEqual(['PUT']);
+
+  // The dialog's own button deletes the branch, only where the pull request left it, and the
+  // menu offers the branch no more once it is gone.
+  await panel(page).getByRole('button', { name: 'More actions' }).click();
+  await menu.getByRole('menuitem', { name: 'Delete branch' }).click();
+  await dialog.getByRole('button', { name: 'Delete branch' }).click();
+  await expect(panel(page).getByText('Branch deleted')).toBeVisible({ timeout: 30_000 });
+  expect(writes.slice(1).map(({ method, pathname }) => `${method} ${pathname}`)).toEqual([
+    'POST /graphql',
+  ]);
+  expect((writes[1].body as { variables: unknown }).variables).toEqual({
+    input: {
+      repositoryId: repositoryId(tokenEndpoint),
+      refUpdates: [
+        {
+          name: `refs/heads/${tokenEndpoint.branch}`,
+          beforeOid: headSha(tokenEndpoint),
+          afterOid: '0'.repeat(40),
+        },
+      ],
+    },
+  });
+  await panel(page).getByRole('button', { name: 'More actions' }).click();
+  await expect(menu.getByRole('menuitem', { name: 'Refresh' })).toBeVisible();
+  await expect(menu.getByRole('menuitem', { name: 'Delete branch' })).toHaveCount(0);
+  await page.keyboard.press('Escape');
   expect(unanswered).toEqual([]);
   expect(warnings).toEqual([]);
 });

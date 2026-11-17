@@ -34,6 +34,7 @@ const open: PullRequest = {
   autoMerge: null,
   headSha: 'head7',
   headRepo: 'o/r',
+  headRepoId: 'R_or',
   baseRepo: 'o/r',
   mergedAt: null,
   closedAt: null,
@@ -55,6 +56,8 @@ const blocked: PullRequest = { ...open, mergeableState: 'blocked' };
 
 let repository: Record<string, unknown>;
 let checkRuns: Record<string, unknown>[];
+// The commit the pull request's branch points at on GitHub; null once the branch is gone.
+let headBranch: string | null;
 
 const respond = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -78,8 +81,13 @@ const click = (element: HTMLElement) => act(async () => element.click());
 const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>();
 const isRepositoryQuery = (url: string, init?: RequestInit) =>
   url === GRAPHQL && String(init?.body).includes('repository(');
+const isHeadBranchQuery = (url: string, init?: RequestInit) =>
+  url === GRAPHQL && String(init?.body).includes('ref(qualifiedName');
 const isRead = (url: string, init?: RequestInit) =>
-  isRepositoryQuery(url, init) || init?.method === undefined || init.method === 'GET';
+  isRepositoryQuery(url, init) ||
+  isHeadBranchQuery(url, init) ||
+  init?.method === undefined ||
+  init.method === 'GET';
 const writes = () =>
   fetchMock.mock.calls
     .filter(([url, init]) => !isRead(url, init))
@@ -146,10 +154,15 @@ beforeEach(() => {
     defaultBranchRef: { name: 'main' },
   };
   checkRuns = [];
+  headBranch = 'head7';
   writeAnswer = async () => respond({ merged: true });
   fetchMock.mockReset();
   fetchMock.mockImplementation(async (url, init) => {
     if (isRepositoryQuery(url, init)) return respond({ data: { repository } });
+    if (isHeadBranchQuery(url, init)) {
+      const node = { ref: headBranch === null ? null : { target: { oid: headBranch } } };
+      return respond({ data: { node } });
+    }
     if (url.includes('/check-runs')) return respond({ check_runs: checkRuns });
     if (url.includes('/status')) return respond({ statuses: [] });
     return writeAnswer();
@@ -342,7 +355,11 @@ describe('HeaderActions', () => {
   });
 
   it('asks in a dialog before it deletes the branch of a merged pull request', async () => {
-    writeAnswer = async () => new Response(null, { status: 204 });
+    // GitHub deletes the branch, after which it reads as gone.
+    writeAnswer = async () => {
+      headBranch = null;
+      return respond({ data: { updateRefs: {} } });
+    };
     const view = await show(merged);
     await openMenu(view);
     await click(row(view, 'Delete branch'));
@@ -362,8 +379,58 @@ describe('HeaderActions', () => {
       .querySelector<HTMLButtonElement>('button:last-of-type')!;
     expect(confirm.textContent).toBe('Delete branch');
     await click(confirm);
-    expect(writes()).toEqual(['DELETE https://api.github.com/repos/o/r/git/refs/heads/feature']);
     await waitUntil(() => expect(view.getByRole('status').textContent).toContain('Branch deleted'));
+    // Only where the pull request left it: GitHub refuses if the branch moved since.
+    expect(writes()).toEqual([`POST ${GRAPHQL}`]);
+    const [, init] = fetchMock.mock.calls.find(([, call]) =>
+      String(call?.body).includes('updateRefs')
+    )!;
+    expect(JSON.parse(String(init?.body)).variables.input).toEqual({
+      repositoryId: 'R_or',
+      refUpdates: [
+        {
+          name: 'refs/heads/feature',
+          beforeOid: 'head7',
+          afterOid: '0000000000000000000000000000000000000000',
+        },
+      ],
+    });
+    // The branch is gone, so the menu offers it no more.
+    await openMenu(view);
+    expect(view.queryByText('Delete branch')).toBeNull();
+  });
+
+  it.each([
+    ['is gone', null],
+    ['got commits since the pull request', 'newer'],
+  ])('offers no Delete branch for a branch that %s', async (_name, sha) => {
+    headBranch = sha;
+    const view = await show(merged);
+    await waitUntil(() =>
+      expect(fetchMock.mock.calls.some(([url, init]) => isHeadBranchQuery(url, init))).toBe(true)
+    );
+    await openMenu(view);
+    expect(view.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Refresh']);
+  });
+
+  it('leaves a branch that got commits after the menu was drawn, and says so', async () => {
+    const view = await show(merged);
+    await openMenu(view);
+    await click(row(view, 'Delete branch'));
+    headBranch = 'newer';
+    await click(view.getByRole('dialog').querySelector<HTMLButtonElement>('button:last-of-type')!);
+    await waitUntil(() =>
+      expect(view.getByRole('status').textContent).toContain(
+        'Could not delete this branch The branch has new commits since this pull request, so it was not deleted.'
+      )
+    );
+    expect(writes()).toEqual([]);
+  });
+
+  it('asks GitHub nothing about the branch of an open pull request', async () => {
+    const view = await show();
+    await openMenu(view);
+    expect(fetchMock.mock.calls.filter(([url, init]) => isHeadBranchQuery(url, init))).toEqual([]);
   });
 
   it('draws no Merge button on a merged pull request', async () => {

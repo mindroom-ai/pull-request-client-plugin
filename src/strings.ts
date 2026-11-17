@@ -123,6 +123,7 @@ export const en = {
       noAccess:
         'GitHub refused it. The saved token may not have write access to this repository (Pull requests and Contents: Read and write).',
       badToken: 'GitHub refused the saved token.',
+      branchMoved: 'The branch has new commits since this pull request, so it was not deleted.',
       failed: 'Could not reach GitHub.',
     },
     dismiss: 'Dismiss',

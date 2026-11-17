@@ -32,9 +32,9 @@ import {
   type PullRequestAction,
   type PullRequestRef,
 } from '../github';
-import { useChecks } from '../queries';
+import { useChecks, useHeadBranchSha } from '../queries';
 import { pluginRootStyle } from '../theme';
-import { menuActions, primaryControl } from './actions.logic';
+import { mayDeleteBranch, menuActions, primaryControl } from './actions.logic';
 import { useInlineConfirm } from './useInlineConfirm';
 import type { ActionResult, usePullRequestActions } from './usePullRequestActions';
 
@@ -80,6 +80,13 @@ export function HeaderActions({
   const canWrite = repo?.canWrite === true;
   // The same query as the checks line, so it costs no request of its own where that one shows.
   const checks = useChecks(pullRequestRef, pr.headSha, canWrite);
+  // Asked only for a branch that could be deleted at all; the menu offers it while it still
+  // ends where the pull request does, so not once it is deleted.
+  const headBranch = useHeadBranchSha(
+    pullRequestRef,
+    pr,
+    repo !== undefined && mayDeleteBranch(pr, repo)
+  );
   const url = pullRequestUrl(pullRequestRef);
   const confirm = useInlineConfirm(url);
   const queryClient = useQueryClient();
@@ -106,7 +113,7 @@ export function HeaderActions({
     repo,
     checks.data ? checksState(checks.data.items) : undefined
   );
-  const listed = menuActions(pr, repo, primary);
+  const listed = menuActions(pr, repo, primary, headBranch.data);
   const showsMethods =
     pr.state === 'open' && !pr.draft && primary !== 'conflicts' && repo.mergeMethods.length > 1;
   // The action the primary control starts, which shows that it runs itself.

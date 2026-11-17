@@ -5,6 +5,7 @@ import {
   fetchCommitFiles,
   fetchCommits,
   fetchConversationComments,
+  fetchHeadBranchSha,
   fetchPullRequest,
   fetchPullRequestFiles,
   fetchReviewComments,
@@ -12,6 +13,7 @@ import {
   fetchReviews,
   GitHubError,
   GitHubWriteError,
+  type PullRequest,
   type PullRequestRef,
 } from './github';
 import { useGitHubToken, useStoredToken } from './token';
@@ -87,6 +89,28 @@ export function useRepository(ref: PullRequestRef | undefined) {
     staleTime: 600_000,
     refetchOnMount: false,
     retryOnMount: false,
+    retry,
+  });
+}
+
+/**
+ * Where the pull request's branch points on GitHub now, null once it is gone: what tells whether
+ * the branch can still be deleted. GraphQL needs a token, so without one nothing is asked. Keyed
+ * under the pull request, so the refetch after an action (a deletion among them) asks again.
+ */
+export function useHeadBranchSha(ref: PullRequestRef, pr: PullRequest, enabled: boolean) {
+  const { token } = useGitHubToken();
+  const storedToken = useStoredToken();
+  return useQuery({
+    queryKey: [...keyOf(ref, true), 'head-branch', pr.headRepoId, pr.headRef] as const,
+    queryFn: ({ signal }) => {
+      const stored = storedToken();
+      // Forgotten after the render that enabled the query; no request goes without one.
+      if (stored === undefined) throw new GitHubWriteError('badToken', 0);
+      return fetchHeadBranchSha(pr, stored, signal);
+    },
+    enabled: enabled && token !== undefined,
+    staleTime: STALE_TIME,
     retry,
   });
 }

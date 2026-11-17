@@ -107,6 +107,7 @@ const pullRequest: PullRequest = {
   autoMerge: null,
   headSha: 'head',
   headRepo: 'a/b',
+  headRepoId: 'R_ab',
   baseRepo: 'a/b',
   mergedAt: null,
   closedAt: null,

@@ -53,8 +53,11 @@ export function resolveMergeMethod(
   return allowed[0] ?? null;
 }
 
-/** Only a branch of this repository, once its pull request is done, and not the default one. */
-export function canDeleteBranch(pr: PullRequest, repo: Repository): boolean {
+/**
+ * Only a branch of this repository, once its pull request is done, and not the default one.
+ * Where such a branch points now is worth asking GitHub; for any other nothing is asked.
+ */
+export function mayDeleteBranch(pr: PullRequest, repo: Repository): boolean {
   return (
     pr.state !== 'open' &&
     repo.canWrite &&
@@ -64,11 +67,25 @@ export function canDeleteBranch(pr: PullRequest, repo: Repository): boolean {
   );
 }
 
+/**
+ * And only while the branch still ends at the pull request's last commit. `headBranchSha` is
+ * where it points on GitHub now: null once it is gone (deleted here or elsewhere), another
+ * commit when it was pushed to since or made anew, undefined until GitHub told.
+ */
+export function canDeleteBranch(
+  pr: PullRequest,
+  repo: Repository,
+  headBranchSha: string | null | undefined
+): boolean {
+  return mayDeleteBranch(pr, repo) && pr.headSha !== '' && headBranchSha === pr.headSha;
+}
+
 /** The menu's actions, in its order; what the primary control already offers is left out. */
 export function menuActions(
   pr: PullRequest,
   repo: Repository,
-  primary: PrimaryControl
+  primary: PrimaryControl,
+  headBranchSha: string | null | undefined
 ): PullRequestAction[] {
   if (!repo.canWrite) return [];
   const open = pr.state === 'open';
@@ -87,6 +104,6 @@ export function menuActions(
   if (open && !pr.draft) actions.push('draft');
   if (open) actions.push('close');
   if (pr.state === 'closed') actions.push('reopen');
-  if (canDeleteBranch(pr, repo)) actions.push('delete-branch');
+  if (canDeleteBranch(pr, repo, headBranchSha)) actions.push('delete-branch');
   return actions;
 }
