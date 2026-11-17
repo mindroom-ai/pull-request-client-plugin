@@ -32,7 +32,7 @@ import {
   type PullRequestAction,
   type PullRequestRef,
 } from '../github';
-import { useChecks, useHeadBranchSha } from '../queries';
+import { pullRequestKey, repositoryKey, useChecks, useHeadBranchSha } from '../queries';
 import { pluginRootStyle } from '../theme';
 import { mayDeleteBranch, menuActions, primaryControl } from './actions.logic';
 import { useInlineConfirm } from './useInlineConfirm';
@@ -153,9 +153,8 @@ export function HeaderActions({
     run();
   };
   const refresh = () => {
-    const { owner, repo: name, number } = pullRequestRef;
-    void queryClient.invalidateQueries({ queryKey: ['pull-requests', 'pr', owner, name, number] });
-    void queryClient.invalidateQueries({ queryKey: ['pull-requests', 'repo', owner, name] });
+    void queryClient.invalidateQueries({ queryKey: pullRequestKey(pullRequestRef) });
+    void queryClient.invalidateQueries({ queryKey: repositoryKey(pullRequestRef) });
   };
 
   const primaryLabel = (action: PullRequestAction, idle: string) => {

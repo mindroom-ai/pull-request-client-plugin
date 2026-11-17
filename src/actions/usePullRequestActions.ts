@@ -13,7 +13,7 @@ import {
   type PullRequestRef,
   type Repository,
 } from '../github';
-import { useRepository } from '../queries';
+import { pullRequestKey, useRepository } from '../queries';
 import { useGitHubToken, useStoredToken } from '../token';
 import { resolveMergeMethod } from './actions.logic';
 
@@ -55,7 +55,7 @@ export function resetPullRequestActions() {
 }
 
 // GitHub's owners and repositories ignore case, so `Acme/Repo#7` and `acme/repo#7` are one pull
-// request, with one lock.
+// request, with one lock, as they have one set of queries.
 const actionKey = (ref: PullRequestRef) =>
   `${ref.owner.toLowerCase()}/${ref.repo.toLowerCase()}#${ref.number}`;
 
@@ -127,9 +127,7 @@ export function usePullRequestActions(
         // moved, and a failed answer may come after GitHub took the write. The action runs on
         // until that state is read: unlocked before, the controls would offer the pull request
         // as it was (a second merge of a merged one, which GitHub then refuses).
-        await queryClient.invalidateQueries({
-          queryKey: ['pull-requests', 'pr', ref.owner, ref.repo, ref.number],
-        });
+        await queryClient.invalidateQueries({ queryKey: pullRequestKey(ref) });
       } finally {
         // The outcome stays with its own pull request, to show when that one is shown again.
         setEntry(key, { pending: null, result });

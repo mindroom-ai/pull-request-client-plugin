@@ -27,10 +27,23 @@ const retry = (count: number, error: Error) =>
 // Two minutes keeps a panel's worth of requests inside the anonymous rate limit.
 const STALE_TIME = 120_000;
 
+// GitHub's owners and repositories ignore case, so the keys do as well: a link written
+// `Acme/Repo` and one written `acme/repo` share what was read, and the refetch after a write
+// through one reaches the other. Only the keys: what shows keeps the case it was written in.
+const lower = (name: string | undefined) => name?.toLowerCase();
+
+/** What the key of every query of one pull request starts with, to invalidate them together. */
+export const pullRequestKey = (ref: PullRequestRef | undefined) =>
+  ['pull-requests', 'pr', lower(ref?.owner), lower(ref?.repo), ref?.number] as const;
+
+/** The key of what `useRepository` reads of a pull request's repository. */
+export const repositoryKey = (ref: PullRequestRef | undefined) =>
+  ['pull-requests', 'repo', lower(ref?.owner), lower(ref?.repo)] as const;
+
 // The token's value never goes in a key (keys show in devtools and error reports); whether there is
 // one does, so a result for a public pull request is not reused for the private view of it.
 const keyOf = (ref: PullRequestRef | undefined, tokenSet: boolean) =>
-  ['pull-requests', 'pr', ref?.owner, ref?.repo, ref?.number, tokenSet] as const;
+  [...pullRequestKey(ref), tokenSet] as const;
 
 /** What a caller can change of a query's refetching: the chips leave out the refetch on window focus,
  * a thread's details also the one on mount, for an answer and for a refusal alike. */
@@ -79,7 +92,7 @@ export function useRepository(ref: PullRequestRef | undefined) {
   const { token } = useGitHubToken();
   const storedToken = useStoredToken();
   return useQuery({
-    queryKey: ['pull-requests', 'repo', ref?.owner, ref?.repo] as const,
+    queryKey: repositoryKey(ref),
     queryFn: ({ signal }) => {
       const { owner, repo } = ref as PullRequestRef;
       const stored = storedToken();

@@ -97,9 +97,10 @@ const writes = () =>
   fetchMock.mock.calls
     .filter(([url, init]) => !isRead(url, init))
     .map(([url, init]) => `${init?.method} ${url}`);
-// The times the pull request itself was read.
-const pullReads = () =>
-  fetchMock.mock.calls.filter(([url, init]) => url === PULL_URL && !init?.method);
+// The times the pull request itself was read, under any case of its owner and repository.
+const isPullRead = (url: string, init?: RequestInit) =>
+  url.toLowerCase() === PULL_URL && !init?.method;
+const pullReads = () => fetchMock.mock.calls.filter(([url, init]) => isPullRead(url, init));
 
 // The writes a test holds until it answers them; every one is answered after the test, so no
 // pull request stays locked for the next.
@@ -192,7 +193,7 @@ beforeEach(() => {
   fetchMock.mockReset();
   fetchMock.mockImplementation(async (url, init) => {
     if (isRepositoryQuery(url, init)) return respond({ data: { repository } });
-    return url === PULL_URL && !init?.method ? pullAnswer() : writeAnswer();
+    return isPullRead(url, init) ? pullAnswer() : writeAnswer();
   });
   vi.stubGlobal('fetch', fetchMock);
 });
@@ -353,6 +354,38 @@ describe('usePullRequestActions', () => {
     expect(shown?.state).toBe('merged');
     expect(actions.result).toEqual({ action: 'merge', outcome: 'done' });
     expect(writes()).toEqual([`PUT ${PULL_URL}/merge`]);
+  });
+
+  it('refreshes a panel that shows the pull request under another case of its owner and repository', async () => {
+    // A link written `O/R`: the same pull request to GitHub.
+    const upper: PullRequestRef = { owner: 'O', repo: 'R', number: 7 };
+    let other: PullRequest | undefined;
+    function Other() {
+      other = usePullRequest(upper).data;
+      return null;
+    }
+    await renderPluginComponent(
+      <QueryClientProvider client={client}>
+        <Other />
+        <Probe pullRequestRef={refA} pullRequest={pull} />
+      </QueryClientProvider>,
+      { id: 'pull-requests', plugin }
+    );
+    await waitUntil(() => expect(other?.state).toBe('open'));
+    await loaded();
+    pullAnswer = async () =>
+      respond(apiPull({ state: 'closed', merged_at: '2026-11-16T00:00:00Z' }));
+    act(() => actions.perform('merge'));
+    await waitUntil(() => expect(actions.result).toEqual({ action: 'merge', outcome: 'done' }));
+    // Not left on the open pull request, with its Merge.
+    await waitUntil(() => expect(other?.state).toBe('merged'));
+  });
+
+  it('asks for the repository once, whatever the case of its owner and name', async () => {
+    await showPair([refA, { owner: 'O', repo: 'R', number: 7 }]);
+    await waitUntil(() => expect(both[0]!.repo).toBeDefined());
+    await waitUntil(() => expect(both[1]!.repo).toBeDefined());
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('unlocks when the read after the write fails', async () => {
