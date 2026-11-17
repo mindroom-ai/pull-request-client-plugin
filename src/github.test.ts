@@ -1,7 +1,9 @@
 import { parsePatchFiles } from '@pierre/diffs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { MindroomServerError } from '@mindroom/client-sdk/server';
 import {
   GitHubError,
+  type GitHubViaServer,
   GitHubWriteError,
   fetchBehindBy,
   fetchChecks,
@@ -1393,5 +1395,137 @@ describe('the write error kinds', () => {
       expect(error.message).not.toContain('secret');
       expect(error.detail ?? '').not.toContain('secret');
     }
+  });
+});
+
+describe('through MindRoom', () => {
+  type Sent = { method: string; path: string; body?: unknown; accept?: string };
+  /** A stand-in MindRoom server that answers each GitHub request with `answer(sent)`. */
+  function viaServer(
+    answer: (sent: Sent) => unknown,
+    origin = 'https://mindroom.example.org'
+  ): GitHubViaServer & { sent: Sent[]; paths: string[]; disconnected: ReturnType<typeof vi.fn> } {
+    const sent: Sent[] = [];
+    const paths: string[] = [];
+    const request = (path: string, init?: RequestInit) => {
+      paths.push(path);
+      const payload = JSON.parse(String(init?.body)) as Sent;
+      sent.push(payload);
+      try {
+        return Promise.resolve(answer(payload));
+      } catch (error) {
+        return Promise.reject(error);
+      }
+    };
+    return {
+      server: { origin, request: request as GitHubViaServer['server']['request'] },
+      disconnected: vi.fn(),
+      sent,
+      paths,
+    };
+  }
+  const answered = (body: unknown, status = 200, headers: Record<string, string> = {}) => ({
+    status,
+    body,
+    headers,
+  });
+
+  it('reads through the server, never from GitHub itself', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const via = viaServer(() => answered(apiPull));
+    expect((await fetchPullRequest(ref, via)).title).toBe('T');
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(via.paths).toEqual(['/api/github/request']);
+    expect(via.sent).toEqual([
+      {
+        method: 'GET',
+        path: '/repos/a/b/pulls/1',
+        accept: 'application/vnd.github.full+json',
+      },
+    ]);
+  });
+
+  it("maps GitHub's refusals as for a token", async () => {
+    const notFound = viaServer(() => answered({ message: 'Not Found' }, 404));
+    await expect(fetchPullRequest(ref, notFound)).rejects.toEqual(new GitHubError('notFound', 404));
+    const broken = viaServer(() => answered('oops', 502));
+    await expect(fetchPullRequest(ref, broken)).rejects.toEqual(new GitHubError('failed', 502));
+  });
+
+  it("holds the server's reads to its own rate limit", async () => {
+    vi.useFakeTimers({ now: Date.parse('2026-01-01T00:00:00Z'), toFake: ['Date'] });
+    try {
+      const reset = String(Date.now() / 1000 + 600);
+      const headers = { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': reset };
+      const limited = viaServer(() => answered({ message: 'limit' }, 403, headers));
+      const LIMITED = new GitHubError('rateLimited', 403);
+      await expect(fetchPullRequest(ref, limited)).rejects.toEqual(LIMITED);
+      await expect(fetchPullRequest(ref, limited)).rejects.toEqual(LIMITED);
+      expect(limited.sent).toHaveLength(1);
+      // Another server, a token and no token are other budgets.
+      const other = viaServer(() => answered(apiPull), 'https://other.example.org');
+      expect((await fetchPullRequest(ref, other)).title).toBe('T');
+      vi.stubGlobal('fetch', () => Promise.resolve(json(apiPull)));
+      expect((await fetchPullRequest(ref, 'tok')).title).toBe('T');
+      expect((await fetchPullRequest(ref, undefined)).title).toBe('T');
+      await expect(fetchPullRequest(ref, limited)).rejects.toEqual(LIMITED);
+      expect(limited.sent).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('writes through the server, with the body and GitHub reason', async () => {
+    const via = viaServer(() => answered({ message: 'Base branch was modified' }, 405));
+    const error = await runPullRequestAction(writeRef, writePull, 'merge', 'squash', via).catch(
+      (e: unknown) => e
+    );
+    expect(error).toEqual(new GitHubWriteError('refused', 405, 'Base branch was modified'));
+    expect(via.sent).toEqual([
+      {
+        method: 'PUT',
+        path: '/repos/o/r/pulls/7/merge',
+        body: { merge_method: 'squash', sha: writePull.headSha },
+        accept: 'application/vnd.github+json',
+      },
+    ]);
+  });
+
+  it('takes a write GitHub answered without a body', async () => {
+    const via = viaServer(() => answered(null, 204));
+    expect(await runPullRequestAction(writeRef, writePull, 'close', 'squash', via)).toBe('done');
+  });
+
+  it('asks GraphQL through the server', async () => {
+    const via = viaServer(() => answered({ data: { repository: apiRepository } }));
+    expect((await fetchRepository('o', 'r', via)).canWrite).toBe(true);
+    expect(via.sent[0]).toMatchObject({ method: 'POST', path: '/graphql' });
+    expect((via.sent[0]?.body as { variables: unknown }).variables).toEqual({
+      owner: 'o',
+      repo: 'r',
+    });
+  });
+
+  it('says the connection went away when the server answers it is not connected', async () => {
+    const gone = () => {
+      throw new MindroomServerError('Conflict', 409, { error: 'github_not_connected' });
+    };
+    const read = viaServer(gone);
+    await expect(fetchPullRequest(ref, read)).rejects.toEqual(new GitHubError('failed', 0));
+    expect(read.disconnected).toHaveBeenCalledTimes(1);
+    const write = viaServer(gone);
+    await expect(
+      runPullRequestAction(writeRef, writePull, 'close', 'squash', write)
+    ).rejects.toEqual(new GitHubWriteError('failed', 0));
+    expect(write.disconnected).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the connection on any other refusal of the server', async () => {
+    const via = viaServer(() => {
+      throw new MindroomServerError('Unavailable', 503, { error: 'github_connection_unavailable' });
+    });
+    await expect(fetchPullRequest(ref, via)).rejects.toEqual(new GitHubError('failed', 0));
+    expect(via.disconnected).not.toHaveBeenCalled();
   });
 });

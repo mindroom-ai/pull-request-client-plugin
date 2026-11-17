@@ -2,6 +2,7 @@
 // only network this plugin uses.
 // It must stay free of the diff libraries: this module loads with the plugin's entry, and
 // those load only with the side panel.
+import { MindroomServerError, type MindroomServer } from '@mindroom/client-sdk/server';
 import { imageSources, type ImageSources } from './images';
 
 export type PullRequestRef = { owner: string; repo: string; number: number };
@@ -110,13 +111,99 @@ function errorKind(response: Response, hasToken: boolean): GitHubErrorKind {
   return 'failed';
 }
 
-type RateLimit = { token: string | undefined; status: number; resetsAt: number };
+/**
+ * GitHub through the room's MindRoom server, as the person's GitHub account connected there: the
+ * server adds that account's token, which never reaches the browser.
+ */
+export type GitHubViaServer = {
+  server: Pick<MindroomServer, 'origin' | 'request'>;
+  /** Told when the server answers that the account is no longer connected. */
+  disconnected(): void;
+};
 
-// The rate limit GitHub last answered, for requests with a token and for those without (which it
-// counts against the address), while it lasts. Until it resets, a request gets the same answer
-// from here without asking, so the chips of a busy room do not keep spending what the panel needs.
-// A request with another token than the one limited starts afresh: a new token is a new budget.
-const rateLimits = new Map<boolean, RateLimit>();
+/** How a request reaches GitHub as someone: the token stored in the browser, or MindRoom. */
+export type GitHubAuth = string | GitHubViaServer;
+
+type RateLimit = { who: string; status: number; resetsAt: number };
+
+// The rate limit GitHub last answered, for requests with a token, for those through each MindRoom
+// server, and for those without either (which it counts against the address), while it lasts.
+// Until it resets, a request gets the same answer from here without asking, so the chips of a busy
+// room do not keep spending what the panel needs. A request with another token than the one
+// limited starts afresh: a new token is a new budget.
+const rateLimits = new Map<string, RateLimit>();
+
+/** The budget a request spends, and who within it: a token's own, or a server's. */
+function budgetOf(token: GitHubAuth | undefined): { budget: string; who: string } {
+  if (token === undefined) return { budget: 'anonymous', who: '' };
+  if (typeof token === 'string') return { budget: 'token', who: token };
+  return { budget: `server:${token.server.origin}`, who: token.server.origin };
+}
+
+type GitHubInit = {
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+  accept: string;
+  body?: unknown;
+  signal?: AbortSignal;
+  cache?: RequestCache;
+};
+
+/**
+ * One request to GitHub's API at `path`: to GitHub itself, with the token when one is given, or
+ * through the MindRoom server, whose answer of GitHub's status, body and rate limit headers is made
+ * a `Response` again, so that both are read the same. Rejects when no answer came, and tells the
+ * server's `disconnected` when it says the account is no longer connected.
+ */
+async function githubFetch(
+  token: GitHubAuth | undefined,
+  path: string,
+  { method, accept, body, signal, cache }: GitHubInit
+): Promise<Response> {
+  if (token === undefined || typeof token === 'string') {
+    const headers: Record<string, string> = {
+      Accept: accept,
+      'X-GitHub-Api-Version': '2022-11-28',
+    };
+    if (token) headers.Authorization = `Bearer ${token}`;
+    if (body !== undefined) headers['Content-Type'] = 'application/json';
+    const sent = body === undefined ? undefined : JSON.stringify(body);
+    return fetch(`${API}${path}`, { method, headers, body: sent, signal, cache });
+  }
+  const request = body === undefined ? { method, path, accept } : { method, path, body, accept };
+  let answer: Json | null;
+  try {
+    answer = record(
+      await token.server.request('/api/github/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+        signal,
+      })
+    );
+  } catch (error) {
+    if (
+      error instanceof MindroomServerError &&
+      error.status === 409 &&
+      record(error.body)?.error === 'github_not_connected'
+    ) {
+      token.disconnected();
+    }
+    throw error;
+  }
+  const status = answer?.status;
+  if (typeof status !== 'number' || status < 200 || status > 599) {
+    throw new TypeError('MindRoom gave no answer of GitHub');
+  }
+  const headers = new Headers();
+  for (const [name, value] of Object.entries(record(answer?.headers) ?? {})) {
+    if (typeof value === 'string') headers.set(name, value);
+  }
+  const content = answer?.body;
+  // Answers such as 204 and 304 take no body at all.
+  const empty = content === null || content === undefined || [204, 205, 304].includes(status);
+  const text = empty ? null : typeof content === 'string' ? content : JSON.stringify(content);
+  return new Response(text, { status, headers });
+}
 
 /** When GitHub's rate limit resets, in milliseconds since the epoch; in a minute when it says not. */
 function resetTime(response: Response): number {
@@ -127,28 +214,24 @@ function resetTime(response: Response): number {
 
 async function getJson(
   path: string,
-  token: string | undefined,
+  token: GitHubAuth | undefined,
   signal: AbortSignal | undefined,
   accept: string = JSON_MEDIA
 ): Promise<unknown> {
   const withToken = Boolean(token);
-  const limit = rateLimits.get(withToken);
-  if (limit && limit.token === token && Date.now() < limit.resetsAt) {
+  const { budget, who } = budgetOf(token);
+  const limit = rateLimits.get(budget);
+  if (limit && limit.who === who && Date.now() < limit.resetsAt) {
     throw new GitHubError('rateLimited', limit.status);
   }
-  rateLimits.delete(withToken);
-  const headers: Record<string, string> = {
-    Accept: accept,
-    'X-GitHub-Api-Version': '2022-11-28',
-  };
-  if (token) headers.Authorization = `Bearer ${token}`;
+  rateLimits.delete(budget);
   let response: Response;
   try {
     // GitHub allows a minute of caching, so a read just after a write could show the state from
     // before it. With a token the browser revalidates by ETag, and an authorized 304 costs no rate
     // limit. Without one a 304 still counts, and no write can have happened, so the cache serves.
     const cache: RequestCache = token ? 'no-cache' : 'default';
-    response = await fetch(`${API}${path}`, { headers, signal, cache });
+    response = await githubFetch(token, path, { method: 'GET', accept, signal, cache });
   } catch (error) {
     // An aborted request is the caller's own doing, not a failure of GitHub.
     if (signal?.aborted) throw error;
@@ -157,7 +240,7 @@ async function getJson(
   if (!response.ok) {
     const kind = errorKind(response, withToken);
     if (kind === 'rateLimited') {
-      rateLimits.set(withToken, { token, status: response.status, resetsAt: resetTime(response) });
+      rateLimits.set(budget, { who, status: response.status, resetsAt: resetTime(response) });
     }
     throw new GitHubError(kind, response.status);
   }
@@ -205,9 +288,11 @@ function writeErrorKind(response: Response): GitHubWriteErrorKind {
   return 'failed';
 }
 
-// GitHub's reasons do not echo the token, but a detail is shown, so one that did is dropped.
-function reason(value: unknown, token: string): string | null {
-  return typeof value === 'string' && !value.includes(token) ? value : null;
+// GitHub's reasons do not echo the token, but a detail is shown, so one that did is dropped. A
+// token MindRoom holds never reaches the browser.
+function reason(value: unknown, token: GitHubAuth): string | null {
+  if (typeof value !== 'string') return null;
+  return typeof token === 'string' && value.includes(token) ? null : value;
 }
 
 /**
@@ -218,23 +303,12 @@ async function sendRest(
   method: 'POST' | 'PUT' | 'PATCH' | 'DELETE',
   path: string,
   body: unknown,
-  token: string,
+  token: GitHubAuth,
   signal?: AbortSignal
 ): Promise<unknown> {
-  const headers: Record<string, string> = {
-    Accept: JSON_MEDIA,
-    'X-GitHub-Api-Version': '2022-11-28',
-    Authorization: `Bearer ${token}`,
-  };
-  if (body !== undefined) headers['Content-Type'] = 'application/json';
   let response: Response;
   try {
-    response = await fetch(`${API}${path}`, {
-      method,
-      headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
-      signal,
-    });
+    response = await githubFetch(token, path, { method, accept: JSON_MEDIA, body, signal });
   } catch (error) {
     if (signal?.aborted) throw error;
     throw new GitHubWriteError('failed', 0);
@@ -258,7 +332,7 @@ async function sendRest(
 async function graphql(
   query: string,
   variables: Json,
-  token: string,
+  token: GitHubAuth,
   signal?: AbortSignal
 ): Promise<Json | null> {
   const answer = record(await sendRest('POST', '/graphql', { query, variables }, token, signal));
@@ -325,7 +399,7 @@ function autoMerge(method: unknown): PullRequest['autoMerge'] {
 
 export async function fetchPullRequest(
   ref: PullRequestRef,
-  token: string | undefined,
+  token: GitHubAuth | undefined,
   signal?: AbortSignal
 ): Promise<PullRequest> {
   const raw = record(
@@ -400,7 +474,7 @@ function mapFiles(raw: unknown, url: string): PullRequestFile[] {
 
 export async function fetchPullRequestFiles(
   ref: PullRequestRef,
-  token: string | undefined,
+  token: GitHubAuth | undefined,
   signal?: AbortSignal
 ): Promise<PullRequestFile[]> {
   const url = `${pullRequestUrl(ref)}/files`;
@@ -451,7 +525,7 @@ export type Paged<T> = { items: T[]; truncated: boolean };
  */
 async function fetchPaged<T>(
   path: string,
-  token: string | undefined,
+  token: GitHubAuth | undefined,
   signal: AbortSignal | undefined,
   map: (item: Json) => T | null,
   accept?: string
@@ -544,7 +618,7 @@ function commitStatus(entry: Json): PullRequestCheck {
 // A 404 for the checks of a commit means GitHub has none to show, not that the request failed.
 async function getOrNothing(
   path: string,
-  token: string | undefined,
+  token: GitHubAuth | undefined,
   signal: AbortSignal | undefined
 ): Promise<Json> {
   try {
@@ -576,7 +650,7 @@ function checksOf(
 export async function fetchChecks(
   ref: PullRequestRef,
   headSha: string,
-  token: string | undefined,
+  token: GitHubAuth | undefined,
   signal?: AbortSignal
 ): Promise<Paged<PullRequestCheck>> {
   const base = `${repoPath(ref)}/commits/${encodeURIComponent(headSha)}`;
@@ -603,7 +677,7 @@ export async function fetchBehindBy(
   ref: PullRequestRef,
   baseRef: string,
   headSha: string,
-  token: string | undefined,
+  token: GitHubAuth | undefined,
   signal?: AbortSignal
 ): Promise<number> {
   const raw = record(
@@ -640,7 +714,7 @@ const REVIEW_STATES: ReadonlySet<string> = new Set([
 
 export function fetchReviews(
   ref: PullRequestRef,
-  token: string | undefined,
+  token: GitHubAuth | undefined,
   signal?: AbortSignal
 ): Promise<Paged<Review>> {
   return fetchPaged(
@@ -717,7 +791,7 @@ function comment(item: Json): Comment {
 
 export function fetchConversationComments(
   ref: PullRequestRef,
-  token: string | undefined,
+  token: GitHubAuth | undefined,
   signal?: AbortSignal
 ): Promise<Paged<Comment>> {
   return fetchPaged(
@@ -744,7 +818,7 @@ const numberOrNull = (value: unknown): number | null => (typeof value === 'numbe
 
 export function fetchReviewComments(
   ref: PullRequestRef,
-  token: string | undefined,
+  token: GitHubAuth | undefined,
   signal?: AbortSignal
 ): Promise<Paged<ReviewComment>> {
   return fetchPaged(
@@ -778,7 +852,7 @@ export type Commit = {
 
 export function fetchCommits(
   ref: PullRequestRef,
-  token: string | undefined,
+  token: GitHubAuth | undefined,
   signal?: AbortSignal
 ): Promise<Paged<Commit>> {
   return fetchPaged(`${repoPath(ref)}/pulls/${ref.number}/commits`, token, signal, (item) => {
@@ -798,7 +872,7 @@ export function fetchCommits(
 export async function fetchCommitFiles(
   ref: PullRequestRef,
   sha: string,
-  token: string | undefined,
+  token: GitHubAuth | undefined,
   signal?: AbortSignal
 ): Promise<PullRequestFile[]> {
   const raw = record(
@@ -836,7 +910,7 @@ const WRITE_PERMISSIONS: ReadonlySet<unknown> = new Set(['ADMIN', 'MAINTAIN', 'W
 export async function fetchRepository(
   owner: string,
   repo: string,
-  token: string,
+  token: GitHubAuth,
   signal?: AbortSignal
 ): Promise<Repository> {
   const data = await graphql(REPOSITORY_QUERY, { owner, repo }, token, signal);
@@ -936,7 +1010,7 @@ export type HeadBranch = {
 export async function fetchHeadBranch(
   ref: PullRequestRef,
   pr: PullRequest,
-  token: string,
+  token: GitHubAuth,
   signal?: AbortSignal
 ): Promise<HeadBranch> {
   const { owner, repo, number } = ref;
@@ -971,7 +1045,7 @@ const DELETE_BRANCH = `mutation($input: UpdateRefsInput!) {
  * A branch already gone is what was asked for. And never the branch of a pull request that is
  * open on GitHub now, though the panel read it as closed: deleting it would close it again.
  */
-async function deleteHeadBranch(ref: PullRequestRef, pr: PullRequest, token: string) {
+async function deleteHeadBranch(ref: PullRequestRef, pr: PullRequest, token: GitHubAuth) {
   const { sha, pullRequestOpen } = await fetchHeadBranch(ref, pr, token);
   if (pullRequestOpen) throw new GitHubWriteError('pullRequestOpen', 0);
   if (sha === null) return;
@@ -999,7 +1073,7 @@ export async function runPullRequestAction(
   pr: PullRequest,
   action: PullRequestAction,
   method: MergeMethod,
-  token: string
+  token: GitHubAuth
 ): Promise<ActionOutcome> {
   const pull = `${repoPath(ref)}/pulls/${ref.number}`;
   const pullRequestId = pr.nodeId;
