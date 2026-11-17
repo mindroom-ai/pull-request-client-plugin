@@ -1,8 +1,10 @@
 // Where the images of a pull request's description and comments load from. GitHub's Markdown keeps
 // the address the author wrote, which for a private repository's attachment answers only with
-// GitHub's session; GitHub's own HTML of the same text (`body_html`) has the address that loads:
-// an attachment's signed `private-user-images` URL (valid for a few minutes) and, for an image on
-// another host, its camo proxy. It stays free of the DOM, so it also runs in node.
+// GitHub's session; GitHub's own HTML of the same text (`body_html`) has the addresses that load:
+// an attachment's signed `private-user-images` URL (valid for a few minutes, new in each answer)
+// and, for an image on another host, its camo proxy. The panel draws an attachment from its stable
+// address and tries the signed one only when that fails. It stays free of the DOM, so it also runs
+// in node.
 
 /**
  * The addresses GitHub's HTML of one body gives its images, each an https URL on GitHub: by an
@@ -58,46 +60,6 @@ function lastUuid(path: string): string | undefined {
 }
 
 const SIGNED_HOST = 'private-user-images.githubusercontent.com';
-// GitHub signs an attachment's address anew in each answer, so the same body would come back with
-// other addresses on every fetch, and each image would load again. An address handed out stays
-// the answer while it is valid for more than a minute.
-const MARGIN = 60_000;
-const handedOut = new Map<string, { href: string; expires: number }>();
-
-/** When a signed address stops loading, by the `exp` of its `jwt`; now when it has none. */
-function expiry(url: URL): number {
-  const payload = url.searchParams.get('jwt')?.split('.')[1] ?? '';
-  try {
-    const base64 = payload.replace(/-/gu, '+').replace(/_/gu, '/');
-    const exp: unknown = JSON.parse(
-      atob(base64.padEnd(Math.ceil(base64.length / 4) * 4, '='))
-    )?.exp;
-    return typeof exp === 'number' ? exp * 1000 : 0;
-  } catch {
-    return 0;
-  }
-}
-
-/** The signed address for an attachment: the one handed out before while it still loads. */
-function stableSigned(uuid: string, url: URL): string {
-  const now = Date.now();
-  for (const [key, entry] of handedOut) if (entry.expires <= now) handedOut.delete(key);
-  const before = handedOut.get(uuid);
-  if (before && before.expires - now > MARGIN) return before.href;
-  handedOut.set(uuid, { href: url.href, expires: expiry(url) });
-  return url.href;
-}
-
-/**
- * Forgets the signed address handed out for this image's attachment, which failed to load: the
- * next answer's address is handed out instead, even when the device's clock deems the failed one
- * valid.
- */
-export function forgetSigned(src: string): void {
-  const url = httpsUrl(src);
-  const uuid = url?.hostname === SIGNED_HOST ? lastUuid(url.pathname) : undefined;
-  if (uuid) handedOut.delete(uuid);
-}
 
 /** The image addresses in GitHub's HTML of a body (`body_html`); none when it sent none. */
 export function imageSources(html: unknown): ImageSources {
@@ -108,10 +70,9 @@ export function imageSources(html: unknown): ImageSources {
     const src = httpsUrl(attrs.get('src') ?? '');
     if (!src || !onGitHub(src)) continue;
     const uuid = src.hostname === SIGNED_HOST ? lastUuid(src.pathname) : undefined;
-    const href = uuid ? stableSigned(uuid, src) : src.href;
     const canonical = attrs.get('data-canonical-src');
-    if (canonical) sources.byUrl[canonical] = href;
-    if (uuid) sources.byAttachment[uuid] = href;
+    if (uuid) sources.byAttachment[uuid] = src.href;
+    else if (canonical) sources.byUrl[canonical] = src.href;
   }
   return sources;
 }
@@ -122,10 +83,11 @@ const ATTACHMENT_PATH =
   /^\/(?:user-attachments\/assets|[^/]+\/[^/]+\/assets\/[0-9]+)\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/?$/iu;
 
 /**
- * Where an image of a body loads from: the address GitHub's HTML gave it, by its URL or by its
- * attachment's UUID (in a `github.com` attachment URL or an older signed address); else the
- * image's own URL when it is an https one on GitHub; else nowhere, so that no other host learns
- * who reads the pull request (GitHub proxies those through camo).
+ * Where an image of a body loads from: an image on another host from its camo address in GitHub's
+ * HTML; an attachment from its stable address, which stays the same in every answer (a pasted
+ * signed address gets its attachment's signed address in the HTML); else the image's own URL when
+ * it is an https one on GitHub; else nowhere, so that no other host learns who reads the pull
+ * request (GitHub proxies those through camo).
  */
 export function imageResolver(sources: ImageSources): (src: string) => string | undefined {
   return (src) => {
@@ -133,13 +95,20 @@ export function imageResolver(sources: ImageSources): (src: string) => string | 
     const mapped = own(sources.byUrl, src) ?? (url ? own(sources.byUrl, url.href) : undefined);
     if (mapped !== undefined) return mapped;
     if (!url || !onGitHub(url)) return undefined;
-    // An already signed address, as pasted from GitHub, gets the fresh one of its attachment.
-    const uuid =
-      url.hostname === 'github.com'
-        ? ATTACHMENT_PATH.exec(url.pathname)?.[1]?.toLowerCase()
-        : url.hostname === SIGNED_HOST
-        ? lastUuid(url.pathname)
-        : undefined;
+    const uuid = url.hostname === SIGNED_HOST ? lastUuid(url.pathname) : undefined;
     return (uuid && own(sources.byAttachment, uuid)) || url.href;
   };
+}
+
+/**
+ * The address to try once an attachment's stable address failed to load: its signed address in
+ * GitHub's HTML of the body. A private repository's attachment loads only from there (the stable
+ * one needs GitHub's session); for a public one the stable address loads and this never runs.
+ * The signed address expires about five minutes after GitHub gave it: an attachment first shown
+ * later stays broken until its body is drawn again from a newer answer.
+ */
+export function signedFallback(sources: ImageSources, src: string): string | undefined {
+  const url = httpsUrl(src);
+  const uuid = url?.hostname === 'github.com' ? ATTACHMENT_PATH.exec(url.pathname)?.[1] : undefined;
+  return uuid && own(sources.byAttachment, uuid.toLowerCase());
 }

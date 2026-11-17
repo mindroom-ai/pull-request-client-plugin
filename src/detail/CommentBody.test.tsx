@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act } from 'react-dom/test-utils';
 import { renderPluginComponent } from '@mindroom/client-sdk/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -7,6 +6,11 @@ import plugin from '../index';
 import { CommentBody } from './CommentBody';
 
 const NO_IMAGES = { byUrl: {}, byAttachment: {} };
+const UUID = '11111111-2222-3333-4444-555555555555';
+const ATTACHMENT = `https://github.com/user-attachments/assets/${UUID}`;
+const SIGNED = `https://private-user-images.githubusercontent.com/1/2-${UUID}.png?jwt=x`;
+const BADGE = 'https://img.example/b.svg';
+const CAMO = 'https://camo.githubusercontent.com/abc/def';
 
 type ImageSource = (src: string) => string | undefined;
 const markdown = vi.hoisted(() => ({
@@ -24,15 +28,8 @@ vi.mock('@mindroom/client-sdk/ui', async (importOriginal) => {
   };
 });
 
-// The body asks the app's query client for the query to fetch again when a signed image fails.
-const render = async (ui: React.ReactElement) => {
-  const client = new QueryClient();
-  const inClient = (body: React.ReactElement) => (
-    <QueryClientProvider client={client}>{body}</QueryClientProvider>
-  );
-  const view = await renderPluginComponent(inClient(ui), { id: 'pull-requests', plugin });
-  return { ...view, rerender: (next: React.ReactElement) => view.rerender(inClient(next)) };
-};
+const render = (ui: React.ReactElement) =>
+  renderPluginComponent(ui, { id: 'pull-requests', plugin });
 
 const heights = (height: number) =>
   vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(height);
@@ -56,17 +53,30 @@ describe('CommentBody', () => {
   });
 
   it("resolves its images by GitHub's HTML, with one function while that stays", async () => {
-    const uuid = '11111111-2222-3333-4444-555555555555';
-    const signed = `https://private-user-images.githubusercontent.com/1/2-${uuid}.png?jwt=x`;
-    const images = { byUrl: {}, byAttachment: { [uuid]: signed } };
-    const body = `![a](https://github.com/user-attachments/assets/${uuid})`;
+    const images = { byUrl: { [BADGE]: CAMO }, byAttachment: { [UUID]: SIGNED } };
+    const body = `![a](${ATTACHMENT}) ![b](${BADGE})`;
     const view = await render(<CommentBody body={body} images={images} />);
     view.rerender(<CommentBody body={body} images={images} />);
     const [first, second] = markdown.imageSources;
-    expect(first?.(`https://github.com/user-attachments/assets/${uuid}`)).toBe(signed);
+    expect(first?.(ATTACHMENT)).toBe(ATTACHMENT);
+    expect(first?.(BADGE)).toBe(CAMO);
     expect(second).toBe(first);
     view.rerender(<CommentBody body={body} images={{ byUrl: {}, byAttachment: {} }} />);
     expect(markdown.imageSources.at(-1)).not.toBe(first);
+  });
+
+  it('loads a failed attachment from its signed address once, and no other image', async () => {
+    markdown.html = `<p><img alt="a" src="${ATTACHMENT}"> <img alt="b" src="${CAMO}"></p>`;
+    const images = { byUrl: { [BADGE]: CAMO }, byAttachment: { [UUID]: SIGNED } };
+    const view = await render(<CommentBody body="![a](x)" images={images} />);
+    const fail = (alt: string) =>
+      act(async () => void view.getByAltText(alt).dispatchEvent(new Event('error')));
+    await fail('a');
+    expect(view.getByAltText('a').getAttribute('src')).toBe(SIGNED);
+    await fail('a');
+    expect(view.getByAltText('a').getAttribute('src')).toBe(SIGNED);
+    await fail('b');
+    expect(view.getByAltText('b').getAttribute('src')).toBe(CAMO);
   });
 
   it('renders nothing for a body of only HTML comments and whitespace', async () => {

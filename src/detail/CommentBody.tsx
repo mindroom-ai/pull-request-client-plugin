@@ -1,13 +1,13 @@
 // Ported from T3 Code (https://github.com/pingdotgg/t3code, apps/web/src/components/pullRequest/PullRequestCommentBody.tsx at 8ab427c6), MIT, Copyright (c) 2026 T3 Tools Inc. See NOTICE.
 // A comment's Markdown, drawn by the app's renderer, clamped at 240 px with a button that shows it
-// whole. A body of only HTML comments (a bot's markers) draws nothing. Its images load from where
-// GitHub's HTML of it says, and only from GitHub.
+// whole. A body of only HTML comments (a bot's markers) draws nothing. Its images load only from
+// GitHub: an attachment from its stable address (signed when that fails), another image via camo.
 import { useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { usePluginTranslation } from '@mindroom/client-sdk/core';
 import { useMarkdownHtml } from '@mindroom/client-sdk/ui';
 import { imageResolver, type ImageSources } from '../images';
 import { visibleBody } from './detail.logic';
-import { useRefetchOnExpiredImage } from './expiredImages';
+import { useSignedImageFallback } from './imageFallback';
 
 const CLAMP = 240;
 
@@ -18,7 +18,7 @@ export function CommentBody({ body, images }: { body: string; images: ImageSourc
   const imageSource = useMemo(() => imageResolver(images), [images]);
   // The plain text shows until the app's Markdown renderer has loaded.
   const html = useMarkdownHtml(visible ?? '', { imageSource });
-  const imagesRef = useRefetchOnExpiredImage(images);
+  const imagesRef = useSignedImageFallback(images);
   const [expanded, setExpanded] = useState(false);
   const [overflowing, setOverflowing] = useState(false);
   const clip = useRef<HTMLDivElement>(null);

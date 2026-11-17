@@ -4,9 +4,8 @@ import { act } from 'react-dom/test-utils';
 import { renderPluginComponent } from '@mindroom/client-sdk/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PullRequest, PullRequestRef } from '../github';
-import { forgetSigned, imageSources } from '../images';
+import { imageSources } from '../images';
 import plugin from '../index';
-import { usePullRequest } from '../queries';
 import { trapOptions } from '../testing/focusTrapStandIn';
 import { SummaryTab } from './SummaryTab';
 
@@ -38,16 +37,9 @@ const HEAD = 'headsha';
 const PR_URL = 'https://github.com/mindroom-ai/mindroom-chat/pull/200';
 const UUID = '11111111-2222-3333-4444-555555555555';
 const ATTACHMENT = `https://github.com/user-attachments/assets/${UUID}`;
-// A signed address whose `jwt` is valid until 2100, as GitHub mints them, new for each answer.
-const signed = (key: string) => {
-  const payload = btoa(JSON.stringify({ exp: 4_102_444_800, key }))
-    .replace(/=+$/u, '')
-    .replace(/\+/gu, '-')
-    .replace(/\//gu, '_');
-  return `https://private-user-images.githubusercontent.com/1/2-${UUID}.png?jwt=e30.${payload}.sig&v=1`;
-};
-const SIGNED = signed('first');
+const SIGNED = `https://private-user-images.githubusercontent.com/1/2-${UUID}.png?jwt=x&v=1`;
 const CAMO = 'https://camo.githubusercontent.com/abc/def';
+const RAW = 'https://raw.githubusercontent.com/a/b/main/x.png';
 // The signed address as GitHub's HTML writes it, with its `&` escaped.
 const SIGNED_HTML = SIGNED.replace('&', '&amp;');
 
@@ -123,7 +115,6 @@ const respond = (body: unknown, status = 200) =>
   });
 
 type Parts = {
-  pull?: unknown;
   reviews?: unknown[] | Response;
   comments?: unknown[] | Response;
   reviewComments?: unknown[] | Response;
@@ -140,7 +131,6 @@ const serve = (parts: Parts = {}) =>
       return respond({ check_runs: parts.checks ?? [], total_count: parts.checksTotal });
     }
     if (url.includes('/status?')) return respond({ statuses: [] });
-    if (url.endsWith('/pulls/200')) return respond(parts.pull ?? {});
     if (url.includes('/pulls/200/reviews')) return answer(parts.reviews);
     if (url.includes('/pulls/200/comments')) return answer(parts.reviewComments);
     if (url.includes('/issues/200/comments')) return answer(parts.comments);
@@ -159,31 +149,18 @@ const show = async (pullRequest: PullRequest = pull()) => {
 
 const click = (element: HTMLElement) => act(async () => element.click());
 
-// The tab as the panel shows it, with the pull request out of its query.
-function FetchedSummary() {
-  const query = usePullRequest(REF);
-  return query.data ? <SummaryTab pullRequest={query.data} pullRequestRef={REF} /> : null;
-}
-
-const calls = (path: string) => fetchMock.mock.calls.filter(([url]) => url.endsWith(path)).length;
 const fail = (image: Element) => act(async () => void image.dispatchEvent(new Event('error')));
 
 beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   localStorage.clear();
-  // The signed addresses images.ts handed out stay for the module; each test starts without them.
-  forgetSigned(SIGNED);
-  forgetSigned(SIGNED.replace(UUID, '99999999-2222-3333-4444-555555555555'));
   fetchMock.mockReset();
   serve();
   vi.stubGlobal('fetch', fetchMock);
   // jsdom has no scrollIntoView.
   Element.prototype.scrollIntoView = vi.fn();
-  // A held back refetch waits on a timer; it must not outlive its test.
-  vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ['setTimeout', 'clearTimeout', 'Date'] });
 });
 afterEach(() => {
-  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -275,7 +252,7 @@ describe('SummaryTab', () => {
     expect(view.getByText('bold').closest('[hidden]')).toBeNull();
   });
 
-  it("shows the description's attachment from the address GitHub's HTML signed", async () => {
+  it("shows the description's attachment from its stable address, another image via camo", async () => {
     const view = await show(
       pull({
         body: `## Screenshots\n\n![Before](${ATTACHMENT}) ![Badge](https://img.example/b.svg) ![Gone](https://img.example/x.png)`,
@@ -286,12 +263,12 @@ describe('SummaryTab', () => {
     );
     const images = [...view.container.querySelectorAll('.mrpr-description img')];
     expect(images.map((image) => [image.getAttribute('alt'), image.getAttribute('src')])).toEqual([
-      ['Before', SIGNED],
+      ['Before', ATTACHMENT],
       ['Badge', CAMO],
     ]);
   });
 
-  it("shows a comment's attachment from its body_html", async () => {
+  it("shows a comment's attachment from its stable address", async () => {
     serve({
       comments: [
         issueComment(1, 'ann', `See ![shot](${ATTACHMENT})`, {
@@ -300,185 +277,46 @@ describe('SummaryTab', () => {
       ],
     });
     const view = await show();
-    expect((await view.findByAltText('shot')).getAttribute('src')).toBe(SIGNED);
+    expect((await view.findByAltText('shot')).getAttribute('src')).toBe(ATTACHMENT);
   });
 
-  it('fetches the pull request again, once a minute at most, when a signed image fails', async () => {
-    const answer = {
-      title: 'Shots',
-      state: 'open',
-      body: `![Before](${ATTACHMENT})`,
-      body_html: `<p><img src="${SIGNED_HTML}" alt="Before"></p>`,
-      head: { sha: HEAD },
-    };
-    serve({ pull: answer });
-    const client = new QueryClient({ defaultOptions: { queries: { retryDelay: 0 } } });
-    const view = await renderPluginComponent(
-      <QueryClientProvider client={client}>
-        <FetchedSummary />
-      </QueryClientProvider>,
-      { id: 'pull-requests', plugin }
+  it("loads a failed attachment from the signed address in GitHub's HTML, once", async () => {
+    const view = await show(
+      pull({
+        body: `![Before](${ATTACHMENT}) ![Badge](https://img.example/b.svg) ![Raw](${RAW})`,
+        images: imageSources(
+          `<p><img src="${SIGNED_HTML}" alt="Before"> <img src="${CAMO}" data-canonical-src="https://img.example/b.svg"></p>`
+        ),
+      })
     );
-    // GitHub signs the attachment anew; the failed address, valid by the clock, is not kept.
-    const second = signed('second');
-    answer.body_html = `<p><img src="${second.replace('&', '&amp;')}" alt="Before"></p>`;
-    await fail(await view.findByAltText('Before'));
-    await vi.waitFor(() => expect(calls('/pulls/200')).toBe(2));
-    await vi.waitFor(async () =>
-      expect((await view.findByAltText('Before')).getAttribute('src')).toBe(second)
-    );
-    await fail(await view.findByAltText('Before'));
-    await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
-    expect(calls('/pulls/200')).toBe(2);
-    const now = Date.now();
-    const later = vi.spyOn(Date, 'now').mockReturnValue(now + 61_000);
-    await fail(await view.findByAltText('Before'));
-    await vi.waitFor(() => expect(calls('/pulls/200')).toBe(3));
-    later.mockRestore();
+    const before = view.getByAltText('Before');
+    const fetches = fetchMock.mock.calls.length;
+    await fail(before);
+    expect(before.getAttribute('src')).toBe(SIGNED);
+    // The signed address failing too, and any other image failing, changes nothing.
+    await fail(before);
+    expect(before.getAttribute('src')).toBe(SIGNED);
+    await fail(view.getByAltText('Badge'));
+    await fail(view.getByAltText('Raw'));
+    expect(view.getByAltText('Badge').getAttribute('src')).toBe(CAMO);
+    expect(view.getByAltText('Raw').getAttribute('src')).toBe(RAW);
+    expect(fetchMock.mock.calls.length).toBe(fetches);
   });
 
-  it("two signed images that fail at once both get the next answer's addresses", async () => {
-    const U2 = '99999999-2222-3333-4444-555555555555';
-    const signed2 = (key: string) => signed(key).replace(UUID, U2);
-    const answer = {
-      title: 'Shots',
-      state: 'open',
-      body: `![A](${ATTACHMENT}) ![B](https://github.com/user-attachments/assets/${U2})`,
-      body_html: `<p><img src="${SIGNED_HTML}" alt="A"> <img src="${signed2('first').replace(
-        '&',
-        '&amp;'
-      )}" alt="B"></p>`,
-      head: { sha: HEAD },
-    };
-    serve({ pull: answer });
-    const client = new QueryClient({ defaultOptions: { queries: { retryDelay: 0 } } });
-    const view = await renderPluginComponent(
-      <QueryClientProvider client={client}>
-        <FetchedSummary />
-      </QueryClientProvider>,
-      { id: 'pull-requests', plugin }
-    );
-    const a2 = signed('second');
-    const b2 = signed2('second');
-    answer.body_html = `<p><img src="${a2.replace('&', '&amp;')}" alt="A"> <img src="${b2.replace(
-      '&',
-      '&amp;'
-    )}" alt="B"></p>`;
-    const a = await view.findByAltText('A');
-    const b = await view.findByAltText('B');
-    await act(async () => {
-      a.dispatchEvent(new Event('error'));
-      b.dispatchEvent(new Event('error'));
-    });
-    await vi.waitFor(() => expect(calls('/pulls/200')).toBe(2));
-    await vi.waitFor(async () =>
-      expect((await view.findByAltText('A')).getAttribute('src')).toBe(a2)
-    );
-    expect((await view.findByAltText('B')).getAttribute('src')).toBe(b2);
-  });
-
-  it('a failure within the minute after a refetch fetches again when the minute ends', async () => {
-    const U2 = '99999999-2222-3333-4444-555555555555';
-    const signed2 = (key: string) => signed(key).replace(UUID, U2);
-    const html = (a: string, b: string) =>
-      `<p><img src="${a.replace('&', '&amp;')}" alt="A"> <img src="${b.replace(
-        '&',
-        '&amp;'
-      )}" alt="B"></p>`;
-    const answer = {
-      title: 'Shots',
-      state: 'open',
-      body: `![A](${ATTACHMENT}) ![B](https://github.com/user-attachments/assets/${U2})`,
-      body_html: html(SIGNED, signed2('first')),
-      head: { sha: HEAD },
-    };
-    serve({ pull: answer });
-    const client = new QueryClient({ defaultOptions: { queries: { retryDelay: 0 } } });
-    const view = await renderPluginComponent(
-      <QueryClientProvider client={client}>
-        <FetchedSummary />
-      </QueryClientProvider>,
-      { id: 'pull-requests', plugin }
-    );
-    const src = async (alt: string) => (await view.findByAltText(alt)).getAttribute('src');
-    answer.body_html = html(signed('second'), signed2('second'));
-    await fail(await view.findByAltText('A'));
-    await vi.waitFor(async () => expect(await src('A')).toBe(signed('second')));
-    expect(calls('/pulls/200')).toBe(2);
-    // B had not failed, so it keeps its address; it fails 10 s later, inside the minute.
-    expect(await src('B')).toBe(signed2('first'));
-    await act(() => vi.advanceTimersByTimeAsync(10_000));
-    answer.body_html = html(signed('third'), signed2('third'));
-    await fail(await view.findByAltText('B'));
-    await act(() => vi.advanceTimersByTimeAsync(20));
-    expect(calls('/pulls/200')).toBe(2);
-    await act(() => vi.advanceTimersByTimeAsync(50_000));
-    await vi.waitFor(async () => expect(await src('B')).toBe(signed2('third')));
-    expect(calls('/pulls/200')).toBe(3);
-  });
-
-  it('an image failing while the panel fetches the pull request joins that fetch', async () => {
-    serve({
-      pull: {
-        title: 'Shots',
-        state: 'open',
-        body: `![Before](${ATTACHMENT})`,
-        body_html: `<p><img src="${SIGNED_HTML}" alt="Before"></p>`,
-        head: { sha: HEAD },
-      },
-    });
-    const served = fetchMock.getMockImplementation()!;
-    let aborted = 0;
-    fetchMock.mockImplementation(async (url, init) => {
-      // After the first answer, GitHub takes longer than S3 takes to refuse an expired image.
-      if (url.endsWith('/pulls/200') && calls('/pulls/200') > 1) {
-        await new Promise<void>((resolve, reject) => {
-          const timer = setTimeout(resolve, 150);
-          init?.signal?.addEventListener('abort', () => {
-            aborted += 1;
-            clearTimeout(timer);
-            reject(new DOMException('aborted', 'AbortError'));
-          });
-        });
-      }
-      return served(url, init);
-    });
-    const client = new QueryClient({ defaultOptions: { queries: { retryDelay: 0 } } });
-    const ui = (
-      <QueryClientProvider client={client}>
-        <FetchedSummary />
-      </QueryClientProvider>
-    );
-    const first = await renderPluginComponent(ui, { id: 'pull-requests', plugin });
-    await first.findByAltText('Before');
-    first.unmount();
-    // Reopened ten minutes later on the cached answer: stale, and its signed image has expired.
-    const query = client.getQueryCache().find({ queryKey: ['pull-requests'], exact: false })!;
-    query.setState({ dataUpdatedAt: Date.now() - 600_000 });
-    const view = await renderPluginComponent(ui, { id: 'pull-requests', plugin });
-    expect(calls('/pulls/200')).toBe(2);
-    await fail(await view.findByAltText('Before'));
-    await act(() => vi.advanceTimersByTimeAsync(400));
-    expect({ fetches: calls('/pulls/200'), aborted }).toEqual({ fetches: 2, aborted: 0 });
-  });
-
-  it("fetches a comment's list again when its signed image fails, not for another image", async () => {
+  it("loads a comment's failed attachment from its body_html, without fetching", async () => {
     serve({
       comments: [
-        issueComment(1, 'ann', `![shot](${ATTACHMENT}) ![badge](https://img.example/b.svg)`, {
-          body_html: `<p><img src="${SIGNED_HTML}" alt="shot"> <img src="${CAMO}" data-canonical-src="https://img.example/b.svg"></p>`,
+        issueComment(1, 'ann', `See ![shot](${ATTACHMENT})`, {
+          body_html: `<p>See <img src="${SIGNED_HTML}" alt="shot"></p>`,
         }),
       ],
     });
     const view = await show();
-    await fail(await view.findByAltText('badge'));
-    await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
-    expect(calls('/issues/200/comments?per_page=100&page=1')).toBe(1);
-    await fail(await view.findByAltText('shot'));
-    await vi.waitFor(() => expect(calls('/issues/200/comments?per_page=100&page=1')).toBe(2));
-    await fail(await view.findByAltText('shot'));
-    await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
-    expect(calls('/issues/200/comments?per_page=100&page=1')).toBe(2);
+    const shot = await view.findByAltText('shot');
+    const fetches = fetchMock.mock.calls.length;
+    await fail(shot);
+    expect(shot.getAttribute('src')).toBe(SIGNED);
+    expect(fetchMock.mock.calls.length).toBe(fetches);
   });
 
   it('says so when there is no description', async () => {
