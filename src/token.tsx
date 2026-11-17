@@ -263,8 +263,11 @@ export function GitHubConnectedNote() {
 // redirect, which the browser would follow to another origin with the body, fails instead.
 const NO_REDIRECT: RequestRedirect = 'error';
 
-/** Why saving a token in MindRoom failed: GitHub refused it, it is no token, or anything else. */
-type SaveProblem = 'rejected' | 'invalid' | 'failed';
+/**
+ * Why saving a token in MindRoom failed: GitHub refused it, it is no token, the server has no
+ * route for it (one from before tokens were saved there), or anything else.
+ */
+type SaveProblem = 'rejected' | 'invalid' | 'unsupported' | 'failed';
 
 /**
  * The token the person saves in the room's MindRoom server, which MindRoom uses before the GitHub
@@ -278,9 +281,8 @@ function useServerToken() {
   const { forget } = useGitHubToken();
   return useMemo(() => {
     if (!server) return undefined;
-    const answered = (answer: unknown) => {
+    const answered = (now: ServerStatus) => {
       const before = queryClient.getQueryData<ServerStatus>(statusKey(server.origin));
-      const now = statusOf(answer);
       // Saving answers with the token's account alone; the App connection there stays.
       const app = now.via === 'token' && (before?.via === 'app' || before?.appConnected === true);
       setStatus(queryClient, server.origin, app ? { ...now, appConnected: true } : now);
@@ -290,15 +292,14 @@ function useServerToken() {
       origin: server.origin,
       /** Saves `token` there; resolves to what went wrong, or undefined once it is saved. */
       save: async (token: string): Promise<SaveProblem | undefined> => {
+        let answer: unknown;
         try {
-          answered(
-            await server.request('/api/github/token', {
-              method: 'PUT',
-              body: JSON.stringify({ token }),
-              headers: { 'Content-Type': 'application/json' },
-              redirect: NO_REDIRECT,
-            })
-          );
+          answer = await server.request('/api/github/token', {
+            method: 'PUT',
+            body: JSON.stringify({ token }),
+            headers: { 'Content-Type': 'application/json' },
+            redirect: NO_REDIRECT,
+          });
         } catch (error) {
           const status = error instanceof MindroomServerError ? error.status : 0;
           const body = error instanceof MindroomServerError ? error.body : undefined;
@@ -307,8 +308,14 @@ function useServerToken() {
               ? (body as { error?: unknown }).error
               : undefined;
           if (status === 400 && code === 'github_token_rejected') return 'rejected';
+          if (status === 404 || status === 405) return 'unsupported';
           return status === 422 ? 'invalid' : 'failed';
         }
+        // Saved only once MindRoom says it uses the token now; an answer that does not leaves the
+        // status, and the token of this browser, as they were.
+        const now = statusOf(answer);
+        if (!now.connected || now.via !== 'token') return 'failed';
+        answered(now);
         // The token of this browser comes first, and would hide the one just saved.
         if (storedToken() !== undefined) forget();
         return undefined;
@@ -317,7 +324,9 @@ function useServerToken() {
       remove: async (): Promise<boolean> => {
         try {
           answered(
-            await server.request('/api/github/token', { method: 'DELETE', redirect: NO_REDIRECT })
+            statusOf(
+              await server.request('/api/github/token', { method: 'DELETE', redirect: NO_REDIRECT })
+            )
           );
           return true;
         } catch {
@@ -487,10 +496,9 @@ export function TokenForm({
     event.preventDefault();
     const trimmed = value.trim();
     if (trimmed === '' || saving) return;
-    // The token leaves the page at once: it is kept in the field no longer than until it is sent.
-    setValue('');
     setProblem(undefined);
     if (!inMindroom) {
+      setValue('');
       setToken(trimmed);
       onSaved?.();
       return;
@@ -499,7 +507,10 @@ export function TokenForm({
     const failure = await serverToken.save(trimmed);
     setSaving(false);
     setProblem(failure);
-    if (failure === undefined) onSaved?.();
+    // The field keeps the token until MindRoom saved it, so that the person can try again.
+    if (failure !== undefined) return;
+    setValue('');
+    onSaved?.();
   };
   return (
     <form className="mrpr-token" onSubmit={(event) => void submit(event)}>

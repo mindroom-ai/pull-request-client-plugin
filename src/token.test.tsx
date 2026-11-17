@@ -400,13 +400,14 @@ describe('the token saved in MindRoom', () => {
     new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
   /**
    * GitHub knows `ghp_good` as `octo`, the App's login too, and `ghp_other` as `other`; it
-   * refuses any other token. The pull request's title says how it was read.
+   * fails for `ghp_down` and refuses any other token. The pull request's title says how it was read.
    */
   const github = async (url: string, init?: RequestInit) => {
     const auth = new Headers(init?.headers).get('authorization');
     if (url === 'https://api.github.com/user') {
       if (auth === 'Bearer ghp_good') return respond({ login: 'octo' });
       if (auth === 'Bearer ghp_other') return respond({ login: 'other' });
+      if (auth === 'Bearer ghp_down') return respond({ message: 'Server Error' }, 500);
       return respond({ message: 'Bad credentials' }, 401);
     }
     return respond({ ...apiPull, title: auth ? 'with the token' : 'with the App' });
@@ -434,16 +435,28 @@ describe('the token saved in MindRoom', () => {
     await type(view.getByLabelText('GitHub token'), token);
     await click(view.getByRole('button', { name: 'Save' }));
   };
-  /** Whether `token` is anywhere it must never be once saved: the page, the cache, the storage. */
-  const leaked = (token: string) =>
-    document.body.innerHTML.includes(token) ||
+  /** Whether `token` is kept anywhere it must never be: the cache or the browser's storage. */
+  const kept = (token: string) =>
     JSON.stringify(
       client
         .getQueryCache()
         .getAll()
         .map(({ queryKey, state }) => [queryKey, state.data])
-    ).includes(token) ||
-    localStorage.getItem(TOKEN_KEY) !== null;
+    ).includes(token) || localStorage.getItem(TOKEN_KEY) !== null;
+  /** Whether `token` is anywhere it must never be once saved: the page, the cache, the storage. */
+  const leaked = (token: string) => document.body.innerHTML.includes(token) || kept(token);
+  const field = (view: Awaited<ReturnType<typeof show>>) =>
+    view.getByLabelText('GitHub token') as HTMLInputElement;
+  /** Makes `mindroom` answer a request for the token with `answer`, its other routes as before. */
+  const answerToken = (
+    mindroom: ReturnType<typeof githubServer>,
+    answer: (init?: RequestInit) => Promise<unknown>
+  ) => {
+    const routes = mindroom.server.request.getMockImplementation()!;
+    mindroom.server.request.mockImplementation((path: string, init?: RequestInit) =>
+      path === '/api/github/token' ? answer(init) : routes(path, init)
+    );
+  };
 
   it('names the way MindRoom reaches GitHub, an older server that does not say it being the App', async () => {
     await show(serverWith(() => Promise.resolve({ connected: true, login: 'octo' })));
@@ -510,19 +523,69 @@ describe('the token saved in MindRoom', () => {
     expect(leaked('ghp_good')).toBe(false);
   });
 
-  it('says GitHub refused a token, and keeps it nowhere', async () => {
+  it.each([
+    ['GitHub refused it', 'ghp_refused', 'GitHub refused this token.'],
+    ['it is no token (422)', 'ghp bad', 'This is not a GitHub token.'],
+    ['GitHub could not be reached (502)', 'ghp_down', 'MindRoom could not save the token. Try again.'],
+  ])('says so when %s, keeps it in the field to try again, and nowhere else', async (_, token, said) => {
     const mindroom = githubServer(github);
     const view = await form(mindroom.server);
     await waitUntil(() => expect(accesses.reader?.connection).toBe('app'));
     await chooseMindroom(view);
-    await save(view, 'ghp_refused');
-    await waitUntil(() =>
-      expect(view.getByRole('alert').textContent).toBe('GitHub refused this token.')
-    );
+    await save(view, token);
+    await waitUntil(() => expect(view.getByRole('alert').textContent).toBe(said));
     expect(mindroom.storedToken()).toBeUndefined();
     expect(accesses.reader?.connection).toBe('app');
-    expect(leaked('ghp_refused')).toBe(false);
+    expect(field(view).value).toBe(token);
+    expect(kept(token)).toBe(false);
   });
+
+  it.each([404, 405])(
+    'says a MindRoom server that answers %s cannot save tokens yet',
+    async (status) => {
+      const mindroom = githubServer(github);
+      answerToken(mindroom, () =>
+        Promise.reject(new MindroomServerError('Not Found', status, { detail: 'Not Found' }))
+      );
+      const view = await form(mindroom.server);
+      await waitUntil(() => expect(accesses.reader?.connection).toBe('app'));
+      await chooseMindroom(view);
+      await save(view, 'ghp_good');
+      await waitUntil(() =>
+        expect(view.getByRole('alert').textContent).toBe(
+          'This MindRoom server cannot save tokens yet. Use Only this browser.'
+        )
+      );
+      expect(field(view).value).toBe('ghp_good');
+      expect(accesses.reader?.connection).toBe('app');
+    }
+  );
+
+  it.each([
+    ['no status', {}],
+    ['the App', { connected: true, via: 'app', login: 'octo' }],
+    ['no connection', { connected: false }],
+  ])(
+    'counts a save as failed when MindRoom answers %s, and keeps the browser token',
+    async (_, answer) => {
+      localStorage.setItem(TOKEN_KEY, 'ghp_old');
+      vi.stubGlobal('fetch', vi.fn(github));
+      const mindroom = githubServer(github);
+      answerToken(mindroom, () => Promise.resolve(answer));
+      const view = await form(mindroom.server);
+      await waitUntil(() => expect(accesses.reader?.via).toBe('token'));
+      await chooseMindroom(view);
+      await save(view, 'ghp_good');
+      await waitUntil(() =>
+        expect(view.getByRole('alert').textContent).toBe(
+          'MindRoom could not save the token. Try again.'
+        )
+      );
+      expect(localStorage.getItem(TOKEN_KEY)).toBe('ghp_old');
+      expect(accesses.reader?.via).toBe('token');
+      expect(field(view).value).toBe('ghp_good');
+    }
+  );
 
   it('keeps the token in the browser alone when asked to again, and asks MindRoom nothing of it', async () => {
     const mindroom = githubServer(github);

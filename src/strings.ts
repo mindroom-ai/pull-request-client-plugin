@@ -384,6 +384,7 @@ export const en = {
     problem: {
       rejected: 'GitHub refused this token.',
       invalid: 'This is not a GitHub token.',
+      unsupported: 'This MindRoom server cannot save tokens yet. Use Only this browser.',
       failed: 'MindRoom could not save the token. Try again.',
     },
     // While no token is stored and the room's MindRoom server has the person's GitHub connected,
