@@ -192,7 +192,12 @@ const ALL_PULLS: Pull[] = Object.values(PULLS);
 const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
 const headSha = (pull: Pull) =>
   `${pull.repo === 'api' ? 'a' : 'b'}${String(pull.number).padStart(39, '0')}`;
+// The head after an update of the branch, which the checks and the comparison know as well.
+const updatedSha = (pull: Pull) => `c${headSha(pull).slice(1)}`;
+const hasHead = (pull: Pull, sha: string) => sha === headSha(pull) || sha === updatedSha(pull);
 const repositoryId = (pull: Pull) => `R_${pull.repo}`;
+const pullId = (pull: Pull) => `PR_${pull.repo}_${pull.number}`;
+const pullPath = (pull: Pull) => `/repos/acme/${pull.repo}/pulls/${pull.number}`;
 const gitHubUser = (login: string) => ({
   login,
   avatar_url: null,
@@ -200,10 +205,11 @@ const gitHubUser = (login: string) => ({
   type: 'User',
 });
 
-const apiPull = (pull: Pull) => {
+const apiPull = (pull: Pull, head: string = headSha(pull)) => {
   const repo = { full_name: `acme/${pull.repo}`, node_id: repositoryId(pull) };
   const done = pull.state === 'merged' || pull.state === 'closed';
   return {
+    node_id: pullId(pull),
     number: pull.number,
     title: pull.title,
     state: done ? 'closed' : 'open',
@@ -221,7 +227,7 @@ const apiPull = (pull: Pull) => {
       ? 'blocked'
       : 'clean',
     auto_merge: null,
-    head: { sha: headSha(pull), ref: pull.branch, repo },
+    head: { sha: head, ref: pull.branch, repo },
     base: { ref: pull.base ?? 'main', repo },
     merged_at: pull.state === 'merged' ? ago(95) : null,
     closed_at: done ? ago(95) : null,
@@ -269,26 +275,26 @@ const CHECK_RUNS: Record<Checks, [string, 'success' | 'failure' | null][]> = {
 /**
  * GitHub's answer to a GET of `pathname`, or undefined for a path these pull requests lack; the
  * pull requests in `moved` (by path) have been merged, closed or reopened in the page since it
- * loaded, and those in `behind` (by path) are that many commits behind their base.
+ * loaded, those in `behind` (by path) are that many commits behind their base, and those in
+ * `heads` (by path) have that head since their branch was updated.
  */
 const gitHubAnswer = (
   pathname: string,
   moved: ReadonlyMap<string, Pull['state']>,
-  behind: Readonly<Record<string, number>>
+  behind: Readonly<Record<string, number>>,
+  heads: ReadonlyMap<string, string>
 ): unknown => {
   const [, repo, kind, id, part] =
     /^\/repos\/acme\/([^/]+)\/([a-z]+)\/([^/]+)(?:\/([a-z-]+))?$/.exec(pathname) ?? [];
   if (kind === 'compare') {
     const pull = ALL_PULLS.find(
-      (candidate) => candidate.repo === repo && id.endsWith(`...${headSha(candidate)}`)
+      (candidate) => candidate.repo === repo && hasHead(candidate, id.split('...')[1] ?? '')
     );
-    const by = pull ? behind[`/repos/acme/${repo}/pulls/${pull.number}`] ?? 0 : 0;
+    const by = pull ? behind[pullPath(pull)] ?? 0 : 0;
     return { behind_by: by, ahead_by: 3 };
   }
   if (kind === 'commits') {
-    const pull = ALL_PULLS.find(
-      (candidate) => candidate.repo === repo && headSha(candidate) === id
-    );
+    const pull = ALL_PULLS.find((candidate) => candidate.repo === repo && hasHead(candidate, id));
     if (!pull) return undefined;
     const runs = CHECK_RUNS[pull.checks].map(([name, conclusion]) =>
       checkRun(pull, name, conclusion)
@@ -303,7 +309,7 @@ const gitHubAnswer = (
   if (!pull) return undefined;
   if (kind === 'pulls' && part === undefined) {
     const state = moved.get(pathname);
-    return apiPull(state ? { ...pull, state } : pull);
+    return apiPull(state ? { ...pull, state } : pull, heads.get(pathname));
   }
   if (kind === 'pulls' && part === 'reviews') {
     return pull.approvedBy
@@ -360,8 +366,9 @@ type Write = { method: string; pathname: string; body: unknown };
  * It answers the repository's GraphQL query, GraphQL's read of where a branch points (at its
  * pull request's head, until the branch is deleted) and the writes, which `writes` collects: a
  * merge, after which the pull request reads as merged; a close or a reopen, after which it reads
- * so; an update of the branch, after which it is behind no more; and GraphQL's deletion of a
- * branch, after which it is gone. A write in `refuse` (by method and path) GitHub refuses with
+ * so; GraphQL's update of a branch, which GitHub makes after it answers (the first read of the
+ * pull request after it still has the old head; the next has the new one, behind no more); and
+ * GraphQL's deletion of a branch, after which it is gone. A write in `refuse` (by method and path) GitHub refuses with
  * 405 and its message; a pull request in `behind` (by path) starts that many commits behind its
  * base.
  */
@@ -378,6 +385,10 @@ const stubGitHub = async (
   const behindNow = { ...behind };
   // The branches deleted in the page, as `refs/heads/<name>` after the repository's id.
   const deleted = new Set<string>();
+  // The heads of the branches updated in the page, by the pull request's path, and the updates
+  // GitHub has taken but not made yet, with the reads that still show the old head.
+  const heads = new Map<string, string>();
+  const updating = new Map<string, { reads: number; sha: string }>();
   await page.route('https://api.github.com/**', async (route) => {
     const request = route.request();
     if (request.method() === 'OPTIONS') {
@@ -402,7 +413,9 @@ const stubGitHub = async (
         );
         const gone =
           !branch || deleted.has(`${String(variables.repositoryId)} ${String(variables.ref)}`);
-        const ref = gone ? null : { target: { oid: headSha(branch) } };
+        const ref = gone
+          ? null
+          : { target: { oid: heads.get(pullPath(branch)) ?? headSha(branch) } };
         await route.fulfill({ headers: CORS, json: { data: { node: { ref } } } });
         return;
       }
@@ -419,9 +432,19 @@ const stubGitHub = async (
         });
         return;
       }
+      if (graphql.includes('updatePullRequestBranch')) {
+        writes.push({ method: request.method(), pathname, body });
+        const branch = ALL_PULLS.find((candidate) => pullId(candidate) === variables.pullRequestId);
+        if (branch) updating.set(pullPath(branch), { reads: 1, sha: updatedSha(branch) });
+        await route.fulfill({
+          headers: CORS,
+          json: { data: { updatePullRequestBranch: { clientMutationId: null } } },
+        });
+        return;
+      }
       const write = `${request.method()} ${pathname}`;
       const [, pull, part] =
-        /^(\/repos\/acme\/[^/]+\/pulls\/\d+)(?:\/(merge|update-branch))?$/.exec(pathname) ?? [];
+        /^(\/repos\/acme\/[^/]+\/pulls\/\d+)(?:\/(merge))?$/.exec(pathname) ?? [];
       const known =
         (request.method() === 'PUT' && pull && part) ||
         (request.method() === 'PATCH' && pull && !part);
@@ -432,16 +455,13 @@ const stubGitHub = async (
           return;
         }
         if (part === 'merge') moved.set(pull!, 'merged');
-        if (part === 'update-branch') delete behindNow[pull!];
         if (request.method() === 'PATCH') {
           const { state } = body as { state: 'open' | 'closed' };
           moved.set(pull!, state);
         }
         // What GitHub answers; the panel reads only the status.
         await route.fulfill(
-          part === 'update-branch'
-            ? { status: 202, headers: CORS, json: { message: 'Updating pull request branch.' } }
-            : part === 'merge'
+          part === 'merge'
             ? { headers: CORS, json: { merged: true, message: 'Merged' } }
             : { headers: CORS, json: body }
         );
@@ -451,7 +471,15 @@ const stubGitHub = async (
       await route.fulfill({ status: 404, headers: CORS, json: { message: 'Not Found' } });
       return;
     }
-    const answer = gitHubAnswer(pathname, moved, behindNow);
+    const update = updating.get(pathname);
+    if (update && update.reads > 0) {
+      update.reads -= 1;
+    } else if (update) {
+      updating.delete(pathname);
+      heads.set(pathname, update.sha);
+      delete behindNow[pathname];
+    }
+    const answer = gitHubAnswer(pathname, moved, behindNow, heads);
     if (answer === undefined) unanswered.push(pathname);
     await route.fulfill(
       answer === undefined
@@ -1438,17 +1466,29 @@ test("a branch behind its base updates from the base branch's warning", async ({
   await expect(page.getByText(`${tokenEndpoint.branch} is 2 commits behind main`)).toBeVisible();
   await shot(page, 'actions-behind', { keepPointer: true });
   await page.getByRole('button', { name: 'Update branch', exact: true }).click();
+  // GitHub answers before the branch has its new commit, and the first read after it still has
+  // the old head: the update runs on until a read shows the new one.
+  await expect(panel(page).getByText('Updating branch...')).toBeVisible();
   await expect(panel(page).getByText('Branch updated')).toBeVisible({ timeout: 30_000 });
-  expect(writes).toEqual([
-    {
-      method: 'PUT',
-      pathname: `${pull}/update-branch`,
-      body: { expected_head_sha: headSha(tokenEndpoint) },
-    },
-  ]);
-  // Its refetch finds the branch up to date.
+  expect(writes.map(({ method, pathname }) => `${method} ${pathname}`)).toEqual(['POST /graphql']);
+  expect((writes[0].body as { variables: unknown }).variables).toEqual({
+    pullRequestId: pullId(tokenEndpoint),
+    expectedHeadOid: headSha(tokenEndpoint),
+    updateMethod: 'MERGE',
+  });
+  // The panel has the new head: the branch is up to date.
   await expect(warning).toHaveCount(0, { timeout: 30_000 });
   await shot(page, 'actions-updated');
+
+  // And a merge sends that new head, not the old one, which GitHub would refuse.
+  await panel(page).getByRole('button', { name: 'Merge', exact: true }).click();
+  await panel(page).getByRole('button', { name: 'Confirm merge?' }).click();
+  await expect(panel(page).locator('.mrpr-badge-state')).toHaveText('Merged', { timeout: 30_000 });
+  expect(writes[1]).toEqual({
+    method: 'PUT',
+    pathname: `${pull}/merge`,
+    body: { merge_method: 'merge', sha: updatedSha(tokenEndpoint) },
+  });
   expect(unanswered).toEqual([]);
   expect(warnings).toEqual([]);
 });

@@ -961,9 +961,6 @@ export async function runPullRequestAction(
     case 'reopen':
       await sendRest('PATCH', pull, { state: 'open' }, token);
       return;
-    case 'update-branch':
-      await sendRest('PUT', `${pull}/update-branch`, { expected_head_sha: pr.headSha }, token);
-      return;
     case 'delete-branch':
       await deleteHeadBranch(pr, token);
       return;
@@ -983,10 +980,17 @@ export async function runPullRequestAction(
         token
       );
       return;
+    // One path for both ways, as T3 Code. GitHub makes the branch's new commit after it
+    // answers, so the caller waits for the new head before it says the branch is updated.
+    case 'update-branch':
     case 'update-branch-rebase':
       await graphql(
         UPDATE_BRANCH,
-        { pullRequestId, expectedHeadOid: pr.headSha, updateMethod: 'REBASE' },
+        {
+          pullRequestId,
+          expectedHeadOid: pr.headSha,
+          updateMethod: action === 'update-branch' ? 'MERGE' : 'REBASE',
+        },
         token
       );
       return;

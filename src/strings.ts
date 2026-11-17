@@ -105,6 +105,11 @@ export const en = {
       'update-branch': 'Branch updated',
       'update-branch-rebase': 'Branch rebased',
     },
+    // GitHub took the update, but its new commit did not show in time.
+    requested: {
+      'update-branch': 'Branch update requested',
+      'update-branch-rebase': 'Branch rebase requested',
+    },
     failed: {
       merge: 'Could not merge this pull request',
       'enable-auto-merge': 'Could not turn on auto-merge',

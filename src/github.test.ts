@@ -981,14 +981,6 @@ describe('runPullRequestAction', () => {
     });
   });
 
-  it('updates the branch by merge with the expected head sha', async () => {
-    expect(await send('update-branch')).toMatchObject({
-      method: 'PUT',
-      url: 'https://api.github.com/repos/o/r/pulls/7/update-branch',
-      body: { expected_head_sha: 'head7' },
-    });
-  });
-
   /** Deletes the branch while it points at `oid` in its repository (null: it is gone). */
   async function deleteBranch(oid: string | null) {
     const node = { ref: oid === null ? null : { target: { oid } } };
@@ -1077,17 +1069,24 @@ describe('runPullRequestAction', () => {
     expect((sent.body as { query: string }).query).toContain('enablePullRequestAutoMerge');
   });
 
-  it('updates the branch by rebase with the expected head', async () => {
-    const sent = await send('update-branch-rebase');
-    expect(sent).toMatchObject({
-      method: 'POST',
-      url: 'https://api.github.com/graphql',
-      body: {
-        variables: { pullRequestId: 'PR_kw7', expectedHeadOid: 'head7', updateMethod: 'REBASE' },
-      },
-    });
-    expect((sent.body as { query: string }).query).toContain('updatePullRequestBranch');
-  });
+  // One path for both, as T3 Code: REST's update-branch only answers 202 Accepted.
+  it.each([
+    ['update-branch', 'MERGE'],
+    ['update-branch-rebase', 'REBASE'],
+  ] as const)(
+    '%s updates the branch by %s with the expected head',
+    async (action, updateMethod) => {
+      const sent = await send(action);
+      expect(sent).toMatchObject({
+        method: 'POST',
+        url: 'https://api.github.com/graphql',
+        body: {
+          variables: { pullRequestId: 'PR_kw7', expectedHeadOid: 'head7', updateMethod },
+        },
+      });
+      expect((sent.body as { query: string }).query).toContain('updatePullRequestBranch');
+    }
+  );
 
   it('does not touch the read rate limit', async () => {
     // A write refused for its limit does not hold back the reads after it.

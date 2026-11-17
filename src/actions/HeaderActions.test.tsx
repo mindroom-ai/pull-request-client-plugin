@@ -433,6 +433,32 @@ describe('HeaderActions', () => {
     expect(fetchMock.mock.calls.filter(([url, init]) => isHeadBranchQuery(url, init))).toEqual([]);
   });
 
+  it('says an update whose new head did not show yet was requested, not made', async () => {
+    const actions = {
+      repo: {
+        canWrite: true,
+        mergeMethods: ['merge' as const],
+        autoMergeAllowed: false,
+        defaultBranch: 'main',
+      },
+      method: 'merge' as const,
+      chooseMethod: () => {},
+      pending: null,
+      result: { action: 'update-branch' as const, outcome: 'requested' as const },
+      perform: () => {},
+      dismissResult: vi.fn(),
+    };
+    const view = await renderPluginComponent(
+      <QueryClientProvider client={client}>
+        <HeaderActions pullRequestRef={ref} pullRequest={open} actions={actions} />
+      </QueryClientProvider>,
+      { id: 'pull-requests', plugin }
+    );
+    expect(view.getByRole('status').textContent).toBe('Branch update requested');
+    await click(view.getByRole('button', { name: 'Dismiss' }));
+    expect(actions.dismissResult).toHaveBeenCalled();
+  });
+
   it('draws no Merge button on a merged pull request', async () => {
     const view = await show(merged);
     await waitUntil(() => expect(moreActions(view)).toBeTruthy());

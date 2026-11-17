@@ -138,6 +138,13 @@ const show = (pullRequestRef?: PullRequestRef, pullRequest?: PullRequest) =>
 
 const loaded = () => waitUntil(() => expect(actions.repo).toBeDefined());
 
+// Lets `ms` of the runner's waiting pass, and what it asks in that time be answered.
+const pass = (ms: number) =>
+  act(async () => {
+    await vi.advanceTimersByTimeAsync(ms);
+    await new Promise((resolve) => setImmediate(resolve));
+  });
+
 // As the panel has it: the pull request is a query, which the read after an action asks again.
 let shown: PullRequest | undefined;
 function Panel() {
@@ -189,6 +196,7 @@ beforeEach(() => {
   vi.stubGlobal('fetch', fetchMock);
 });
 afterEach(async () => {
+  vi.useRealTimers();
   await answerHeld();
   resetPullRequestActions();
   vi.unstubAllGlobals();
@@ -311,6 +319,85 @@ describe('usePullRequestActions', () => {
     await waitUntil(() => expect(actions.result).toEqual({ action: 'close', outcome: 'done' }));
     expect(actions.pending).toBeNull();
     expect(pullReads()).toHaveLength(2);
+  });
+
+  describe('an update of the branch, which GitHub makes after it answers', () => {
+    const head = (sha: string) => ({
+      head: { sha, ref: 'feature', repo: { full_name: 'o/r', node_id: 'R_or' } },
+    });
+    const update = async () => {
+      await showPanel();
+      writeAnswer = async () => respond({ data: { updatePullRequestBranch: {} } });
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    };
+
+    it('runs until GitHub shows the new head, which the panel then has', async () => {
+      await update();
+      act(() => actions.perform('update-branch'));
+      // Read at once, and again two seconds later: GitHub still shows the old head.
+      await pass(0);
+      expect(pullReads()).toHaveLength(2);
+      await pass(2000);
+      expect(pullReads()).toHaveLength(3);
+      expect(actions.pending).toBe('update-branch');
+      expect(actions.result).toBeNull();
+      expect(shown?.headSha).toBe('head7');
+      pullAnswer = async () => respond(apiPull(head('head8')));
+      await pass(2000);
+      await pass(0);
+      expect(actions.pending).toBeNull();
+      expect(actions.result).toEqual({ action: 'update-branch', outcome: 'done' });
+      // So a merge after it sends the new head.
+      expect(shown?.headSha).toBe('head8');
+      await pass(60_000);
+      // The read that saw the new head, and the panel's own after it; then no more.
+      expect(pullReads()).toHaveLength(5);
+    });
+
+    it('says only that the update was requested when no new head shows in half a minute', async () => {
+      await update();
+      act(() => actions.perform('update-branch-rebase'));
+      for (let waited = 0; waited < 28_000; waited += 2000) await pass(2000);
+      expect(actions.pending).toBe('update-branch-rebase');
+      await pass(2000);
+      await pass(0);
+      expect(actions.pending).toBeNull();
+      expect(actions.result).toEqual({ action: 'update-branch-rebase', outcome: 'requested' });
+      // The first load, a read every two seconds for half a minute, and the panel's own after.
+      expect(pullReads()).toHaveLength(1 + 16 + 1);
+      await pass(60_000);
+      expect(pullReads()).toHaveLength(18);
+    });
+
+    it('keeps waiting through a read that fails', async () => {
+      await update();
+      pullAnswer = async () => respond({ message: 'Not Found' }, 404);
+      act(() => actions.perform('update-branch'));
+      await pass(0);
+      expect(actions.pending).toBe('update-branch');
+      pullAnswer = async () => respond(apiPull(head('head8')));
+      await pass(2000);
+      await pass(0);
+      expect(actions.result).toEqual({ action: 'update-branch', outcome: 'done' });
+    });
+
+    it('does not wait for a head after a refused update', async () => {
+      await update();
+      writeAnswer = async () => respond({ errors: [{ message: 'Head branch was modified' }] });
+      act(() => actions.perform('update-branch'));
+      await pass(0);
+      expect(actions.result?.outcome).toBe('failed');
+      expect(actions.pending).toBeNull();
+    });
+
+    it('does not wait for a head after any other action', async () => {
+      await update();
+      act(() => actions.perform('close'));
+      await pass(0);
+      expect(actions.result).toEqual({ action: 'close', outcome: 'done' });
+      // The first load, and the read after the action.
+      expect(pullReads()).toHaveLength(2);
+    });
   });
 
   it('reports a refusal, and refreshes the pull request whose state moved', async () => {

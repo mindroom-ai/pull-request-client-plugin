@@ -365,8 +365,8 @@ function ResultLine({
   } else if (shown !== null) {
     const dismiss = t('actions.dismiss');
     let text: ReactNode;
-    if (shown.outcome === 'done') {
-      text = <span>{t(`actions.done.${shown.action}`)}</span>;
+    if (shown.outcome !== 'failed') {
+      text = <span>{t(`actions.${shown.outcome}.${shown.action}`)}</span>;
     } else {
       const { kind, detail } = shown.error;
       // A refusal is GitHub's reason alone. Without access the hint comes first, then GitHub's

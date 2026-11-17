@@ -841,17 +841,28 @@ describe('PullRequestPanel', () => {
           repo: { full_name: 'mindroom-ai/mindroom-chat' },
         };
         const base = { ref: 'main', repo: { full_name: 'mindroom-ai/mindroom-chat' } };
+        // GitHub updates the branch, after which the pull request has a new head, level with main.
+        let updated = false;
         fetchMock.mockImplementation(async (url, init) => {
+          if (url === GRAPHQL && String(init?.body).includes('updatePullRequestBranch')) {
+            updated = true;
+            return respond({ data: { updatePullRequestBranch: { clientMutationId: null } } });
+          }
           if (url === GRAPHQL) return respond({ data: { repository } });
-          if (init?.method === 'PUT')
-            return respond({ message: 'Updating pull request branch.' }, 202);
-          if (url.includes('/compare/')) return respond({ behind_by: 2 });
+          if (url.includes('/compare/')) return respond({ behind_by: updated ? 0 : 2 });
           if (url.includes('/check-runs')) return respond({ check_runs: [] });
           if (url.includes('/status?')) return respond({ statuses: [] });
           if (url.includes('/files') || url.includes('/commits') || url.includes('/comments'))
             return respond([]);
           if (url.includes('/reviews')) return respond([]);
-          return respond(pull({ head, base, mergeable }));
+          return respond(
+            pull({
+              node_id: 'PR_kw200',
+              head: updated ? { ...head, sha: 'def456' } : head,
+              base,
+              mergeable,
+            })
+          );
         });
         const view = await show();
         await waitUntil(() =>
@@ -866,11 +877,21 @@ describe('PullRequestPanel', () => {
           return;
         }
         await click(await view.findByRole('button', { name: 'Update branch' }));
-        const puts = fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT');
-        expect(puts.map(([url]) => url)).toEqual([
-          'https://api.github.com/repos/mindroom-ai/mindroom-chat/pulls/200/update-branch',
-        ]);
-        expect(JSON.parse(String(puts[0][1]?.body))).toEqual({ expected_head_sha: 'abc123' });
+        expect(await view.findByText('Branch updated')).toBeTruthy();
+        const updates = fetchMock.mock.calls.filter(([, init]) =>
+          String(init?.body).includes('updatePullRequestBranch')
+        );
+        expect(updates).toHaveLength(1);
+        expect(JSON.parse(String(updates[0][1]?.body)).variables).toEqual({
+          pullRequestId: 'PR_kw200',
+          expectedHeadOid: 'abc123',
+          updateMethod: 'MERGE',
+        });
+        // The panel has the new head, so the warning is gone.
+        await waitUntil(() =>
+          expect(view.queryByRole('button', { name: 'Warnings for main' })).toBeNull()
+        );
+        expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT')).toEqual([]);
       }
     );
   });
