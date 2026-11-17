@@ -142,7 +142,9 @@ async function getJson(
   if (token) headers.Authorization = `Bearer ${token}`;
   let response: Response;
   try {
-    response = await fetch(`${API}${path}`, { headers, signal });
+    // GitHub allows a minute of caching, so without this a read just after a write could show
+    // the state from before it. The browser revalidates by ETag, and a 304 costs no rate limit.
+    response = await fetch(`${API}${path}`, { headers, signal, cache: 'no-cache' });
   } catch (error) {
     // An aborted request is the caller's own doing, not a failure of GitHub.
     if (signal?.aborted) throw error;
