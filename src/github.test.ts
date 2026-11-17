@@ -108,14 +108,24 @@ describe('fetchPullRequest', () => {
     }
   });
 
-  it('asks GitHub again for every read, not the browser cache', async () => {
+  it('asks GitHub again for every read with a token, not the browser cache', async () => {
     // GitHub answers with max-age=60: a read served from the cache would show a pull request
-    // merged a moment ago as still open. A revalidation GitHub answers 304 is not rate limited.
+    // merged a moment ago as still open. An authorized revalidation answered 304 is not rate
+    // limited.
     const fetchMock = vi.fn(() => Promise.resolve(json(apiPull)));
     vi.stubGlobal('fetch', fetchMock);
     await fetchPullRequest(ref, 't');
     const calls = fetchMock.mock.calls as unknown as [string, RequestInit][];
     expect(calls[0]![1].cache).toBe('no-cache');
+  });
+
+  it('lets the browser cache serve a read without a token', async () => {
+    // Without a token a 304 still counts against the 60 an hour, and no write can have happened.
+    const fetchMock = vi.fn(() => Promise.resolve(json(apiPull)));
+    vi.stubGlobal('fetch', fetchMock);
+    await fetchPullRequest(ref, undefined);
+    const calls = fetchMock.mock.calls as unknown as [string, RequestInit][];
+    expect(calls[0]![1].cache).toBe('default');
   });
 
   it('maps an open pull request', async () => {
