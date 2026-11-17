@@ -282,6 +282,8 @@ function useServerToken() {
       setStatus(queryClient, server.origin, app ? { ...now, appConnected: true } : now);
     };
     return {
+      /** Where it saves the token: the server's origin. */
+      origin: server.origin,
       /** Saves `token` there; resolves to what went wrong, or undefined once it is saved. */
       save: async (token: string): Promise<SaveProblem | undefined> => {
         try {
@@ -438,6 +440,15 @@ export function useGitHubAccess(): GitHubAccess {
   );
 }
 
+/** The host of `origin`, as the person knows the server by. */
+const hostOf = (origin: string) => {
+  try {
+    return new URL(origin).host;
+  } catch {
+    return origin;
+  }
+};
+
 export function TokenForm({
   reason,
   inputRef,
@@ -457,11 +468,14 @@ export function TokenForm({
   const { via } = useGitHubAccess();
   const serverToken = useServerToken();
   const [value, setValue] = useState('');
-  // In a room with a MindRoom server, the token is saved there unless the person keeps it here.
-  const [browserOnly, setBrowserOnly] = useState(false);
+  // In a room with a MindRoom server, the token is saved there only once the person chose that
+  // server, by its name: the room's server may be any that an agent's account published. Another
+  // server, once the room has one, is not chosen until the person chooses it.
+  const [chosen, setChosen] = useState<string>();
+  if (chosen !== undefined && chosen !== serverToken?.origin) setChosen(undefined);
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState<SaveProblem>();
-  const inMindroom = serverToken !== undefined && !browserOnly;
+  const inMindroom = serverToken !== undefined && chosen === serverToken.origin;
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     const trimmed = value.trim();
@@ -514,10 +528,12 @@ export function TokenForm({
               <input
                 type="radio"
                 name="mrpr-token-where"
-                checked={browserOnly === only}
-                onChange={() => setBrowserOnly(only)}
+                checked={only !== inMindroom}
+                onChange={() => setChosen(only ? undefined : serverToken.origin)}
               />{' '}
-              {t(only ? 'token.inBrowser' : 'token.inMindroom')}
+              {only
+                ? t('token.inBrowser')
+                : t('token.inMindroom', { host: hostOf(serverToken.origin) })}
             </label>
           ))}
         </div>

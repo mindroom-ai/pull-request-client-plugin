@@ -378,7 +378,7 @@ export const en = {
     noteMindroom: 'MindRoom keeps the token for your account and uses it on every device.',
     // Where the form saves it, in a room with a MindRoom server.
     where: 'Where to save the token',
-    inMindroom: 'Save in MindRoom',
+    inMindroom: 'Save in MindRoom at {{host}}',
     inBrowser: 'Only this browser',
     // Why saving it in MindRoom failed.
     problem: {

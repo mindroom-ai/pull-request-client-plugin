@@ -1088,6 +1088,7 @@ describe('with the GitHub account connected in MindRoom', () => {
     const view = await show();
     await click(await view.findByRole('button', { name: 'Use a token instead' }));
     await type(view.getByLabelText('GitHub token'), 'ghp_good');
+    await click(view.getByLabelText('Save in MindRoom at mindroom.example.org'));
     await click(view.getByRole('button', { name: 'Save' }));
     expect(await view.findByText('Signed in as pat-login through MindRoom (token).')).toBeTruthy();
     expect(view.queryByLabelText('GitHub token')).toBeNull();

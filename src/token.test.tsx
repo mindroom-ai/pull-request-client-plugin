@@ -417,6 +417,10 @@ describe('the token saved in MindRoom', () => {
       field.dispatchEvent(new Event('input', { bubbles: true }));
     });
   const click = (element: HTMLElement) => act(async () => element.click());
+  const HOST = 'mindroom.example.org';
+  /** Chooses to save the token in MindRoom, which the form never does by itself. */
+  const chooseMindroom = (view: Awaited<ReturnType<typeof show>>) =>
+    click(view.getByLabelText(`Save in MindRoom at ${HOST}`));
   /** The form and a reader of the pull request, in a room with `server`, or none. */
   const form = (server: MindroomServer | undefined) =>
     show(
@@ -447,13 +451,52 @@ describe('the token saved in MindRoom', () => {
     expect(accesses.a).toMatchObject({ via: 'server', appConnected: false });
   });
 
-  it('saves in MindRoom by default, keeps the key of the same login, and reads again with it', async () => {
+  it('keeps the token in this browser unless MindRoom is chosen, and names where MindRoom is', async () => {
+    const mindroom = githubServer(github);
+    const view = await form(mindroom.server);
+    await waitUntil(() => expect(accesses.reader?.connection).toBe('app'));
+    expect((view.getByLabelText('Only this browser') as HTMLInputElement).checked).toBe(true);
+    expect((view.getByLabelText(`Save in MindRoom at ${HOST}`) as HTMLInputElement).checked).toBe(
+      false
+    );
+    await save(view, 'ghp_mine');
+    await waitUntil(() => expect(accesses.reader?.via).toBe('token'));
+    expect(localStorage.getItem(TOKEN_KEY)).toBe('ghp_mine');
+    expect(mindroom.tokenRequests()).toEqual([]);
+  });
+
+  it("goes back to this browser alone once the room's MindRoom server is another", async () => {
+    const mindroom = githubServer(github);
+    const other = githubServer(github, undefined, 'https://other.example.net');
+    const view = await form(mindroom.server);
+    await waitUntil(() => expect(accesses.reader?.connection).toBe('app'));
+    await chooseMindroom(view);
+    view.rerender(
+      tree(
+        other.server,
+        <>
+          <TokenForm reason="override" />
+          <NamedReader name="reader" />
+        </>
+      )
+    );
+    expect((view.getByLabelText('Only this browser') as HTMLInputElement).checked).toBe(true);
+    expect(view.queryByLabelText(`Save in MindRoom at ${HOST}`)).toBeNull();
+    expect(
+      (view.getByLabelText('Save in MindRoom at other.example.net') as HTMLInputElement).checked
+    ).toBe(false);
+    await save(view, 'ghp_mine');
+    expect(localStorage.getItem(TOKEN_KEY)).toBe('ghp_mine');
+    expect(mindroom.tokenRequests()).toEqual([]);
+    expect(other.tokenRequests()).toEqual([]);
+  });
+
+  it('saves in MindRoom when chosen, keeps the key of the same login, and reads again with it', async () => {
     const mindroom = githubServer(github);
     const view = await form(mindroom.server);
     await waitUntil(() => expect(view.getByTestId('reader').textContent).toBe('with the App'));
     expect(accesses.reader).toMatchObject({ connection: 'app', key: `server:${ORIGIN}:octo` });
-    expect((view.getByLabelText('Save in MindRoom') as HTMLInputElement).checked).toBe(true);
-    expect((view.getByLabelText('Only this browser') as HTMLInputElement).checked).toBe(false);
+    await chooseMindroom(view);
     await save(view, ' ghp_good ');
     expect(mindroom.storedToken()).toBe('ghp_good');
     await waitUntil(() => expect(view.getByTestId('reader').textContent).toBe('with the token'));
@@ -471,6 +514,7 @@ describe('the token saved in MindRoom', () => {
     const mindroom = githubServer(github);
     const view = await form(mindroom.server);
     await waitUntil(() => expect(accesses.reader?.connection).toBe('app'));
+    await chooseMindroom(view);
     await save(view, 'ghp_refused');
     await waitUntil(() =>
       expect(view.getByRole('alert').textContent).toBe('GitHub refused this token.')
@@ -480,9 +524,10 @@ describe('the token saved in MindRoom', () => {
     expect(leaked('ghp_refused')).toBe(false);
   });
 
-  it('keeps the token in the browser alone when asked to, and asks MindRoom nothing of it', async () => {
+  it('keeps the token in the browser alone when asked to again, and asks MindRoom nothing of it', async () => {
     const mindroom = githubServer(github);
     const view = await form(mindroom.server);
+    await chooseMindroom(view);
     await click(view.getByLabelText('Only this browser'));
     await save(view, 'ghp_mine');
     await waitUntil(() => expect(accesses.reader?.via).toBe('token'));
@@ -493,7 +538,7 @@ describe('the token saved in MindRoom', () => {
   it('offers no choice in a room without a MindRoom server, and keeps the token in the browser', async () => {
     vi.stubGlobal('fetch', vi.fn(github));
     const view = await form(undefined);
-    expect(view.queryByLabelText('Save in MindRoom')).toBeNull();
+    expect(view.queryByLabelText(/Save in MindRoom/)).toBeNull();
     await save(view, 'ghp_mine');
     expect(localStorage.getItem(TOKEN_KEY)).toBe('ghp_mine');
   });
@@ -504,6 +549,7 @@ describe('the token saved in MindRoom', () => {
     const mindroom = githubServer(github);
     const view = await form(mindroom.server);
     await waitUntil(() => expect(accesses.reader?.via).toBe('token'));
+    await chooseMindroom(view);
     await save(view, 'ghp_other');
     await waitUntil(() => expect(accesses.reader?.key).toBe(`server:${ORIGIN}:other`));
     expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
