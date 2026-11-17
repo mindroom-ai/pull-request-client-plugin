@@ -1124,6 +1124,20 @@ describe('CodeTab', () => {
       expect(shown(tab)).toMatchObject({ now: 444, style: '444px' });
     });
 
+    it('a key or drag at a clamped bound keeps the stored width', async () => {
+      localStorage.setItem(PREFS_KEY, JSON.stringify({ treeWidth: 500 }));
+      const tab = await show();
+      await resizeBody(700);
+      await press(tab, 'ArrowRight');
+      await press(tab, 'End');
+      await pointer(tab, 'pointerdown', 300);
+      await pointer(tab, 'pointerup', 2000);
+      expect(shown(tab)).toMatchObject({ now: 444, style: '444px' });
+      expect(stored()).toEqual({ treeWidth: 500 });
+      await resizeBody(1000);
+      expect(shown(tab)).toMatchObject({ now: 500, style: '500px' });
+    });
+
     it('a narrower body clamps a stored width it keeps', async () => {
       localStorage.setItem(PREFS_KEY, JSON.stringify({ treeWidth: 500 }));
       bodyWidth = 600;

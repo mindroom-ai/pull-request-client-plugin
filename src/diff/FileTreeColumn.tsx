@@ -65,8 +65,10 @@ export function FileTreeColumn({ children }: { children: ReactNode }) {
       edge: isRightToLeft(handle) ? 'left' : 'right',
       bounds: { min: TREE_MIN_WIDTH, max: maxWidth },
       resize: show,
+      // A width the column already shows is not stored, so a drag held at a clamped bound keeps
+      // the stored width (treeWidth.logic.ts).
       finish(finalWidth, moved) {
-        if (moved) prefs.update({ treeWidth: finalWidth });
+        if (moved && finalWidth !== shownWidth.current) prefs.update({ treeWidth: finalWidth });
         else show(shownWidth.current);
       },
       cleanup(committed) {
@@ -87,7 +89,7 @@ export function FileTreeColumn({ children }: { children: ReactNode }) {
     if (next === null) return;
     event.preventDefault();
     event.stopPropagation();
-    prefs.update({ treeWidth: next });
+    if (next !== width) prefs.update({ treeWidth: next });
   };
 
   return (
