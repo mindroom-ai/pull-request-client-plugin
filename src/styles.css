@@ -245,8 +245,8 @@
 /* The handle that resizes the Files column beside the diffs (FileTreeColumn.tsx), as T3 Code's: a
    4px strip on the column's inline-end edge, 16px for a coarse pointer, reaching over the diffs'
    edge. Its line lies on the column's border and shows only while a pointer hovers it, in the
-   border's tone darkened, and while it has the focus or is dragged, in the accent. Above the diffs
-   it is hidden. */
+   border's tone darkened, while it is dragged, in the accent faded, and while it has the keyboard's
+   focus, in the accent. Above the diffs it is hidden. */
 .mrpr-tree-resize {
   display: none;
 }
@@ -287,9 +287,11 @@
     user-select: none;
     outline: none;
   }
-  .mrpr-tree-resize:focus-visible .mrpr-tree-resize-line,
   .mrpr-tree-resize:active .mrpr-tree-resize-line {
     background: color-mix(in srgb, var(--pr-primary) 60%, transparent);
+  }
+  .mrpr-tree-resize:focus-visible .mrpr-tree-resize-line {
+    background: var(--pr-primary);
   }
 }
 @media (any-pointer: coarse) {

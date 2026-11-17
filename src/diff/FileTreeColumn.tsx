@@ -1,4 +1,4 @@
-// Ported from T3 Code (https://github.com/pingdotgg/t3code, apps/web/src/components/files/FileExplorerPane.tsx, hooks/useResizableWidth.ts, components/preview/RightPanelResizeHandle.tsx and lib/observeResize.ts at 943de8fe), MIT, Copyright (c) 2026 T3 Tools Inc. See NOTICE.
+// Ported from T3 Code (https://github.com/pingdotgg/t3code, apps/web/src/components/files/FileExplorerPane.tsx, apps/web/src/hooks/useResizableWidth.ts, apps/web/src/components/preview/RightPanelResizeHandle.tsx and apps/web/src/lib/observeResize.ts at 943de8fe), MIT, Copyright (c) 2026 T3 Tools Inc. See NOTICE.
 // The Code tab's Files column. Beside the diffs it has a handle on its inline-end edge that drags
 // or steps its width, which every Code tab keeps in the Code prefs; above the diffs, in a narrow
 // panel, the handle is hidden and the width unused (styles.css). A drag shows each frame's width
@@ -52,21 +52,25 @@ export function FileTreeColumn({ children }: { children: ReactNode }) {
   const drag = useResizeDrag<HTMLDivElement>((event) => {
     const host = hostRef.current;
     if (!host) return null;
+    const handle = event.currentTarget;
+    // Each frame of a drag shows its width without a render, to the eye and to assistive
+    // technology alike.
+    const show = (shown: number) => {
+      host.style.setProperty(WIDTH_PROPERTY, `${shown}px`);
+      handle.setAttribute('aria-valuenow', `${shown}`);
+    };
     const startWidth = width;
     return {
       width: startWidth,
-      edge: isRightToLeft(event.currentTarget) ? 'left' : 'right',
+      edge: isRightToLeft(handle) ? 'left' : 'right',
       bounds: { min: TREE_MIN_WIDTH, max: maxWidth },
-      resize(nextWidth) {
-        host.style.setProperty(WIDTH_PROPERTY, `${nextWidth}px`);
-        return nextWidth;
-      },
+      resize: show,
       finish(finalWidth, moved) {
         if (moved) prefs.update({ treeWidth: finalWidth });
-        else host.style.setProperty(WIDTH_PROPERTY, `${shownWidth.current}px`);
+        else show(shownWidth.current);
       },
       cleanup(committed) {
-        if (!committed) host.style.setProperty(WIDTH_PROPERTY, `${startWidth}px`);
+        if (!committed) show(startWidth);
       },
     };
   });

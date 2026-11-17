@@ -925,14 +925,38 @@ describe('CodeTab', () => {
   describe('Files column width', () => {
     const PREFS_KEY = 'mindroom.plugin:%40plugin-tester%3Aexample.org/pull-requests/code:prefs';
     let bodyWidth = 1000;
+    let clientWidth: { mockRestore(): void } | undefined;
+    // jsdom has no ResizeObserver; this one tells its observers of a size change when a test
+    // resizes the Code body.
+    let observers: { callback: () => void; targets: Set<Element> }[] = [];
     beforeEach(() => {
       bodyWidth = 1000;
+      observers = [];
       // jsdom lays nothing out; the Code body is as wide as each test says.
-      vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (
-        this: HTMLElement
-      ) {
-        return this.classList.contains('mrpr-code-body') ? bodyWidth : 0;
-      });
+      clientWidth = vi
+        .spyOn(HTMLElement.prototype, 'clientWidth', 'get')
+        .mockImplementation(function (this: HTMLElement) {
+          return this.classList.contains('mrpr-code-body') ? bodyWidth : 0;
+        });
+      vi.stubGlobal(
+        'ResizeObserver',
+        class {
+          private readonly entry: (typeof observers)[number];
+          constructor(callback: () => void) {
+            this.entry = { callback, targets: new Set() };
+            observers.push(this.entry);
+          }
+          observe(target: Element) {
+            this.entry.targets.add(target);
+          }
+          unobserve(target: Element) {
+            this.entry.targets.delete(target);
+          }
+          disconnect() {
+            this.entry.targets.clear();
+          }
+        }
+      );
       // jsdom has no pointer capture.
       const captured = new Set<number>();
       Object.assign(HTMLElement.prototype, {
@@ -942,11 +966,20 @@ describe('CodeTab', () => {
       });
     });
     afterEach(() => {
-      vi.restoreAllMocks();
+      clientWidth?.mockRestore();
       for (const name of ['setPointerCapture', 'hasPointerCapture', 'releasePointerCapture']) {
         delete (HTMLElement.prototype as unknown as Record<string, unknown>)[name];
       }
     });
+    const resizeBody = (width: number) =>
+      act(async () => {
+        bodyWidth = width;
+        for (const { callback, targets } of observers) {
+          if ([...targets].some((target) => target.classList.contains('mrpr-code-body'))) {
+            callback();
+          }
+        }
+      });
 
     const handleOf = (tab: TabView) => tab.getByRole('separator', { name: 'Resize the files' });
     const shown = (tab: TabView) => {
@@ -1018,7 +1051,7 @@ describe('CodeTab', () => {
       await pointer(first, 'pointermove', 380);
       await act(() => new Promise((resolve) => requestAnimationFrame(resolve)));
       // Each frame shows the width without storing it.
-      expect(shown(first)).toMatchObject({ now: 240, style: '320px' });
+      expect(shown(first)).toMatchObject({ now: 320, style: '320px' });
       expect(stored()).toBeNull();
       await pointer(first, 'pointerup', 400);
       expect(shown(first)).toMatchObject({ now: 340, style: '340px' });
@@ -1063,6 +1096,32 @@ describe('CodeTab', () => {
       expect(document.body.style.cursor).toBe('');
       await click(tab.getByRole('button', { name: 'Files' }));
       expect(shown(tab)).toMatchObject({ now: 240, style: '240px' });
+    });
+
+    it('follows the panel as it narrows and widens, keeping the stored width', async () => {
+      localStorage.setItem(PREFS_KEY, JSON.stringify({ treeWidth: 500 }));
+      const tab = await show();
+      expect(shown(tab)).toMatchObject({ now: 500, max: 560, style: '500px' });
+      await resizeBody(700);
+      expect(shown(tab)).toMatchObject({ now: 444, max: 444, style: '444px' });
+      expect(stored()).toEqual({ treeWidth: 500 });
+      await resizeBody(1000);
+      expect(shown(tab)).toMatchObject({ now: 500, max: 560, style: '500px' });
+      expect(stored()).toEqual({ treeWidth: 500 });
+    });
+
+    it('a drag follows bounds that change while it lasts', async () => {
+      const tab = await show();
+      await pointer(tab, 'pointerdown', 300);
+      await pointer(tab, 'pointermove', 700);
+      await act(() => new Promise((resolve) => requestAnimationFrame(resolve)));
+      expect(shown(tab)).toMatchObject({ now: 560, style: '560px' });
+      await resizeBody(700);
+      expect(shown(tab)).toMatchObject({ now: 444, max: 444, style: '444px' });
+      expect(stored()).toBeNull();
+      await pointer(tab, 'pointerup', 700);
+      expect(stored()).toMatchObject({ treeWidth: 444 });
+      expect(shown(tab)).toMatchObject({ now: 444, style: '444px' });
     });
 
     it('a narrower body clamps a stored width it keeps', async () => {

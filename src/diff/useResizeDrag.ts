@@ -4,20 +4,21 @@
 // a finger drag the same way.
 import { type PointerEvent, useState } from 'react';
 
-export interface ResizeBounds {
+interface ResizeBounds {
   readonly min: number;
   readonly max: number;
 }
 
-export interface ResizeSession {
+interface ResizeSession {
   width: number;
   /** The edge the handle is on: dragging it away from the element widens it. */
   edge: 'left' | 'right';
   /** Pointer widths are clamped to these before `resize` sees them. */
   bounds: ResizeBounds;
-  resize: (width: number) => number;
+  /** Shows a width the pointer reached, already clamped to the bounds. */
+  resize: (width: number) => void;
   finish: (width: number, moved: boolean) => void;
-  cleanup?: (committed: boolean) => void;
+  cleanup: (committed: boolean) => void;
 }
 
 function clampToBounds(width: number, bounds: ResizeBounds): number {
@@ -44,9 +45,8 @@ function createResizeDrag<T extends HTMLElement>() {
     if (!active) return;
     const delta = (active.pendingX - active.startX) * (active.session.edge === 'left' ? -1 : 1);
     if (Math.abs(delta) > 2) active.moved = true;
-    active.width = active.session.resize(
-      clampToBounds(active.session.width + delta, active.session.bounds)
-    );
+    active.width = clampToBounds(active.session.width + delta, active.session.bounds);
+    active.session.resize(active.width);
   };
 
   const finish = (commit: boolean) => {
@@ -66,7 +66,7 @@ function createResizeDrag<T extends HTMLElement>() {
     }
     document.body.style.removeProperty('cursor');
     document.body.style.removeProperty('user-select');
-    active.session.cleanup?.(commit);
+    active.session.cleanup(commit);
     if (commit) active.session.finish(active.width, active.moved);
   };
 
@@ -81,9 +81,9 @@ function createResizeDrag<T extends HTMLElement>() {
   return {
     /** Abandons a drag, putting the width back to where it started. */
     cancel: () => finish(false),
-    refresh(bounds?: ResizeBounds) {
+    refresh(bounds: ResizeBounds) {
       if (!drag) return;
-      if (bounds) drag.session.bounds = bounds;
+      drag.session.bounds = bounds;
       flush();
     },
     begin(event: PointerEvent<T>, start: (event: PointerEvent<T>) => ResizeSession | null) {
@@ -93,7 +93,7 @@ function createResizeDrag<T extends HTMLElement>() {
       try {
         event.currentTarget.setPointerCapture(event.pointerId);
       } catch {
-        session.cleanup?.(false);
+        session.cleanup(false);
         return;
       }
       event.preventDefault();

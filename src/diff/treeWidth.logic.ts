@@ -1,4 +1,4 @@
-// Ported from T3 Code (https://github.com/pingdotgg/t3code, apps/web/src/components/files/FileExplorerPane.tsx and hooks/useResizableWidth.ts at 943de8fe), MIT, Copyright (c) 2026 T3 Tools Inc. See NOTICE.
+// Ported from T3 Code (https://github.com/pingdotgg/t3code, apps/web/src/components/files/FileExplorerPane.tsx and apps/web/src/hooks/useResizableWidth.ts at 943de8fe), MIT, Copyright (c) 2026 T3 Tools Inc. See NOTICE.
 // The width of the Code tab's Files column beside the diffs: 240px until a person drags or steps
 // it, at least 192px, and at most 560px or what leaves the diffs 256px of the Code body, whichever
 // is less. A stored width outside these shows clamped and stays stored, so a column narrowed by a
