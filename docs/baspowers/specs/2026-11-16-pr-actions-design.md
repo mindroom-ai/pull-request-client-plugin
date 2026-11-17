@@ -53,8 +53,8 @@ Out: revert, approve workflows, stacks, maintainer edits, title and description 
 ### Data
 
 - `PullRequest` gains `nodeId` (`node_id`, for GraphQL) and `mergeable` (`mergeable`, true/false/null). `mergeableState` is already there (`dirty` means conflicting).
-- New `fetchRepository(owner, repo)`: `GET /repos/{owner}/{repo}` gives `permissions.push`, `allow_merge_commit`, `allow_squash_merge`, `allow_rebase_merge`, `allow_auto_merge`, `default_branch`. Enabled only with a token (no extra anonymous requests), `staleTime` 10 minutes, shared key per repository, `retryOnMount: false`. Without a token, or without `permissions.push`, the header shows no write controls at all (today's header).
-- Allowed methods: the `allow_*` flags, in T3's order merge, squash, rebase.
+- New `fetchRepository(owner, repo)`: one GraphQL query, `repository(owner, name) { viewerPermission mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed autoMergeAllowed defaultBranchRef { name } }`, as T3 reads it (the REST repository's `allow_*` flags are not served to every reader). GraphQL always needs a token, which fits: the query runs only with one (no anonymous requests), `staleTime` 10 minutes, one key per repository, `retryOnMount: false`. Without a token, or when `viewerPermission` is not `ADMIN`, `MAINTAIN` or `WRITE`, the header shows no write controls at all (today's header).
+- Allowed methods: the three `*Allowed` flags, in T3's order merge, squash, rebase.
 
 ### Writes
 
@@ -84,7 +84,7 @@ After any success: invalidate the PR's query prefix (`['pull-requests', owner, r
 3. draft: Ready for review (with push), else nothing
 4. auto-merge armed: badge "Auto-merge (squash)"
 5. no allowed method: nothing
-6. checks not passing (pending or failing) and `allow_auto_merge`: Auto-merge (method)
+6. checks pending or failing (not none) and `autoMergeAllowed`: Auto-merge (method)
 7. Merge (method)
 
 `blocked` and `behind` still merge: GitHub refuses with its own reason (required reviews, branch protection), and the result line shows it.
