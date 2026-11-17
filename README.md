@@ -65,8 +65,8 @@ The worktree shows as its branch: the branch icon and the branch's name, or the 
 
 A thread with a linked pull request or a worktree has details, which MindRoom Chat shows in the hover card of its card in the Compact view, when a pointer rests on the card, and as the first group of the thread's menu. They are rows of text, with no control and no link:
 
-- Each pull request linked to the thread, in the order they were linked, also those past the two its card shows: its state's icon, its repository and number and, while a GitHub token is stored, the mark of its checks; once GitHub has answered, its title (two lines at most), its head and base branches (`head → base`, with the fork's owner before the head of a pull request from a fork, and long names shortened in the middle), and the lines and files it changes, its author and when it was updated.
-- The thread's worktree: its branch, when it has one, and its path.
+- Each pull request linked to the thread, in the order they were linked, also those past the two its card shows, with a line between them: its state's icon, its repository and number (without the owner, as on a chip) and, once GitHub has answered, its state in words and, while a GitHub token is stored, its checks in a few words; then its title (two lines at most); then the lines and files it changes, when it was updated, and `this worktree` when its head branch is the thread's worktree's branch.
+- The thread's worktree, under a line and its label: its branch, when it has one and no linked pull request is on it, and its path, shortened in the middle, whole in its tooltip.
 
 The details ask GitHub through the chips' own requests: a hover asks GitHub nothing for a pull request whose chip has loaded or was refused, however long ago, while those past the card's two load on the first hover, and the menu's details load as the hover card's do.
 

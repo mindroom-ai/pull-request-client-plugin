@@ -1,4 +1,4 @@
-import { useQuery, type Query, type QueryClient } from '@tanstack/react-query';
+import { useQueries, useQuery, type Query, type QueryClient } from '@tanstack/react-query';
 import {
   fetchBehindBy,
   fetchChecks,
@@ -80,16 +80,34 @@ export type RefetchOptions = {
 // every chip seen so far would ask at once, and without a token that spends the hourly limit.
 export const NO_FOCUS_REFETCH = { refetchOnWindowFocus: false };
 
+// The query of one pull request, the same for `usePullRequest` and `usePullRequests`.
+const pullRequestQuery = (
+  ref: PullRequestRef | undefined,
+  tokenSet: boolean,
+  storedToken: () => string | undefined,
+  options: RefetchOptions
+) => ({
+  queryKey: keyOf(ref, tokenSet),
+  queryFn: ({ signal }: { signal: AbortSignal }) =>
+    fetchPullRequest(ref as PullRequestRef, storedToken(), signal),
+  enabled: ref !== undefined,
+  staleTime: STALE_TIME,
+  retry,
+  ...options,
+});
+
 export function usePullRequest(ref: PullRequestRef | undefined, options: RefetchOptions = {}) {
   const { token } = useGitHubToken();
   const storedToken = useStoredToken();
-  return useQuery({
-    queryKey: keyOf(ref, token !== undefined),
-    queryFn: ({ signal }) => fetchPullRequest(ref as PullRequestRef, storedToken(), signal),
-    enabled: ref !== undefined,
-    staleTime: STALE_TIME,
-    retry,
-    ...options,
+  return useQuery(pullRequestQuery(ref, token !== undefined, storedToken, options));
+}
+
+/** The pull requests `refs` as `usePullRequest` reads each, through the same queries. */
+export function usePullRequests(refs: readonly PullRequestRef[], options: RefetchOptions = {}) {
+  const { token } = useGitHubToken();
+  const storedToken = useStoredToken();
+  return useQueries({
+    queries: refs.map((ref) => pullRequestQuery(ref, token !== undefined, storedToken, options)),
   });
 }
 

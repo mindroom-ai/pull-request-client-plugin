@@ -328,13 +328,17 @@ export const en = {
     labelWithRepository: 'Worktree {{path}}, repository {{repo}}, branch {{branch}}',
     labelWithRepositoryWithoutBranch: 'Worktree {{path}}, repository {{repo}}',
   },
-  // A thread's details: a pull request's repository and number, its branches, a fork's head and
-  // its author.
+  // A thread's details: a pull request's repository and number, the short words of its checks and
+  // its mark when it is the worktree's branch, and the label of the worktree.
   details: {
     pullRequest: '{{repository}} #{{number}}',
-    branches: '{{head}} → {{base}}',
-    forkHead: '{{owner}}:{{branch}}',
-    author: '@{{login}}',
+    checks: {
+      passing: 'checks passed',
+      failing: 'checks failed',
+      pending: 'checks running',
+    },
+    thisWorktree: 'this worktree',
+    worktree: 'Worktree',
   },
   error: {
     notFound: 'GitHub did not find this pull request. A private repository needs a token.',

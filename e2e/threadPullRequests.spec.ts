@@ -1025,9 +1025,11 @@ test('on a phone a card shows one chip and the count of the rest', async ({ brow
   }
 });
 
-/** Whether `locator`'s text shows whole, not cut at its element's end. */
-const shownWhole = (locator: Locator) =>
-  locator.evaluate((element) => element.scrollWidth <= element.clientWidth);
+/** Whether each element of `locator` takes one line of the details, so none wraps inside. */
+const eachOnOneLine = (locator: Locator) =>
+  locator.evaluateAll((elements) =>
+    elements.every((element) => element.getBoundingClientRect().height <= 17)
+  );
 
 /** Expects `details` to show the pull requests `pulls` in order, each by its title from GitHub. */
 const expectDetailsTitles = async (details: Locator, pulls: Pull[]) => {
@@ -1041,43 +1043,60 @@ const expectDetailsTitles = async (details: Locator, pulls: Pull[]) => {
 
 test("resting the pointer on a card shows all its pull requests' details", async ({ page }) => {
   test.setTimeout(4 * 60_000);
-  const unanswered = await stubGitHub(page);
-  const warnings = listenerWarnings(page);
-  await openRoom(page);
-  const details = page.locator('[data-thread-card-details]');
   const [rateLimit] = THREADS.release.pulls;
-  const blocks = details.locator('.mrpr-details-pull-request');
+  // The worktree is on the first pull request's branch, in a path longer than the card is wide.
+  const path = '/srv/agents/builder/workspace/worktrees/api-rate-limit-per-token';
+  await writeWorktree(roots.release, {
+    path,
+    branch: rateLimit.branch,
+    set_by: agent.userId,
+    set_at: new Date().toISOString(),
+  });
+  try {
+    const unanswered = await stubGitHub(page);
+    const warnings = listenerWarnings(page);
+    await openRoom(page);
+    const details = page.locator('[data-thread-card-details]');
+    const blocks = details.locator('.mrpr-details-pull-request');
 
-  // All three pull requests, also the one the card's chips leave to their count.
-  await card(page, roots.release).hover();
-  await expectDetailsTitles(details, THREADS.release.pulls);
-  await expect(
-    blocks.first().getByText(`${rateLimit.branch} → main`, { exact: true })
-  ).toBeVisible();
-  // Its size and its author's whole login, which the line wraps for rather than cut.
-  const meta = blocks.first().locator('.mrpr-meta');
-  await expect(meta).toContainText('+268');
-  await expect(meta).toContainText('9 files');
-  const author = meta.getByText('@acme-builder', { exact: true });
-  await expect(author).toBeVisible();
-  expect(await shownWhole(author)).toBe(true);
-  // Two long branches, each shortened in its middle, on a line that wraps so both their ends show.
-  const branches = blocks
-    .nth(THREADS.release.pulls.indexOf(PULLS.ipRateLimit))
-    .getByText('rate-limit-p…-ip-address → release/2026…i-hardening', { exact: true });
-  await expect(branches).toBeVisible();
-  expect(await shownWhole(branches)).toBe(true);
-  await shot(page, 'details-light', { keepPointer: true });
+    // All three pull requests, also the one the card's chips leave to their count.
+    await card(page, roots.release).hover();
+    await expectDetailsTitles(details, THREADS.release.pulls);
+    // Each by its repository without the owner, and its state in words.
+    const first = blocks.first();
+    await expect(first.locator('.mrpr-details-row')).toHaveText(`api #${rateLimit.number}·Merged`);
+    await expect(
+      blocks.nth(THREADS.release.pulls.indexOf(PULLS.ipRateLimit)).getByText('Closed')
+    ).toBeVisible();
+    // Its size and age, and the mark of the worktree's branch, on a line that wraps between them.
+    const meta = first.locator('.mrpr-details-title + .mrpr-meta');
+    await expect(meta).toContainText('+268');
+    await expect(meta).toContainText('9 files');
+    await expect(meta.getByText('this worktree', { exact: true })).toBeVisible();
+    await expect(blocks.nth(1).getByText('this worktree')).toHaveCount(0);
+    expect(await eachOnOneLine(details.locator('.mrpr-meta > *'))).toBe(true);
+    // Neither the branches nor the author; the worktree leaves out the branch the mark names.
+    await expect(details).not.toContainText('→');
+    await expect(details).not.toContainText('@acme-builder');
+    const worktree = details.locator('.mrpr-details-worktree');
+    await expect(worktree).toHaveText('Worktree/srv/agents/builder/…ate-limit-per-token');
+    // Shortened so it takes one line, whole in its tooltip.
+    await expect(worktree.locator('[title]')).toHaveAttribute('title', path);
+    expect(await eachOnOneLine(worktree.locator('[title]'))).toBe(true);
+    await shot(page, 'details-light', { keepPointer: true });
 
-  await page.mouse.move(0, 0);
-  await expect(details).toHaveCount(0);
-  await page.emulateMedia({ colorScheme: 'dark' });
-  await expect(page.locator('html')).toHaveAttribute('data-theme-kind', 'dark');
-  await card(page, roots.release).hover();
-  await expectDetailsTitles(details, THREADS.release.pulls);
-  await shot(page, 'details-dark', { keepPointer: true });
-  expect(unanswered).toEqual([]);
-  expect(warnings).toEqual([]);
+    await page.mouse.move(0, 0);
+    await expect(details).toHaveCount(0);
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await expect(page.locator('html')).toHaveAttribute('data-theme-kind', 'dark');
+    await card(page, roots.release).hover();
+    await expectDetailsTitles(details, THREADS.release.pulls);
+    await shot(page, 'details-dark', { keepPointer: true });
+    expect(unanswered).toEqual([]);
+    expect(warnings).toEqual([]);
+  } finally {
+    await writeWorktree(roots.release, {});
+  }
 });
 
 test('on a phone a long press on a card opens its menu with the details', async ({
@@ -1085,6 +1104,13 @@ test('on a phone a long press on a card opens its menu with the details', async 
   baseURL,
 }) => {
   test.setTimeout(4 * 60_000);
+  // A worktree on a branch none of the pull requests has: it shows its branch itself.
+  await writeWorktree(roots.sessions, {
+    path: 'worktrees/redis-session-expiry',
+    branch: 'redis-session-expiry',
+    set_by: agent.userId,
+    set_at: new Date().toISOString(),
+  });
   const context = await browser.newContext({ baseURL, ...PHONE_CONTEXT });
   const page = await context.newPage();
   try {
@@ -1098,11 +1124,17 @@ test('on a phone a long press on a card opens its menu with the details', async 
     ]);
     const details = page.getByRole('menu').locator('[data-thread-details]');
     await expectDetailsTitles(details, [PULLS.sessionStore, PULLS.tokenEndpoint]);
+    await expect(details.getByText('this worktree')).toHaveCount(0);
+    await expect(details.locator('.mrpr-details-worktree')).toHaveText(
+      'Worktreeredis-session-expiryworktrees/redis-session-expiry'
+    );
+    expect(await eachOnOneLine(details.locator('.mrpr-meta > *'))).toBe(true);
     await shot(page, 'phone-details-menu', { keepPointer: true });
     expect(unanswered).toEqual([]);
     expect(warnings).toEqual([]);
   } finally {
     await context.close();
+    await writeWorktree(roots.sessions, {});
   }
 });
 

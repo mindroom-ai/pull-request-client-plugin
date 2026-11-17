@@ -22,6 +22,8 @@ vi.mock('@mindroom/client-sdk/room', async (importOriginal) => {
 const ROOM_ID = '!room:example.org';
 const SHA = 'abc123';
 const REPOSITORY = 'mindroom-ai/mindroom-chat';
+// As on a chip, the details name the repository without its owner.
+const NUMBER = (number: number) => `mindroom-chat #${number}`;
 
 const pull = (over: Record<string, unknown> = {}) => ({
   title: 'Store sessions in Redis',
@@ -107,23 +109,28 @@ describe('ThreadDetails', () => {
   it("is the plugin's thread details, for threads with a link or a worktree", () =>
     expect(plugin.threadDetails).toEqual([{ shows: threadHasDetails, Component: ThreadDetails }]));
 
-  it('shows a loaded pull request: repository and number with its state and checks, title, branches, size, author and age', async () => {
+  it('shows a loaded pull request: repository and number with its state and checks, title, size and age', async () => {
     saveToken();
     serve({ 412: pull() }, [run('success')]);
     const { view } = await show(roomWith([{ number: 412 }]));
     const root = view.container.firstElementChild;
     expect(root?.getAttribute('class')).toBe('mrpr-root mrpr-details');
-    expect(view.getByText(`${REPOSITORY} #412`)).toBeTruthy();
-    await view.findByRole('img', { name: 'Open' });
-    await view.findByRole('img', { name: 'All checks have passed' });
+    expect(view.getByText(NUMBER(412))).toBeTruthy();
+    const state = await view.findByText('Open');
+    expect(state.getAttribute('class')).toBe('mrpr-details-state mrpr-tone-open');
+    // The checks' long words stay the icon's name and the tooltip of the short ones.
+    const checks = await view.findByRole('img', { name: 'All checks have passed' });
+    expect(checks.parentElement?.textContent).toBe('checks passed');
+    expect(checks.parentElement?.getAttribute('title')).toBe('All checks have passed');
     const title = view.getByText('Store sessions in Redis');
     expect(title.classList.contains('mrpr-details-title')).toBe(true);
-    expect(view.getByText('redis-sessions → main')).toBeTruthy();
     expect(view.getByText('+120')).toBeTruthy();
     expect(view.getByText('-30')).toBeTruthy();
     expect(view.getByText('5 files')).toBeTruthy();
-    expect(view.getByText('@acme-builder')).toBeTruthy();
-    expect(view.getByText('updated 2 hours ago')).toBeTruthy();
+    expect(view.getByText('2 hours ago')).toBeTruthy();
+    // Neither the owner, the branches nor the author.
+    expect(root?.textContent).not.toMatch(/mindroom-ai|→|redis-sessions|acme-builder|updated/);
+    expect(view.queryByText('this worktree')).toBeNull();
     expect(view.container.querySelector('button, a, [tabindex]')).toBeNull();
   });
 
@@ -131,7 +138,7 @@ describe('ThreadDetails', () => {
     fetchMock.mockImplementation(() => new Promise<Response>(() => undefined));
     const waiting = await show(roomWith([{ number: 412 }]));
     await vi.waitFor(() => expect(requests('/pulls/412').length).toBe(1));
-    expect(waiting.view.getByText(`${REPOSITORY} #412`)).toBeTruthy();
+    expect(waiting.view.getByText(NUMBER(412))).toBeTruthy();
     expect(waiting.view.queryByRole('img')).toBeNull();
     expect(waiting.view.container.querySelector('.mrpr-tone-draft')).not.toBeNull();
     expect(waiting.view.container.querySelector('.mrpr-details-title')).toBeNull();
@@ -141,70 +148,60 @@ describe('ThreadDetails', () => {
     fetchMock.mockImplementation(async () => respond({ message: 'Not Found' }, 404));
     const { view, client } = await show(roomWith([{ number: 412 }]));
     await answered(client, '/pulls/412');
-    expect(view.getByText(`${REPOSITORY} #412`)).toBeTruthy();
-    expect(view.queryByRole('img', { name: 'Open' })).toBeNull();
+    expect(view.container.firstElementChild?.textContent).toBe(NUMBER(412));
     expect(view.container.querySelector('.mrpr-details-title')).toBeNull();
-    expect(view.queryByText(/→/)).toBeNull();
   });
 
-  it("names a fork's head with its owner, and a deleted fork's head without one", async () => {
-    serve({
-      412: pull({
-        head: { sha: SHA, ref: 'fix-typo', repo: { full_name: 'contributor/mindroom-chat' } },
-      }),
-      413: pull({ head: { sha: SHA, ref: 'fix-typo', repo: null } }),
-    });
-    const fork = await show(roomWith([{ number: 412 }]));
-    expect(await fork.view.findByText('contributor:fix-typo → main')).toBeTruthy();
-    fork.view.unmount();
-    const deleted = await show(roomWith([{ number: 413 }]));
-    expect(await deleted.view.findByText('fix-typo → main')).toBeTruthy();
-  });
-
-  it('middle-truncates long branch names, on a line that wraps rather than cut the base', async () => {
-    const ref = 'feature/a-very-long-branch-name-for-details';
-    const base = 'release/2026.11-api-hardening-and-cleanup';
-    serve({
-      412: pull({
-        head: { sha: SHA, ref, repo: { full_name: REPOSITORY } },
-        base: { ref: base, repo: { full_name: REPOSITORY } },
-      }),
-    });
-    const { view } = await show(roomWith([{ number: 412 }]));
-    const line = await view.findByText(`${middleTruncate(ref, 24)} → ${middleTruncate(base, 24)}`);
-    expect(middleTruncate(ref, 24)).not.toBe(ref);
-    expect(middleTruncate(base, 24)).not.toBe(base);
-    expect(line.classList.contains('mrpr-details-wrap')).toBe(true);
-    expect(line.classList.contains('mrpr-truncate')).toBe(false);
-  });
-
-  it("middle-truncates a fork's head together with its owner", async () => {
-    const owner = 'a-very-long-contributor-name';
-    serve({
-      412: pull({
-        head: { sha: SHA, ref: 'fix-typo', repo: { full_name: `${owner}/mindroom-chat` } },
-      }),
-    });
-    const { view } = await show(roomWith([{ number: 412 }]));
-    const head = middleTruncate(`${owner}:fix-typo`, 24);
-    expect(await view.findByText(`${head} → main`)).toBeTruthy();
-    expect(head).not.toBe(`${owner}:fix-typo`);
-  });
-
-  it('shows the worktree with its branch and its path, and the path alone without a branch', async () => {
+  it('shows the worktree with its label, its branch and its path, and the path alone without a branch', async () => {
     const withBranch = await show(
       roomWith([], [{ path: 'worktrees/redis-sessions', branch: 'redis-sessions' }])
     );
     const worktree = withBranch.view.container.querySelector('.mrpr-details-worktree');
-    expect(worktree?.textContent).toBe('redis-sessionsworktrees/redis-sessions');
+    expect(worktree?.textContent).toBe('Worktreeredis-sessionsworktrees/redis-sessions');
     expect(blocks(withBranch.view)).toHaveLength(0);
     withBranch.view.unmount();
 
     const pathOnly = await show(roomWith([], [{ path: '/srv/worktrees/scratch', branch: '' }]));
     const alone = pathOnly.view.container.querySelector('.mrpr-details-worktree');
-    expect(alone?.textContent).toBe('/srv/worktrees/scratch');
+    expect(alone?.textContent).toBe('Worktree/srv/worktrees/scratch');
     expect(alone?.querySelectorAll('svg')).toHaveLength(1);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("marks the pull request on the worktree's branch, which the worktree then leaves out", async () => {
+    serve({ 412: pull(), 7: pull({ head: { sha: SHA, ref: 'other', repo: null } }) });
+    const { view } = await show(
+      roomWith(
+        [{ number: 412 }, { number: 7 }],
+        [{ path: 'worktrees/redis-sessions', branch: 'redis-sessions' }]
+      )
+    );
+    const mark = await view.findByText('this worktree');
+    expect(mark.closest('.mrpr-details-pull-request')).toBe(blocks(view)[0]);
+    expect(blocks(view)[1]?.textContent).not.toContain('this worktree');
+    const worktree = view.container.querySelector('.mrpr-details-worktree');
+    expect(worktree?.textContent).toBe('Worktreeworktrees/redis-sessions');
+  });
+
+  it("keeps the worktree's branch when no pull request is on it", async () => {
+    serve({ 412: pull() });
+    const { view, client } = await show(
+      roomWith([{ number: 412 }], [{ path: 'worktrees/x', branch: 'redis-sessions-v2' }])
+    );
+    await answered(client, '/pulls/412');
+    expect(view.getByText('Store sessions in Redis')).toBeTruthy();
+    expect(view.queryByText('this worktree')).toBeNull();
+    const worktree = view.container.querySelector('.mrpr-details-worktree');
+    expect(worktree?.textContent).toBe('Worktreeredis-sessions-v2worktrees/x');
+  });
+
+  it("shortens a worktree's long path in its middle, with the whole path as its tooltip", async () => {
+    const path = '/home/basnijholt/repos/worktrees/mindroom-tool-row-started-at';
+    const { view } = await show(roomWith([], [{ path, branch: '' }]));
+    const shown = view.getByText(middleTruncate(path, 40));
+    expect(middleTruncate(path, 40)).not.toBe(path);
+    expect(shown.textContent?.endsWith('tool-row-started-at')).toBe(true);
+    expect(shown.getAttribute('title')).toBe(path);
   });
 
   it('shows every pull request of the thread, also past the two its card shows', async () => {
@@ -223,8 +220,8 @@ describe('ThreadDetails', () => {
       'Second',
       'Third',
     ]);
-    expect(shown[0]?.textContent).toContain(`${REPOSITORY} #412`);
-    expect(shown[1]?.textContent).toContain(`${REPOSITORY} #7`);
+    expect(shown[0]?.textContent).toContain(NUMBER(412));
+    expect(shown[1]?.textContent).toContain(NUMBER(7));
     // The worktree comes after the pull requests.
     const last = view.container.firstElementChild?.lastElementChild;
     expect(last?.classList.contains('mrpr-details-worktree')).toBe(true);
