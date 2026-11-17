@@ -8,15 +8,19 @@ import {
   fetchPullRequest,
   fetchPullRequestFiles,
   fetchReviewComments,
+  fetchRepository,
   fetchReviews,
   GitHubError,
+  GitHubWriteError,
   type PullRequestRef,
 } from './github';
 import { useGitHubToken, useStoredToken } from './token';
 
 // A refusal GitHub gave twice would be the same again; only a failed request is worth another try.
 const retry = (count: number, error: Error) =>
-  error instanceof GitHubError && error.kind !== 'failed' ? false : count < 2;
+  (error instanceof GitHubError || error instanceof GitHubWriteError) && error.kind !== 'failed'
+    ? false
+    : count < 2;
 
 // Two minutes keeps a panel's worth of requests inside the anonymous rate limit.
 const STALE_TIME = 120_000;
@@ -59,6 +63,30 @@ export function usePullRequestFiles(ref: PullRequestRef | undefined, enabled: bo
     queryFn: ({ signal }) => fetchPullRequestFiles(ref as PullRequestRef, storedToken(), signal),
     enabled: enabled && ref !== undefined,
     staleTime: STALE_TIME,
+    retry,
+  });
+}
+
+/**
+ * What the viewer may do in the pull request's repository, and how it merges. GraphQL needs a
+ * token, so without one nothing is asked. It changes rarely, so a panel opened again reuses it.
+ */
+export function useRepository(ref: PullRequestRef | undefined) {
+  const { token } = useGitHubToken();
+  const storedToken = useStoredToken();
+  return useQuery({
+    queryKey: ['pull-requests', 'repo', ref?.owner, ref?.repo] as const,
+    queryFn: ({ signal }) => {
+      const { owner, repo } = ref as PullRequestRef;
+      const stored = storedToken();
+      // Forgotten after the render that enabled the query; no request goes without one.
+      if (stored === undefined) throw new GitHubWriteError('badToken', 0);
+      return fetchRepository(owner, repo, stored, signal);
+    },
+    enabled: token !== undefined && ref !== undefined,
+    staleTime: 600_000,
+    refetchOnMount: false,
+    retryOnMount: false,
     retry,
   });
 }
