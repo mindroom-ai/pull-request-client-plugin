@@ -1,4 +1,10 @@
-import { isCancelledError, useQuery, type Query, type QueryClient } from '@tanstack/react-query';
+import {
+  isCancelledError,
+  useQueries,
+  useQuery,
+  type Query,
+  type QueryClient,
+} from '@tanstack/react-query';
 import {
   fetchBehindBy,
   fetchChecks,
@@ -17,7 +23,7 @@ import {
   type PullRequest,
   type PullRequestRef,
 } from './github';
-import { useGitHubAccess, type AccessKey } from './token';
+import { useGitHubAccess, type AccessKey, type GitHubAccess } from './token';
 
 // A refusal GitHub gave twice would be the same again; only a failed request is worth another try.
 // A read cancelled because its key no longer names the access (`authFor`) is not tried again.
@@ -90,17 +96,29 @@ export type RefetchOptions = {
 // every chip seen so far would ask at once, and without a token that spends the hourly limit.
 export const NO_FOCUS_REFETCH = { refetchOnWindowFocus: false };
 
+// The query of one pull request, the same for `usePullRequest` and `usePullRequests`.
+const pullRequestQuery = (
+  ref: PullRequestRef | undefined,
+  access: GitHubAccess,
+  options: RefetchOptions
+) => ({
+  queryKey: keyOf(ref, access.key),
+  queryFn: ({ signal }: { signal: AbortSignal }) =>
+    fetchPullRequest(ref as PullRequestRef, access.authFor(access.key), signal),
+  enabled: ref !== undefined && !access.pending,
+  staleTime: STALE_TIME,
+  retry,
+  ...options,
+});
+
 export function usePullRequest(ref: PullRequestRef | undefined, options: RefetchOptions = {}) {
+  return useQuery(pullRequestQuery(ref, useGitHubAccess(), options));
+}
+
+/** The pull requests `refs` as `usePullRequest` reads each, through the same queries. */
+export function usePullRequests(refs: readonly PullRequestRef[], options: RefetchOptions = {}) {
   const access = useGitHubAccess();
-  return useQuery({
-    queryKey: keyOf(ref, access.key),
-    queryFn: ({ signal }) =>
-      fetchPullRequest(ref as PullRequestRef, access.authFor(access.key), signal),
-    enabled: ref !== undefined && !access.pending,
-    staleTime: STALE_TIME,
-    retry,
-    ...options,
-  });
+  return useQueries({ queries: refs.map((ref) => pullRequestQuery(ref, access, options)) });
 }
 
 export function usePullRequestFiles(ref: PullRequestRef | undefined, enabled: boolean) {
