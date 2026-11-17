@@ -15,6 +15,7 @@ import {
   CancelledError,
   useQuery,
   useQueryClient,
+  type Query,
   type QueryClient,
   type QueryKey,
 } from '@tanstack/react-query';
@@ -137,7 +138,8 @@ const serverKey = (origin: string, login: string | undefined) =>
  * (`retryOnMount: false`), so the refusals with nothing read that no part shows are forgotten:
  * they are asked anew then. One a part shows is asked again once that part shows it anew, under a
  * key it changes to. `refetch`, the key the parts keep (a new token's), is read again where it
- * shows.
+ * shows, once each read still under way there is cancelled: it went with the access before, and a
+ * query with nothing read yet would take its answer for the read again.
  */
 function readAgain(queryClient: QueryClient, refetch?: AccessKey) {
   const queryKey = ['pull-requests'];
@@ -151,22 +153,29 @@ function readAgain(queryClient: QueryClient, refetch?: AccessKey) {
     .forEach((query) => query.reset());
   void queryClient.invalidateQueries({ queryKey, refetchType: 'none' });
   if (refetch === undefined) return;
-  void queryClient.refetchQueries({
-    queryKey,
-    type: 'active',
-    predicate: (query) => accessOf(query.queryKey) === refetch,
-  });
+  const kept = { queryKey, predicate: (query: Query) => accessOf(query.queryKey) === refetch };
+  void queryClient
+    .cancelQueries(kept)
+    .then(() => queryClient.refetchQueries({ ...kept, type: 'active' }));
 }
 
 /**
- * Keeps `status` as the server's, and reads everything again when it names another connection.
- * Another way to the same login keeps its keys, so what shows under them is read again here.
+ * Keeps `status` as the server's, and reads everything again when it names another connection, or
+ * when `saved`: a token was saved or removed in MindRoom, which the same status may name as well.
+ * Another way to the same login, or another token of it, keeps its keys, so what shows under them
+ * is read again here.
  */
-function setStatus(queryClient: QueryClient, origin: string, status: ServerStatus) {
+function setStatus(
+  queryClient: QueryClient,
+  origin: string,
+  status: ServerStatus,
+  saved = false
+) {
   const before = queryClient.getQueryData<ServerStatus>(statusKey(origin));
   queryClient.setQueryData(statusKey(origin), status);
-  if (!before || identity(before) === identity(status)) return;
+  if (!before) return;
   const sameLogin = before.connected && status.connected && before.login === status.login;
+  if (identity(before) === identity(status) && !(saved && sameLogin)) return;
   readAgain(queryClient, sameLogin ? serverKey(origin, status.login) : undefined);
 }
 
@@ -285,7 +294,7 @@ function useServerToken() {
       const before = queryClient.getQueryData<ServerStatus>(statusKey(server.origin));
       // Saving answers with the token's account alone; the App connection there stays.
       const app = now.via === 'token' && (before?.via === 'app' || before?.appConnected === true);
-      setStatus(queryClient, server.origin, app ? { ...now, appConnected: true } : now);
+      setStatus(queryClient, server.origin, app ? { ...now, appConnected: true } : now, true);
     };
     return {
       /** Where it saves the token: the server's origin. */

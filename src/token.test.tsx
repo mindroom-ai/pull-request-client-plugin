@@ -399,8 +399,8 @@ describe('the token saved in MindRoom', () => {
   const respond = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
   /**
-   * GitHub knows `ghp_good` as `octo`, the App's login too, and `ghp_other` as `other`; it
-   * fails for `ghp_down` and refuses any other token. The pull request's title says how it was read.
+   * GitHub knows `ghp_good` and `ghp_new` as `octo`, the App's login too, and `ghp_other` as
+   * `other`; it fails for `ghp_down` and refuses any other token. The pull request's title says how it was read.
    */
   const github = async (url: string, init?: RequestInit) => {
     const auth = new Headers(init?.headers).get('authorization');
@@ -408,9 +408,11 @@ describe('the token saved in MindRoom', () => {
       if (auth === 'Bearer ghp_good') return respond({ login: 'octo' });
       if (auth === 'Bearer ghp_other') return respond({ login: 'other' });
       if (auth === 'Bearer ghp_down') return respond({ message: 'Server Error' }, 500);
+      if (auth === 'Bearer ghp_new') return respond({ login: 'octo' });
       return respond({ message: 'Bad credentials' }, 401);
     }
-    return respond({ ...apiPull, title: auth ? 'with the token' : 'with the App' });
+    const title = !auth ? 'with the App' : auth === 'Bearer ghp_new' ? 'with the new token' : 'with the token';
+    return respond({ ...apiPull, title });
   };
   const type = (field: HTMLElement, value: string) =>
     act(() => {
@@ -618,6 +620,56 @@ describe('the token saved in MindRoom', () => {
     expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
     await waitUntil(() => expect(mindroom.githubRequests()).toHaveLength(1));
     await waitUntil(() => expect(view.getByTestId('reader').textContent).toBe('with the token'));
+  });
+
+  it('reads again with a new token of the same login, under the same key', async () => {
+    const mindroom = githubServer(github);
+    const view = await form(mindroom.server);
+    await waitUntil(() => expect(accesses.reader?.connection).toBe('app'));
+    await chooseMindroom(view);
+    await save(view, 'ghp_good');
+    await waitUntil(() => expect(view.getByTestId('reader').textContent).toBe('with the token'));
+    await chooseMindroom(view);
+    await save(view, 'ghp_new');
+    await waitUntil(() =>
+      expect(view.getByTestId('reader').textContent).toBe('with the new token')
+    );
+    expect(accesses.reader?.key).toBe(`server:${ORIGIN}:octo`);
+  });
+
+  it('never shows what a read still under way with the App gives once the token is saved', async () => {
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const mindroom = githubServer(async (url, init) => {
+      const auth = new Headers(init?.headers).get('authorization');
+      if (url.includes('/pulls/') && !auth) await held;
+      return github(url, init);
+    });
+    const view = await form(mindroom.server);
+    await waitUntil(() => expect(mindroom.githubRequests()).toHaveLength(1));
+    await chooseMindroom(view);
+    await save(view, 'ghp_good');
+    await waitUntil(() => expect(view.getByTestId('reader').textContent).toBe('with the token'));
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(view.getByTestId('reader').textContent).toBe('with the token');
+  });
+
+  it("reads under the new login's keys once its token replaces the App, and not under the old ones", async () => {
+    const mindroom = githubServer(github);
+    const view = await form(mindroom.server);
+    await waitUntil(() => expect(view.getByTestId('reader').textContent).toBe('with the App'));
+    const octos = ['pull-requests', 'pr', 'o', 'r', 7, `server:${ORIGIN}:octo`];
+    expect(client.getQueryState(octos)?.dataUpdateCount).toBe(1);
+    await chooseMindroom(view);
+    await save(view, 'ghp_other');
+    await waitUntil(() => expect(view.getByTestId('reader').textContent).toBe('with the token'));
+    expect(accesses.reader).toMatchObject({ connection: 'token', key: `server:${ORIGIN}:other` });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(client.getQueryState(octos)).toMatchObject({ dataUpdateCount: 1, isInvalidated: true });
+    expect(mindroom.githubRequests()).toHaveLength(2);
   });
 
   it('saves and removes it without following a redirect, which would take the token elsewhere', async () => {
