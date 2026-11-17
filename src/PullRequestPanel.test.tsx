@@ -767,4 +767,49 @@ describe('PullRequestPanel', () => {
       expect(view.getByRole('button', { name: 'Retry' })).toBeTruthy();
     });
   });
+
+  describe('header actions', () => {
+    const GRAPHQL = 'https://api.github.com/graphql';
+    const headerRow = (view: Awaited<ReturnType<typeof show>>) =>
+      view.container.querySelector<HTMLElement>('.mrpr-header-actions');
+
+    it("shows today's header row without a token, and asks GitHub no GraphQL", async () => {
+      const view = await show();
+      await view.findByText('Add pull request cards');
+      const row = headerRow(view);
+      expect(Array.from(row?.children ?? []).map((child) => child.textContent)).toEqual([
+        'Open on GitHub',
+      ]);
+      expect(view.queryByRole('button', { name: 'More actions' })).toBeNull();
+      expect(view.queryByRole('button', { name: 'Merge' })).toBeNull();
+      expect(fetchMock.mock.calls.filter(([url]) => url === GRAPHQL)).toEqual([]);
+    });
+
+    it('a merged pull request shows the Merged badge and no Merge button', async () => {
+      localStorage.setItem(
+        'mindroom.plugin:%40plugin-tester%3Aexample.org/pull-requests/githubToken',
+        'tok'
+      );
+      const repository = {
+        viewerPermission: 'WRITE',
+        mergeCommitAllowed: true,
+        squashMergeAllowed: true,
+        rebaseMergeAllowed: true,
+        autoMergeAllowed: true,
+        defaultBranchRef: { name: 'main' },
+      };
+      fetchMock.mockImplementation(async (url) =>
+        url === GRAPHQL
+          ? respond({ data: { repository } })
+          : url.includes('/files')
+          ? respond([])
+          : respond(pull({ state: 'closed', merged_at: '2026-11-02T00:00:00Z' }))
+      );
+      const view = await show();
+      expect(await view.findByRole('button', { name: 'More actions' })).toBeTruthy();
+      expect(view.getAllByText('Merged')).toHaveLength(1);
+      expect(view.queryByRole('button', { name: 'Merge' })).toBeNull();
+      expect(headerRow(view)?.textContent).toContain('Open on GitHub');
+    });
+  });
 });

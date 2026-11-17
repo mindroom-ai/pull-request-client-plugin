@@ -819,6 +819,94 @@
   font-size: 12px;
 }
 
+/* The header's actions: the primary control in the accent, the menu's button, and the line that
+   says what runs or what came of it, on a row of its own under them. */
+.mrpr-button-primary {
+  border-color: var(--pr-primary);
+  background: color-mix(in srgb, var(--pr-primary) 16%, transparent);
+  font-weight: 600;
+}
+.mrpr-button-primary:hover {
+  background: color-mix(in srgb, var(--pr-primary) 26%, transparent);
+}
+.mrpr-button-primary:disabled,
+.mrpr-dialog-actions .mrpr-button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.mrpr-button-danger {
+  border-color: var(--pr-removed);
+  color: var(--pr-removed);
+}
+.mrpr-action-result {
+  display: flex;
+  flex-basis: 100%;
+  order: 1;
+  align-items: center;
+  gap: 8px;
+  color: var(--pr-muted);
+  overflow-wrap: anywhere;
+}
+.mrpr-action-result-title {
+  color: var(--pr-fg);
+  font-weight: 600;
+}
+.mrpr-action-result-dismiss {
+  flex-shrink: 0;
+  margin-inline-start: auto;
+}
+.mrpr-actions-menu {
+  min-inline-size: 220px;
+}
+/* A menu row's wrapper that holds the ref of its two-click confirm, without a box of its own. */
+.mrpr-menu-slot {
+  display: contents;
+}
+.mrpr-menu-radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: inherit;
+}
+/* Where an unchosen method's check mark would be, so the labels line up. */
+.mrpr-menu-icon-space {
+  flex-shrink: 0;
+  inline-size: 16px;
+}
+.mrpr-dialog {
+  box-sizing: border-box;
+  inline-size: min(28rem, calc(100vw - 2rem));
+  padding: 16px;
+}
+.mrpr-dialog-title {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.mrpr-dialog-body {
+  margin: 0 0 16px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.mrpr-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+/* A finger needs a larger target than a pointer. */
+@media (any-pointer: coarse) {
+  .mrpr-button-primary,
+  .mrpr-dialog-actions .mrpr-button {
+    min-block-size: 44px;
+    padding-inline: 14px;
+  }
+  .mrpr-header-more,
+  .mrpr-action-result-dismiss {
+    min-inline-size: 44px;
+    min-block-size: 44px;
+  }
+}
+
 .mrpr-tabbar {
   display: flex;
   flex-shrink: 0;
