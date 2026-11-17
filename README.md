@@ -108,6 +108,23 @@ E2E_PLUGIN_DIRS=/path/to/pull-request-client-plugin MINDROOM_CLIENT_PLUGINS=/pat
 
 The page answers GitHub's API itself, so no request leaves the test. With `MRPR_SHOTS=<directory>` (an absolute one: the run's working directory is the slot's snapshot), it saves screenshots of a thread's pull requests: the Compact view in the light and dark themes, the hover card of a chip on a card and of one in the strip in both themes, a hover card with six reviewers and five labels, an open thread with its strip and the panel, and the Compact view on a phone; of a thread's branch on its card and in the strip of the open thread; and of the panel's actions: the header with Merge (`actions-open.png`), the More actions menu (`actions-menu.png`), the armed Confirm merge? (`actions-confirm.png`), the header after the merge (`actions-merged.png`), the dialog before the branch goes (`actions-delete-dialog.png`), the line with GitHub's reason for a refused merge (`actions-refused.png`), the header of a closed pull request (`actions-closed.png`), the base branch's warning with Update branch (`actions-behind.png`), the header after the update (`actions-updated.png`), the line after an update GitHub has not made yet (`actions-update-requested.png`) and the header with its controls on a phone (`actions-phone.png`).
 
+## GitHub through MindRoom
+
+In a room with a MindRoom server (the one `useMindroomServer` gives the room), the plugin can read and write GitHub as the GitHub account the person connected in MindRoom, with no token in the browser: MindRoom adds the account's token to each request, and the token never reaches the page. The plugin chooses how to reach GitHub in this order:
+
+1. A token stored in the browser (see "GitHub token") always comes first, and MindRoom is asked nothing.
+2. Else, when the room has a MindRoom server, the plugin asks it once (`GET /api/github/status`, again after five minutes at the earliest) whether the person's GitHub is connected. While it says so, every read and write goes through `POST /api/github/request`, and the panel says `Using your GitHub account connected in MindRoom (@login)` where it otherwise offers to forget the token. The token form stays where it showed before, as an override.
+3. Else the plugin reads without a token, as before, and offers no writes. In a room without a MindRoom server nothing changes: no request goes to MindRoom.
+
+Everything this README says of a stored token holds for the connection too: the checks marks, the reviewers in the hover card, the GraphQL reads and the panel's actions, which show as soon as GitHub says the account may write. What was read through MindRoom is kept apart from what was read with a token or without one. When MindRoom answers that the account is no longer connected (`409 github_not_connected`), the plugin reads without it again, until the status is asked again.
+
+For this, MindRoom's GitHub connection has to be set up and the person has to connect:
+
+- a GitHub App with the repository permissions Pull requests: Read and write, Contents: Read and write, Checks: Read and Metadata: Read (and Commit statuses: Read for the commit statuses), installed on the repositories, as MindRoom's `docs/tools/project-management.md` ("GitHub In Client Plugins") describes;
+- Connect GitHub in MindRoom, by the person who uses the plugin.
+
+The App reaches only the repositories it is installed on: for any other, GitHub does not find the pull request, and the plugin says the App may not be installed there, and offers the token form.
+
 ## GitHub token
 
 Public pull requests need no token. For a private repository, or to avoid GitHub's rate limit for requests without one, a person can enter a GitHub token in the plugin's panel. The token is kept in the browser's localStorage for the signed-in account, where any script running on the page can read it. Requests go to `https://api.github.com` and nowhere else; the token is sent only there, and only when one is stored. The plugin reads with `GET`, and asks GraphQL (`POST https://api.github.com/graphql`, only with a token) for the repository's merge settings and whether the account may write, and for where the branch of a merged or closed pull request points; it writes only when a person runs one of the panel's actions.
