@@ -1,4 +1,4 @@
-// Ported from T3 Code (https://github.com/pingdotgg/t3code, apps/web/src/components/diffs/DiffFileTree.tsx, components/files/fileTreeExpansion.ts and hooks/useStableCallback.ts at 8ab427c6), MIT, Copyright (c) 2026 T3 Tools Inc. See NOTICE.
+// Ported from T3 Code (https://github.com/pingdotgg/t3code, apps/web/src/components/diffs/DiffFileTree.tsx, components/files/fileTreeExpansion.ts and hooks/useStableCallback.ts at 8ab427c6 (and 1c86881dd5)), MIT, Copyright (c) 2026 T3 Tools Inc. See NOTICE.
 // The changed files as a tree, in Pierre's file tree, with a header that folds every folder.
 import { IconButton, IconTooltip, useThemeKind } from '@mindroom/client-sdk/ui';
 import { usePluginTranslation } from '@mindroom/client-sdk/core';
@@ -9,7 +9,14 @@ import type {
 } from '@pierre/trees';
 import { FileTree, useFileTree, useFileTreeSelector } from '@pierre/trees/react';
 import { ChevronsDownUp, ChevronsUpDown } from 'lucide-react';
-import { useEffect, useInsertionEffect, useMemo, useRef, useState } from 'react';
+import {
+  useEffect,
+  useInsertionEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 
 import {
   buildDiffFileTreeUpdates,
@@ -35,6 +42,31 @@ function areAllDirectoriesExpanded(model: TreeModel, directoryPaths: readonly st
       return item !== null && 'isExpanded' in item && item.isExpanded();
     })
   );
+}
+
+/**
+ * Calls `listener` once per task, however many events the model emitted in it. Expanding every
+ * folder emits one event per folder, and a listener that looks at every folder is quadratic
+ * otherwise.
+ */
+function subscribeOncePerTask(
+  model: { subscribe(listener: () => void): () => void },
+  listener: () => void
+): () => void {
+  let queued = false;
+  let subscribed = true;
+  const unsubscribe = model.subscribe(() => {
+    if (queued) return;
+    queued = true;
+    queueMicrotask(() => {
+      queued = false;
+      if (subscribed) listener();
+    });
+  });
+  return () => {
+    subscribed = false;
+    unsubscribe();
+  };
 }
 
 function setAllDirectoriesExpanded(
@@ -154,8 +186,9 @@ export function DiffFileTree({ entries, onSelectFile, ariaLabel }: DiffFileTreeP
     sort: ordering.sort,
     unsafeCSS: PIERRE_TREE_UNSAFE_CSS,
   });
-  const allDirectoriesExpanded = useFileTreeSelector(model, (currentModel) =>
-    areAllDirectoriesExpanded(currentModel, directoryPaths)
+  const allDirectoriesExpanded = useSyncExternalStore(
+    (listener) => subscribeOncePerTask(model, listener),
+    () => areAllDirectoriesExpanded(model, directoryPaths)
   );
   // The tree takes no height from its rows, so it says how tall they are: above the diffs, its
   // pane is as tall as them until it reaches its cap.
