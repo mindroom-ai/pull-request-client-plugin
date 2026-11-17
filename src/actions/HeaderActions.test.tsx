@@ -118,13 +118,13 @@ function Harness({ pullRequest }: { pullRequest: PullRequest }) {
 }
 
 let client: QueryClient;
+const ui = (pullRequest: PullRequest) => (
+  <QueryClientProvider client={client}>
+    <Harness pullRequest={pullRequest} />
+  </QueryClientProvider>
+);
 const show = (pullRequest: PullRequest = open) =>
-  renderPluginComponent(
-    <QueryClientProvider client={client}>
-      <Harness pullRequest={pullRequest} />
-    </QueryClientProvider>,
-    { id: 'pull-requests', plugin }
-  );
+  renderPluginComponent(ui(pullRequest), { id: 'pull-requests', plugin });
 type View = Awaited<ReturnType<typeof show>>;
 
 // The app's test setup draws menus as plain components, so a row is found by its text.
@@ -475,6 +475,10 @@ describe('HeaderActions', () => {
     expect(writes()).toEqual([]);
   });
 
+  // Disabled for the click and for a screen reader, yet still able to hold the focus.
+  const isOff = (button: HTMLElement) =>
+    button.hasAttribute('disabled') || button.getAttribute('aria-disabled') === 'true';
+
   it('disables every control while an action runs, and says what runs', async () => {
     writeAnswer = () => hold(() => respond({}));
     const view = await show();
@@ -483,10 +487,18 @@ describe('HeaderActions', () => {
     expect(writes()).toHaveLength(1);
     const buttons = Array.from(view.getByTestId('header-row').querySelectorAll('button'));
     expect(buttons.length).toBeGreaterThan(1);
-    expect(buttons.every((button) => button.disabled)).toBe(true);
+    expect(buttons.every(isOff)).toBe(true);
     expect(view.getByRole('status').textContent).toBe('Converting to draft...');
+    // Neither the menu opens nor the merge arms meanwhile.
+    await click(moreActions(view));
+    expect(moreActions(view).getAttribute('aria-expanded')).toBe('false');
+    expect(view.queryByText('Refresh')).toBeNull();
+    await click(view.getByRole('button', { name: 'Merge' }));
+    expect(view.queryByRole('button', { name: 'Confirm merge?' })).toBeNull();
+    expect(writes()).toHaveLength(1);
     await answerHeld();
-    expect(view.getByRole('button', { name: 'Merge' }).hasAttribute('disabled')).toBe(false);
+    await waitUntil(() => expect(isOff(view.getByRole('button', { name: 'Merge' }))).toBe(false));
+    expect(isOff(moreActions(view))).toBe(false);
   });
 
   it('the pending primary control says so', async () => {
@@ -496,7 +508,109 @@ describe('HeaderActions', () => {
     await click(view.getByRole('button', { name: 'Merge' }));
     await click(view.getByRole('button', { name: 'Confirm merge?' }));
     const pending = view.getByRole('button', { name: 'Merging...' });
-    expect(pending.hasAttribute('disabled')).toBe(true);
-    expect(moreActions(view).hasAttribute('disabled')).toBe(true);
+    expect(isOff(pending)).toBe(true);
+    expect(isOff(moreActions(view))).toBe(true);
+  });
+
+  describe('for a screen reader and the keyboard', () => {
+    const status = (view: View) => view.getByRole('status');
+    const announcedOnly = (view: View) => {
+      expect(status(view).className).toBe('mrpr-sr-only');
+      // Nothing to press in a line nobody sees.
+      expect(status(view).querySelector('button')).toBeNull();
+    };
+
+    it('announces a merge that runs and that it is done, though the header shows both', async () => {
+      writeAnswer = () => hold(() => respond({ merged: true }));
+      const view = await show();
+      await waitUntil(() => expect(view.getByRole('button', { name: 'Merge' })));
+      const region = status(view);
+      await click(view.getByRole('button', { name: 'Merge' }));
+      await click(view.getByRole('button', { name: 'Confirm merge?' }));
+      expect(status(view)).toBe(region);
+      expect(region.textContent).toBe('Merging...');
+      announcedOnly(view);
+      await answerHeld();
+      await waitUntil(() => expect(region.textContent).toBe('Pull request merged'));
+      expect(status(view)).toBe(region);
+      announcedOnly(view);
+    });
+
+    it.each([
+      ['Convert to draft', 'Converted to draft'],
+      ['Enable auto-merge', 'Auto-merge enabled'],
+    ])("announces the outcome of the menu's %s", async (name, outcome) => {
+      writeAnswer = async () => respond({ data: {} });
+      const view = await show(blocked);
+      await openMenu(view);
+      await click(row(view, name));
+      if (name === 'Enable auto-merge') await click(row(view, 'Confirm auto-merge?'));
+      await waitUntil(() => expect(status(view).textContent).toBe(outcome));
+      announcedOnly(view);
+    });
+
+    it('gives the focus back to More actions at once after a menu action, and leaves it there', async () => {
+      writeAnswer = () => hold(() => respond({ data: {} }));
+      const view = await show();
+      await openMenu(view);
+      await click(row(view, 'Convert to draft'));
+      expect(writes()).toHaveLength(1);
+      // Not on the page's body, where a keyboard would start over from the top.
+      expect(document.activeElement).toBe(moreActions(view));
+      await answerHeld();
+      await waitUntil(() => expect(isOff(moreActions(view))).toBe(false));
+      expect(document.activeElement).toBe(moreActions(view));
+    });
+
+    it('keeps the focus on the primary control while its action runs', async () => {
+      writeAnswer = () => hold(() => respond({ data: {} }));
+      const view = await show({ ...open, draft: true });
+      await waitUntil(() => expect(view.getByRole('button', { name: 'Ready for review' })));
+      const ready = view.getByRole('button', { name: 'Ready for review' });
+      ready.focus();
+      await click(ready);
+      expect(ready.textContent).toBe('Marking ready for review...');
+      // A browser takes the focus from a control with `disabled`, so it is off by ARIA alone.
+      expect(ready.hasAttribute('disabled')).toBe(false);
+      expect(ready.getAttribute('aria-disabled')).toBe('true');
+      expect(document.activeElement).toBe(ready);
+      // A second press of it sends nothing more.
+      await click(ready);
+      expect(writes()).toHaveLength(1);
+      await answerHeld();
+      await waitUntil(() => expect(isOff(ready)).toBe(false));
+      expect(document.activeElement).toBe(ready);
+    });
+
+    it('moves the focus to More actions when a merge takes the focused control away', async () => {
+      writeAnswer = () => hold(() => respond({ merged: true }));
+      const view = await show();
+      await waitUntil(() => expect(view.getByRole('button', { name: 'Merge' })));
+      const merge = view.getByRole('button', { name: 'Merge' });
+      merge.focus();
+      await click(merge);
+      await click(view.getByRole('button', { name: 'Confirm merge?' }));
+      expect(document.activeElement).toBe(merge);
+      // The read after the merge shows it merged, which has no primary control.
+      view.rerender(ui(merged));
+      expect(view.queryByRole('button', { name: 'Merging...' })).toBeNull();
+      await answerHeld();
+      await waitUntil(() => expect(isOff(moreActions(view))).toBe(false));
+      expect(document.activeElement).toBe(moreActions(view));
+    });
+
+    it('leaves the focus where the viewer put it meanwhile', async () => {
+      writeAnswer = () => hold(() => respond({ data: {} }));
+      const view = await show();
+      await openMenu(view);
+      await click(row(view, 'Convert to draft'));
+      const elsewhere = document.createElement('button');
+      document.body.append(elsewhere);
+      elsewhere.focus();
+      await answerHeld();
+      await waitUntil(() => expect(isOff(moreActions(view))).toBe(false));
+      expect(document.activeElement).toBe(elsewhere);
+      elsewhere.remove();
+    });
   });
 });

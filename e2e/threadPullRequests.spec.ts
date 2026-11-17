@@ -1291,6 +1291,12 @@ test("a viewer who can write merges the panel's pull request with two clicks", a
     },
   ]);
   await expect(merge).toHaveCount(0);
+  // A screen reader heard the merge, which the line does not show; and the focus, which the
+  // button that is gone had, is on More actions, not lost to the page.
+  const status = panel(page).getByRole('status');
+  await expect(status).toHaveText('Pull request merged');
+  await expect(status).toHaveClass('mrpr-sr-only');
+  await expect(panel(page).getByRole('button', { name: 'More actions' })).toBeFocused();
   await shot(page, 'actions-merged');
 
   // The merged pull request's branch goes only after the dialog's own button; Cancel sends nothing.
@@ -1367,8 +1373,10 @@ test("a merge GitHub refuses shows GitHub's reason under the header", async ({ p
   await expect(result).toHaveAttribute('role', 'status');
   await shot(page, 'actions-refused');
   expect(writes.map(({ method, pathname }) => `${method} ${pathname}`)).toEqual([`PUT ${path}`]);
-  // Still open, so Merge is offered again, and the line goes with its Dismiss.
+  // Still open, so Merge is offered again, with the focus it kept while the merge ran, and the
+  // line goes with its Dismiss.
   await expect(merge).toBeEnabled();
+  await expect(merge).toBeFocused();
   await result.getByRole('button', { name: 'Dismiss' }).click();
   await expect(result).toHaveCount(0);
   expect(unanswered).toEqual([]);
@@ -1442,7 +1450,10 @@ test('a pull request closed with two clicks reopens from the menu', async ({ pag
 
   await more.click();
   await menu.getByRole('menuitem', { name: 'Reopen pull request' }).click();
+  // The menu's button has the focus back at once, while the action still runs.
+  await expect(more).toBeFocused();
   await expect(badge).toHaveCount(0, { timeout: 30_000 });
+  await expect(more).toBeFocused();
   await expect(merge).toBeVisible();
   expect(writes).toEqual([
     { method: 'PATCH', pathname: pull, body: { state: 'closed' } },

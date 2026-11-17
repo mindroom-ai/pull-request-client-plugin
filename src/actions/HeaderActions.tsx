@@ -60,7 +60,9 @@ const CONFIRM: Partial<Record<PullRequestAction, string>> = {
   close: 'actions.confirm.close',
 };
 
-const DONE: ReadonlySet<PullRequestAction> = new Set([
+// The successes nothing else on screen shows, so the line under the header shows them. The
+// others the header shows itself (a badge, another control), and the line only announces them.
+const SHOWN_DONE: ReadonlySet<PullRequestAction> = new Set([
   'delete-branch',
   'update-branch',
   'update-branch-rebase',
@@ -104,10 +106,31 @@ export function HeaderActions({
   }, [anchor]);
   // While an action runs no other starts, so its menu does not stay open either.
   if (pending !== null && anchor !== undefined) setAnchor(undefined);
+  const busy = pending !== null;
+  // An action may take the control that had the focus away with it: a merged pull request has
+  // no Merge, an updated branch no warning. The focus then falls to the page, where a keyboard
+  // or a screen reader starts over from the top, so when the action ends it goes to More
+  // actions, which every state keeps. Focus the viewer put elsewhere meanwhile stays there.
+  const wasBusy = useRef(false);
+  useEffect(() => {
+    if (busy) {
+      wasBusy.current = true;
+      return;
+    }
+    if (!wasBusy.current) return;
+    wasBusy.current = false;
+    const focused = document.activeElement;
+    if (focused === null || focused === document.body) {
+      moreRef.current?.focus({ preventScroll: true });
+    }
+  }, [busy]);
 
   if (!repo || !canWrite) return null;
 
-  const busy = pending !== null;
+  // The two controls that can have the focus when an action starts stay focusable while it
+  // runs: `disabled` would drop the focus to the page, so they are off by ARIA and ignore the
+  // click instead.
+  const off = busy ? { 'aria-disabled': true } : undefined;
   const primary = primaryControl(
     pr,
     repo,
@@ -151,8 +174,8 @@ export function HeaderActions({
       <button
         type="button"
         className="mrpr-button mrpr-button-primary"
-        disabled={busy}
-        onClick={() => perform('ready')}
+        {...off}
+        onClick={busy ? undefined : () => perform('ready')}
       >
         {primaryLabel('ready', t('actions.ready'))}
       </button>
@@ -160,12 +183,14 @@ export function HeaderActions({
   } else if ((primary === 'merge' || primary === 'enable-auto-merge') && method !== null) {
     const idle =
       primary === 'merge' ? t(`actions.merge.${method}`) : t('actions.autoMerge', { method });
+    const { onClick, ...armable } = confirm.props(primary, () => perform(primary));
     primaryControlElement = (
       <button
         type="button"
         className="mrpr-button mrpr-button-primary"
-        disabled={busy}
-        {...confirm.props(primary, () => perform(primary))}
+        {...off}
+        {...armable}
+        onClick={busy ? undefined : onClick}
       >
         {primaryLabel(primary, idle)}
       </button>
@@ -241,10 +266,11 @@ export function HeaderActions({
             aria-label={more}
             aria-haspopup="menu"
             aria-expanded={anchor !== undefined}
-            disabled={busy}
-            onClick={(event: MouseEvent<HTMLButtonElement>) =>
-              setAnchor(anchor ? undefined : event.currentTarget.getBoundingClientRect())
-            }
+            {...off}
+            onClick={(event: MouseEvent<HTMLButtonElement>) => {
+              if (busy) return;
+              setAnchor(anchor ? undefined : event.currentTarget.getBoundingClientRect());
+            }}
           >
             <MoreHorizontal aria-hidden className="mrpr-button-icon" />
           </IconButton>
@@ -320,7 +346,8 @@ export function HeaderActions({
         }
       />
       <ResultLine
-        pending={pending === primaryAction ? null : pending}
+        pending={pending}
+        pendingShown={pending !== primaryAction}
         result={result}
         onDismiss={dismissResult}
       />
@@ -341,27 +368,33 @@ export function HeaderActions({
 }
 
 /**
- * What runs when no control on screen says so, and what came of the last action: a failure with
- * why, or a success that nothing else on screen shows. The status region stays drawn while it
- * has nothing to say, as some screen readers announce only a change in one already there.
+ * What runs, and what came of the last action, as a status region: a screen reader announces
+ * every action that starts and how it ended. It shows as a line only what no control on screen
+ * says: an action a menu started (`pendingShown`), a failure with why, and a success the header
+ * does not show itself; the rest it holds for the screen reader alone, without a Dismiss. The
+ * region stays drawn while it has nothing to say, as some screen readers announce only a change
+ * in one already there.
  */
 function ResultLine({
   pending,
+  pendingShown,
   result,
   onDismiss,
 }: {
   pending: PullRequestAction | null;
+  pendingShown: boolean;
   result: ActionResult | null;
   onDismiss: () => void;
 }) {
   const t = usePluginTranslation('pull-requests');
-  const shown =
-    pending === null && result !== null && (result.outcome === 'failed' || DONE.has(result.action))
-      ? result
-      : null;
+  const announced =
+    pending === null && result?.outcome === 'done' && !SHOWN_DONE.has(result.action);
+  const shown = pending === null && !announced ? result : null;
   let content: ReactNode = null;
   if (pending !== null) {
     content = t(`actions.pending.${pending}`);
+  } else if (result !== null && announced) {
+    content = t(`actions.done.${result.action}`);
   } else if (shown !== null) {
     const dismiss = t('actions.dismiss');
     let text: ReactNode;
@@ -405,8 +438,9 @@ function ResultLine({
       </>
     );
   }
+  const visible = pending !== null ? pendingShown : shown !== null;
   return (
-    <div role="status" className={content === null ? 'mrpr-sr-only' : 'mrpr-action-result'}>
+    <div role="status" className={visible ? 'mrpr-action-result' : 'mrpr-sr-only'}>
       {content}
     </div>
   );

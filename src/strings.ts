@@ -63,7 +63,7 @@ export const en = {
   badge: { autoMerge: 'Auto-merge ({{method}})' },
   // The header's actions on a pull request: its primary control, the menu, the delete dialog
   // and the line under the header that says what runs and what failed. `pending`, `failed` and
-  // `done` are by action.
+  // `done` are by action; a screen reader hears each, also those the line does not show.
   actions: {
     merge: { merge: 'Merge', squash: 'Squash and merge', rebase: 'Rebase and merge' },
     autoMerge: 'Auto-merge ({{method}})',
@@ -101,6 +101,13 @@ export const en = {
       'This deletes {{branch}} from {{repo}} on GitHub. Local branches and worktrees are not changed.',
     cancel: 'Cancel',
     done: {
+      merge: 'Pull request merged',
+      'enable-auto-merge': 'Auto-merge enabled',
+      'disable-auto-merge': 'Auto-merge disabled',
+      ready: 'Marked ready for review',
+      draft: 'Converted to draft',
+      close: 'Pull request closed',
+      reopen: 'Pull request reopened',
       'delete-branch': 'Branch deleted',
       'update-branch': 'Branch updated',
       'update-branch-rebase': 'Branch rebased',

@@ -826,10 +826,14 @@
   background: color-mix(in srgb, var(--pr-primary) 16%, transparent);
   font-weight: 600;
 }
-.mrpr-button-primary:hover {
+/* While an action runs the primary control is off by ARIA, not `disabled`, to keep the focus. */
+.mrpr-button-primary:hover:not([aria-disabled='true']) {
   background: color-mix(in srgb, var(--pr-primary) 26%, transparent);
 }
-.mrpr-button-primary:disabled,
+.mrpr-button-primary[aria-disabled='true']:hover {
+  background: color-mix(in srgb, var(--pr-primary) 16%, transparent);
+}
+.mrpr-button-primary[aria-disabled='true'],
 .mrpr-dialog-actions .mrpr-button:disabled,
 .mrpr-popover-actions .mrpr-button:disabled {
   cursor: default;
