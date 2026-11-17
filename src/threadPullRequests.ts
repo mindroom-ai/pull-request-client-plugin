@@ -176,6 +176,12 @@ function snapshotOf(room: Room): RoomPullRequests {
   return pullRequests;
 }
 
+/** Whether a thread of the room has a linked pull request or a worktree to show. */
+export function threadHasDetails(room: Room, threadId: string): boolean {
+  const { byThread, worktrees } = snapshotOf(room);
+  return byThread.has(threadId) || worktrees.has(threadId);
+}
+
 /** The subscription only tells React to read again; the read checks the room's state itself. */
 function subscribeTo(room: Room, notify: () => void): () => void {
   const store = storeOf(room);

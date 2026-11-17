@@ -4,13 +4,11 @@
 import { useEffect, useId, useState } from 'react';
 import { usePluginTranslation } from '@mindroom/client-sdk/core';
 import { GitPullRequestArrow } from 'lucide-react';
-import { checksState } from './detail/detail.logic';
 import type { PullRequestRef } from './github';
 import { PullRequestHoverCard, useHoverCard } from './PullRequestHoverCard';
-import { pullRequestChecksStatePresentation, resolvePullRequestState } from './presentation';
-import { useChecks, usePullRequest } from './queries';
+import { pullRequestChecksStatePresentation } from './presentation';
+import { usePullRequestStatus } from './pullRequestStatus';
 import { pluginRootStyle } from './theme';
-import { useGitHubToken } from './token';
 
 /** Whether `element` has been on screen; at once where the browser cannot tell. */
 function useOnScreenOnce(element: Element | null): boolean {
@@ -25,8 +23,6 @@ function useOnScreenOnce(element: Element | null): boolean {
   }, [element, seen]);
   return seen;
 }
-
-const NO_FOCUS_REFETCH = { refetchOnWindowFocus: false };
 
 export function PullRequestChip({
   pullRequest,
@@ -48,18 +44,8 @@ export function PullRequestChip({
   const [element, setElement] = useState<HTMLElement | null>(null);
   // The Compact view draws every card of a room: a chip asks GitHub once it has been on screen.
   const queried = useOnScreenOnce(element) ? pullRequest : undefined;
-  // A chip asks again when it shows after its answer went stale, not when the tab regains focus:
-  // every chip seen so far would ask at once, and without a token that spends the hourly limit.
-  const query = usePullRequest(queried, NO_FOCUS_REFETCH);
-  const pr = query.data;
-  const { token } = useGitHubToken();
-  // Only an open pull request, draft or not, has checks worth asking for, and only with a token:
-  // without one, GitHub allows 60 requests an hour, kept for the pull requests and the panel.
-  const withChecks = pr?.state === 'open' && token !== undefined;
-  const checks = useChecks(queried, pr?.headSha ?? '', withChecks, NO_FOCUS_REFETCH);
-  const checksMark = withChecks && checks.data ? checksState(checks.data.items) : 'none';
-  const mark = checksMark === 'none' ? undefined : pullRequestChecksStatePresentation(checksMark);
-  const state = pr && resolvePullRequestState(pr);
+  const { pr, state, checks, error, checkList } = usePullRequestStatus(queried);
+  const mark = checks && pullRequestChecksStatePresentation(checks);
   // Until GitHub sent the pull request, or when it refused, the plain icon in the draft's tone.
   const StateIcon = state?.Icon ?? GitPullRequestArrow;
   const tone = state?.toneClassName ?? 'mrpr-tone-draft';
@@ -115,8 +101,8 @@ export function PullRequestChip({
           anchor={element}
           pullRequest={pullRequest}
           pr={pr}
-          error={query.error}
-          checks={withChecks ? { items: checks.data?.items, failed: checks.isError } : undefined}
+          error={error}
+          checks={checkList}
           // The panel already shows a pressed chip's pull request.
           opensPanel={(onSelect !== undefined && !selected) || opensPanel}
         />
