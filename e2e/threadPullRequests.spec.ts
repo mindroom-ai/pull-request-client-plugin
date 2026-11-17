@@ -1025,11 +1025,29 @@ test('on a phone a card shows one chip and the count of the rest', async ({ brow
   }
 });
 
-/** Whether each element of `locator` takes one line of the details, so none wraps inside. */
-const eachOnOneLine = (locator: Locator) =>
-  locator.evaluateAll((elements) =>
-    elements.every((element) => element.getBoundingClientRect().height <= 17)
+/** Expects each element of `locator`, one at least, on one line inside `details`: none wraps
+ * inside, is cut at its end or reaches past the details' sides. */
+const expectEachOnOneLine = async (locator: Locator, details: Locator) => {
+  await expect(locator.first()).toBeVisible();
+  const bounds = await details.boundingBox();
+  expect(bounds).not.toBeNull();
+  const misfits = await locator.evaluateAll(
+    (elements, { x, width }) =>
+      elements
+        .filter((element) => {
+          const box = element.getBoundingClientRect();
+          return (
+            box.height > 17 ||
+            element.scrollWidth > element.clientWidth ||
+            box.left < x - 0.5 ||
+            box.right > x + width + 0.5
+          );
+        })
+        .map((element) => element.textContent),
+    bounds as { x: number; width: number }
   );
+  expect(misfits).toEqual([]);
+};
 
 /** Expects `details` to show the pull requests `pulls` in order, each by its title from GitHub. */
 const expectDetailsTitles = async (details: Locator, pulls: Pull[]) => {
@@ -1074,7 +1092,7 @@ test("resting the pointer on a card shows all its pull requests' details", async
     await expect(meta).toContainText('9 files');
     await expect(meta.getByText('this worktree', { exact: true })).toBeVisible();
     await expect(blocks.nth(1).getByText('this worktree')).toHaveCount(0);
-    expect(await eachOnOneLine(details.locator('.mrpr-meta > *'))).toBe(true);
+    await expectEachOnOneLine(details.locator('.mrpr-meta > *'), details);
     // Neither the branches nor the author; the worktree leaves out the branch the mark names.
     await expect(details).not.toContainText('→');
     await expect(details).not.toContainText('@acme-builder');
@@ -1082,7 +1100,7 @@ test("resting the pointer on a card shows all its pull requests' details", async
     await expect(worktree).toHaveText('Worktree/srv/agents/builder/…ate-limit-per-token');
     // Shortened so it takes one line, whole in its tooltip.
     await expect(worktree.locator('[title]')).toHaveAttribute('title', path);
-    expect(await eachOnOneLine(worktree.locator('[title]'))).toBe(true);
+    await expectEachOnOneLine(worktree.locator('[title]'), details);
     await shot(page, 'details-light', { keepPointer: true });
 
     await page.mouse.move(0, 0);
@@ -1128,7 +1146,7 @@ test('on a phone a long press on a card opens its menu with the details', async 
     await expect(details.locator('.mrpr-details-worktree')).toHaveText(
       'Worktreeredis-session-expiryworktrees/redis-session-expiry'
     );
-    expect(await eachOnOneLine(details.locator('.mrpr-meta > *'))).toBe(true);
+    await expectEachOnOneLine(details.locator('.mrpr-meta > *'), details);
     await shot(page, 'phone-details-menu', { keepPointer: true });
     expect(unanswered).toEqual([]);
     expect(warnings).toEqual([]);

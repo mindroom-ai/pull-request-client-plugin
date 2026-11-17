@@ -74,8 +74,11 @@ function PullRequestDetails({
             {t('details.pullRequest', { repository: pullRequest.repo, number: pullRequest.number })}
           </span>
           {state ? (
-            <span key="state" className={`mrpr-details-state ${state.toneClassName}`}>
-              {t(`state.${state.key}`)}
+            // The tone colors the words through `mrpr-details-word`, in a shade text can have.
+            <span key="state" className={state.toneClassName}>
+              <span className="mrpr-details-word mrpr-details-state">
+                {t(`state.${state.key}`)}
+              </span>
             </span>
           ) : null}
           {mark ? (
@@ -84,8 +87,8 @@ function PullRequestDetails({
               className={`mrpr-state ${mark.toneClassName}`}
               title={t(`checksState.${checks}`)}
             >
-              <mark.Icon role="img" aria-label={t(`checksState.${checks}`)} className="mrpr-icon" />
-              {t(`details.checks.${checks}`)}
+              <mark.Icon aria-hidden className="mrpr-icon" />
+              <span className="mrpr-details-word">{t(`details.checks.${checks}`)}</span>
             </span>
           ) : null}
         </PullRequestMetaLine>
@@ -134,12 +137,12 @@ function WorktreeDetails({
       <p className="mrpr-details-label">{t('details.worktree')}</p>
       {branch && showBranch ? (
         <div className="mrpr-details-row">
-          <GitBranch aria-hidden className="mrpr-icon mrpr-details-icon" />
+          <GitBranch aria-hidden className="mrpr-icon" />
           <span className="mrpr-details-wrap">{branch}</span>
         </div>
       ) : null}
       <div className="mrpr-details-row">
-        <Folder aria-hidden className="mrpr-icon mrpr-details-icon" />
+        <Folder aria-hidden className="mrpr-icon" />
         <span className="mrpr-details-wrap mrpr-details-path" title={path}>
           {middleTruncate(path, PATH_MAX)}
         </span>

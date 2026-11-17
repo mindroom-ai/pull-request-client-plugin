@@ -1889,12 +1889,14 @@ button.mrpr-chip:focus-visible {
 }
 /* A thread's details, in its card's hover card and its menu: muted rows of 12px text, the pull
    requests first and the worktree last, a line between blocks. The icons have the chips' size,
-   and a pull request's title stands out in the text's color, in two lines at most. */
+   and a pull request's title stands out in the text's color, in two lines at most. The theme's
+   muted color is often its text color, so the rows mix their own: 68% keeps 5.7:1 on the
+   default light theme's surface and 6.4:1 on the dark one's. */
 .mrpr-details {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  color: var(--pr-muted);
+  color: color-mix(in srgb, var(--pr-fg) 68%, var(--pr-surface));
   font-size: 12px;
   line-height: 16px;
 }
@@ -1914,6 +1916,7 @@ button.mrpr-chip:focus-visible {
 .mrpr-details .mrpr-meta {
   flex-wrap: wrap;
   row-gap: 0;
+  color: inherit;
   font-size: inherit;
   line-height: inherit;
 }
@@ -1933,8 +1936,11 @@ button.mrpr-chip:focus-visible {
   block-size: calc(0.65rem * 1.1);
   margin-block: calc((16px - 0.65rem * 1.1) / 2);
 }
-.mrpr-details-icon {
-  color: var(--pr-muted);
+/* The words of a state or of the checks, in their tone (the parent's) mixed with the text's
+   color: GitHub's colors and the theme's are an icon's, too light or too dark for 12px text, and
+   this mix keeps 4.5:1 at least on the default light and dark themes' surfaces. */
+.mrpr-details-word {
+  color: color-mix(in srgb, currentColor 65%, var(--pr-fg));
 }
 .mrpr-details-state {
   font-weight: 600;

@@ -117,11 +117,14 @@ describe('ThreadDetails', () => {
     expect(root?.getAttribute('class')).toBe('mrpr-root mrpr-details');
     expect(view.getByText(NUMBER(412))).toBeTruthy();
     const state = await view.findByText('Open');
-    expect(state.getAttribute('class')).toBe('mrpr-details-state mrpr-tone-open');
-    // The checks' long words stay the icon's name and the tooltip of the short ones.
-    const checks = await view.findByRole('img', { name: 'All checks have passed' });
-    expect(checks.parentElement?.textContent).toBe('checks passed');
-    expect(checks.parentElement?.getAttribute('title')).toBe('All checks have passed');
+    expect(state.getAttribute('class')).toBe('mrpr-details-word mrpr-details-state');
+    expect(state.parentElement?.getAttribute('class')).toBe('mrpr-tone-open');
+    // The checks in a few words, their long words as the tooltip; the icon says nothing more.
+    const checks = (await view.findByText('checks passed')).parentElement;
+    expect(checks?.getAttribute('title')).toBe('All checks have passed');
+    expect(checks?.classList.contains('mrpr-tone-success')).toBe(true);
+    expect(checks?.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
+    expect(view.queryByRole('img')).toBeNull();
     const title = view.getByText('Store sessions in Redis');
     expect(title.classList.contains('mrpr-details-title')).toBe(true);
     expect(view.getByText('+120')).toBeTruthy();
@@ -242,7 +245,7 @@ describe('ThreadDetails', () => {
     await answered(client, '/check-runs');
     const asked = fetchMock.mock.calls.length;
     const { view } = await show(room, client);
-    expect(view.getByRole('img', { name: 'All checks have passed' })).toBeTruthy();
+    expect(view.getByText('checks passed')).toBeTruthy();
     expect(view.getByText('Store sessions in Redis')).toBeTruthy();
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(client.isFetching()).toBe(0);
@@ -268,7 +271,7 @@ describe('ThreadDetails', () => {
     vi.setSystemTime(Date.now() + 121_000);
     for (let hover = 0; hover < 2; hover += 1) {
       const { view } = await show(room, client);
-      expect(view.getByRole('img', { name: 'All checks have passed' })).toBeTruthy();
+      expect(view.getByText('checks passed')).toBeTruthy();
       await new Promise((resolve) => setTimeout(resolve, 0));
       expect(client.isFetching()).toBe(0);
       view.unmount();
