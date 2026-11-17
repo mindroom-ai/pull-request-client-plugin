@@ -20,6 +20,7 @@ import {
   diffFileTreePositions,
   type DiffFileTreeEntry,
 } from './diffFileTree.logic';
+import { useLanguage } from '../presentation';
 import { PIERRE_TREE_UNSAFE_CSS, pierreTreeStyle } from './pierreTreeTheme';
 
 export type { DiffFileTreeEntry } from './diffFileTree.logic';
@@ -75,6 +76,7 @@ interface DiffFileTreeProps {
 
 export function DiffFileTree({ entries, onSelectFile, ariaLabel }: DiffFileTreeProps) {
   const t = usePluginTranslation('pull-requests');
+  const language = useLanguage();
   const themeKind = useThemeKind();
   const paths = entries.map((entry) => entry.path);
   const presented = diffFileTreeModel(paths);
@@ -115,8 +117,10 @@ export function DiffFileTree({ entries, onSelectFile, ariaLabel }: DiffFileTreeP
       if (item.kind !== 'directory') return null;
       const lines = directoryLines.get(item.path);
       if (lines === undefined || (lines.additions === 0 && lines.deletions === 0)) return null;
-      const additions = lines.additions.toLocaleString();
-      const deletions = lines.deletions.toLocaleString();
+      // In the app's language, as the pull request's own line counts are.
+      const format = new Intl.NumberFormat(language);
+      const additions = format.format(lines.additions);
+      const deletions = format.format(lines.deletions);
       const added = `+${additions}`;
       const removed = `-${deletions}`;
       return {
@@ -207,7 +211,7 @@ export function DiffFileTree({ entries, onSelectFile, ariaLabel }: DiffFileTreeP
   // when upgrading @pierre/trees (1.0.0-beta.6).
   useEffect(() => {
     model.setComposition(model.getComposition());
-  }, [directoryLines, model, t]);
+  }, [directoryLines, language, model, t]);
 
   const foldLabel = allDirectoriesExpanded ? t('code.collapseFolders') : t('code.expandFolders');
   return (

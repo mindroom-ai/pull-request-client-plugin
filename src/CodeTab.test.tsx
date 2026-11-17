@@ -165,13 +165,13 @@ vi.mock('@pierre/trees/react', async () => {
           <div data-testid="tree-folders">
             {folders.map(([path, decoration]) =>
               decoration === null ? null : (
-                <span
-                  key={path}
-                  data-path={path}
-                  title={decoration.title}
-                  data-colors={decoration.parts?.map((part) => part.color).join(' ')}
-                >
-                  {decoration.text}
+                // Like Pierre, it draws the parts when there are some, and the text otherwise.
+                <span key={path} data-path={path} title={decoration.title}>
+                  {(decoration.parts ?? [{ text: decoration.text }]).map((part, index) => (
+                    <span key={index} data-color={part.color}>
+                      {part.text}
+                    </span>
+                  ))}
                 </span>
               )
             )}
@@ -382,13 +382,22 @@ const chooseCommit = async (tabView: Awaited<ReturnType<typeof show>>, name: Reg
 
 const treeItems = (tree: HTMLElement) =>
   [...tree.querySelectorAll('li')].map((item) => [item.textContent, item.dataset.status]);
-// The changed lines the tree shows on its folders, by folder.
+// The changed lines the tree shows on its folders, by folder, the parts it draws apart by a space.
 const folderLines = (tab: TabView) =>
   Object.fromEntries(
     [...tab.getByTestId('tree-folders').querySelectorAll<HTMLElement>('[data-path]')].map(
-      (folder) => [folder.dataset.path, folder.textContent]
+      (folder) => [
+        folder.dataset.path,
+        [...folder.children].map((part) => part.textContent).join(' '),
+      ]
     )
   );
+const folderColors = (tab: TabView, path: string) =>
+  [
+    ...tab
+      .getByTestId('tree-folders')
+      .querySelectorAll<HTMLElement>(`[data-path="${path}"] > [data-color]`),
+  ].map((part) => [part.textContent, part.dataset.color]);
 
 beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -823,7 +832,10 @@ describe('CodeTab', () => {
       });
       const src = tab.getByTestId('tree-folders').querySelector<HTMLElement>('[data-path="src/"]');
       expect(src?.title).toBe(`${(1230).toLocaleString()} lines added, 7 removed`);
-      expect(src?.dataset.colors).toBe('var(--pr-added) var(--pr-removed)');
+      expect(folderColors(tab, 'src/')).toEqual([
+        [`+${(1230).toLocaleString()}`, 'var(--pr-added)'],
+        ['-7', 'var(--pr-removed)'],
+      ]);
 
       await click(tab.getByRole('button', { name: 'Hide test files' }));
       expect(folderLines(tab)).toEqual({
@@ -847,6 +859,22 @@ describe('CodeTab', () => {
       tab.rerender(ui(8, 4));
       expect(folderLines(tab)).toEqual({ 'src/': '+8 -4' });
       expect(src()?.title).toBe('8 lines added, 4 removed');
+    });
+
+    it("formats a folder's lines in the app's language", async () => {
+      // The app's German strings, none of which this test needs.
+      fetchMock.mockImplementation(async (url) =>
+        url.includes('/locales/de.json') ? respond({}) : respond({}, 404)
+      );
+      const tab = await renderPluginComponent(
+        <QueryClientProvider client={new QueryClient()}>
+          <Holder files={[file({ path: 'src/a.ts', additions: 1230, deletions: 7 })]} />
+        </QueryClientProvider>,
+        { id: 'pull-requests', plugin, language: 'de' }
+      );
+      expect(folderLines(tab)).toEqual({ 'src/': '+1.230 -7' });
+      const src = tab.getByTestId('tree-folders').querySelector<HTMLElement>('[data-path="src/"]');
+      expect(src?.title).toBe('1.230 lines added, 7 removed');
     });
 
     it('offers no test file toggle without test files', async () => {

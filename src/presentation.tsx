@@ -57,7 +57,7 @@ export function resolvePullRequestState(input: {
 }
 
 /** The app's language, which numbers and relative times are formatted in. */
-function useLanguage(): string | undefined {
+export function useLanguage(): string | undefined {
   return useTranslation().i18n.resolvedLanguage;
 }
 
