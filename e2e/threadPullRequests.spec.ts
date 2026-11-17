@@ -30,7 +30,10 @@ import { touch } from '@mindroom/e2e/touch';
 // a thread's worktree, which MindRoom's `thread-worktree` backend plugin writes, shows as its
 // branch on its card and in the strip until it is cleared; a thread's pull requests show as its
 // details in the card's hover card and, on a phone, in the menu a long press opens; and a viewer
-// who can write merges a pull request from the panel's header with two clicks.
+// who can write merges a pull request from the panel's header with two clicks (and is asked before
+// its branch goes), sees GitHub's reason for a refused merge, chooses the merge method that the
+// next pull request and the next page load keep, closes and reopens a pull request, and updates a
+// branch behind its base from the base branch's warning, with the header's controls on a phone.
 // Set MRPR_SHOTS=<directory> to save the screenshots of the pull request.
 
 const LINK_EVENT = 'com.mindroom.thread.pull_request';
@@ -209,6 +212,7 @@ const apiPull = (pull: Pull) => {
     labels: (pull.labels ?? []).map((name) => ({ name, color: '0e8a16' })),
     requested_reviewers: (pull.reviewers ?? []).map(gitHubUser),
     requested_teams: [],
+    mergeable: done ? null : true,
     mergeable_state: done ? null : 'clean',
     auto_merge: null,
     head: { sha: headSha(pull), ref: pull.branch, repo },
@@ -258,12 +262,23 @@ const CHECK_RUNS: Record<Checks, [string, 'success' | 'failure' | null][]> = {
 
 /**
  * GitHub's answer to a GET of `pathname`, or undefined for a path these pull requests lack; the
- * pull requests in `merged` (by path) have been merged in the page since it loaded.
+ * pull requests in `moved` (by path) have been merged, closed or reopened in the page since it
+ * loaded, and those in `behind` (by path) are that many commits behind their base.
  */
-const gitHubAnswer = (pathname: string, merged: ReadonlySet<string>): unknown => {
+const gitHubAnswer = (
+  pathname: string,
+  moved: ReadonlyMap<string, Pull['state']>,
+  behind: Readonly<Record<string, number>>
+): unknown => {
   const [, repo, kind, id, part] =
     /^\/repos\/acme\/([^/]+)\/([a-z]+)\/([^/]+)(?:\/([a-z-]+))?$/.exec(pathname) ?? [];
-  if (kind === 'compare') return { behind_by: 0, ahead_by: 3 };
+  if (kind === 'compare') {
+    const pull = ALL_PULLS.find(
+      (candidate) => candidate.repo === repo && id.endsWith(`...${headSha(candidate)}`)
+    );
+    const by = pull ? behind[`/repos/acme/${repo}/pulls/${pull.number}`] ?? 0 : 0;
+    return { behind_by: by, ahead_by: 3 };
+  }
   if (kind === 'commits') {
     const pull = ALL_PULLS.find(
       (candidate) => candidate.repo === repo && headSha(candidate) === id
@@ -281,7 +296,8 @@ const gitHubAnswer = (pathname: string, merged: ReadonlySet<string>): unknown =>
   );
   if (!pull) return undefined;
   if (kind === 'pulls' && part === undefined) {
-    return apiPull(merged.has(pathname) ? { ...pull, state: 'merged' } : pull);
+    const state = moved.get(pathname);
+    return apiPull(state ? { ...pull, state } : pull);
   }
   if (kind === 'pulls' && part === 'reviews') {
     return pull.approvedBy
@@ -318,7 +334,7 @@ const gitHubAnswer = (pathname: string, merged: ReadonlySet<string>): unknown =>
 const CORS = {
   'access-control-allow-origin': '*',
   'access-control-allow-headers': 'accept, authorization, content-type, x-github-api-version',
-  'access-control-allow-methods': 'GET, POST, PUT',
+  'access-control-allow-methods': 'GET, POST, PUT, PATCH, DELETE',
 };
 
 // The repository's settings as GraphQL gives them: the lead may write, with every merge method.
@@ -335,12 +351,23 @@ type Write = { method: string; pathname: string; body: unknown };
 
 /**
  * Answers GitHub's API in the page; the returned list collects the paths it had no answer for.
- * It answers the repository's GraphQL query and a merge, which `writes` collects, after which the
- * pull request reads as merged.
+ * It answers the repository's GraphQL query and the writes, which `writes` collects: a merge,
+ * after which the pull request reads as merged; a close or a reopen, after which it reads so; an
+ * update of the branch, after which it is behind no more; and a deletion of a branch. A write in
+ * `refuse` (by method and path) GitHub refuses with 405 and its message; a pull request in
+ * `behind` (by path) starts that many commits behind its base.
  */
-const stubGitHub = async (page: Page, writes: Write[] = []): Promise<string[]> => {
+const stubGitHub = async (
+  page: Page,
+  writes: Write[] = [],
+  {
+    refuse = {},
+    behind = {},
+  }: { refuse?: Record<string, string>; behind?: Record<string, number> } = {}
+): Promise<string[]> => {
   const unanswered: string[] = [];
-  const merged = new Set<string>();
+  const moved = new Map<string, Pull['state']>();
+  const behindNow = { ...behind };
   await page.route('https://api.github.com/**', async (route) => {
     const request = route.request();
     if (request.method() === 'OPTIONS') {
@@ -355,18 +382,43 @@ const stubGitHub = async (page: Page, writes: Write[] = []): Promise<string[]> =
         await route.fulfill({ headers: CORS, json: { data: { repository: REPOSITORY } } });
         return;
       }
-      const pull = /^(\/repos\/acme\/[^/]+\/pulls\/\d+)\/merge$/.exec(pathname)?.[1];
-      if (request.method() === 'PUT' && pull) {
-        writes.push({ method: 'PUT', pathname, body });
-        merged.add(pull);
-        await route.fulfill({ headers: CORS, json: { merged: true, message: 'Merged' } });
+      const write = `${request.method()} ${pathname}`;
+      const [, pull, part] =
+        /^(\/repos\/acme\/[^/]+\/pulls\/\d+)(?:\/(merge|update-branch))?$/.exec(pathname) ?? [];
+      const branch = /^\/repos\/acme\/[^/]+\/git\/refs\/heads\/.+$/.test(pathname);
+      const known =
+        (request.method() === 'PUT' && pull && part) ||
+        (request.method() === 'PATCH' && pull && !part) ||
+        (request.method() === 'DELETE' && branch);
+      if (known) {
+        writes.push({ method: request.method(), pathname, body });
+        if (write in refuse) {
+          await route.fulfill({ status: 405, headers: CORS, json: { message: refuse[write] } });
+          return;
+        }
+        if (part === 'merge') moved.set(pull!, 'merged');
+        if (part === 'update-branch') delete behindNow[pull!];
+        if (request.method() === 'PATCH') {
+          const { state } = body as { state: 'open' | 'closed' };
+          moved.set(pull!, state);
+        }
+        // What GitHub answers; the panel reads only the status.
+        await route.fulfill(
+          branch
+            ? { status: 204, headers: CORS }
+            : part === 'update-branch'
+            ? { status: 202, headers: CORS, json: { message: 'Updating pull request branch.' } }
+            : part === 'merge'
+            ? { headers: CORS, json: { merged: true, message: 'Merged' } }
+            : { headers: CORS, json: body }
+        );
         return;
       }
-      unanswered.push(`${request.method()} ${pathname}`);
+      unanswered.push(write);
       await route.fulfill({ status: 404, headers: CORS, json: { message: 'Not Found' } });
       return;
     }
-    const answer = gitHubAnswer(pathname, merged);
+    const answer = gitHubAnswer(pathname, moved, behindNow);
     if (answer === undefined) unanswered.push(pathname);
     await route.fulfill(
       answer === undefined
@@ -1179,6 +1231,191 @@ test("a viewer who can write merges the panel's pull request with two clicks", a
   ]);
   await expect(merge).toHaveCount(0);
   await shot(page, 'actions-merged');
+
+  // The merged pull request's branch goes only after the dialog's own button; Cancel sends nothing.
+  await panel(page).getByRole('button', { name: 'More actions' }).click();
+  await menu.getByRole('menuitem', { name: 'Delete branch' }).click();
+  const dialog = page.getByRole('dialog', { name: `Delete branch ${tokenEndpoint.branch}?` });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText(
+    `This deletes ${tokenEndpoint.branch} from acme/${tokenEndpoint.repo} on GitHub.`
+  );
+  await shot(page, 'actions-delete-dialog');
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(writes.map(({ method }) => method)).toEqual(['PUT']);
   expect(unanswered).toEqual([]);
   expect(warnings).toEqual([]);
+});
+
+/** Opens the side panel on the token endpoint's pull request, from its chip on the thread's card. */
+const openTokenEndpoint = async (page: Page) => {
+  const { tokenEndpoint } = PULLS;
+  await expectChips(cardChips(page, roots.sessions), THREADS.sessions.pulls);
+  await cardChips(page, roots.sessions).nth(1).click();
+  await expect(panel(page).locator('.mrpr-panel-title')).toHaveText(tokenEndpoint.title, {
+    timeout: 30_000,
+  });
+  await expect(panel(page).getByRole('button', { name: 'More actions' })).toBeVisible({
+    timeout: 30_000,
+  });
+};
+
+test("a merge GitHub refuses shows GitHub's reason under the header", async ({ page }) => {
+  test.setTimeout(4 * 60_000);
+  const { tokenEndpoint } = PULLS;
+  const path = `/repos/acme/${tokenEndpoint.repo}/pulls/${tokenEndpoint.number}/merge`;
+  const reason = 'Head branch was modified. Review and try the merge again.';
+  const writes: Write[] = [];
+  const unanswered = await stubGitHub(page, writes, { refuse: { [`PUT ${path}`]: reason } });
+  const warnings = listenerWarnings(page);
+  await openRoom(page);
+  await openTokenEndpoint(page);
+  const merge = panel(page).getByRole('button', { name: 'Merge', exact: true });
+  await merge.click();
+  await panel(page).getByRole('button', { name: 'Confirm merge?' }).click();
+  const result = panel(page).locator('.mrpr-action-result');
+  await expect(result).toContainText(reason, { timeout: 30_000 });
+  await expect(result).toContainText('Could not merge this pull request');
+  await expect(result).toHaveAttribute('role', 'status');
+  await shot(page, 'actions-refused');
+  expect(writes.map(({ method, pathname }) => `${method} ${pathname}`)).toEqual([`PUT ${path}`]);
+  // Still open, so Merge is offered again, and the line goes with its Dismiss.
+  await expect(merge).toBeEnabled();
+  await result.getByRole('button', { name: 'Dismiss' }).click();
+  await expect(result).toHaveCount(0);
+  expect(unanswered).toEqual([]);
+  expect(warnings).toEqual([]);
+});
+
+test('the merge method chosen in the menu names Merge, and holds for the next pull request and the next page load', async ({
+  page,
+}) => {
+  test.setTimeout(4 * 60_000);
+  const writes: Write[] = [];
+  const unanswered = await stubGitHub(page, writes);
+  const warnings = listenerWarnings(page);
+  await openRoom(page);
+  await openTokenEndpoint(page);
+  const more = panel(page).getByRole('button', { name: 'More actions' });
+  const menu = page.getByRole('menu', { name: 'More actions' });
+  await expect(panel(page).getByRole('button', { name: 'Merge', exact: true })).toBeVisible();
+  await more.click();
+  await menu.getByRole('menuitemradio', { name: 'Squash and merge' }).click();
+  await expect(menu).toHaveCount(0);
+  const squash = panel(page).getByRole('button', { name: 'Squash and merge', exact: true });
+  await expect(squash).toBeVisible();
+  await more.click();
+  await expect(menu.getByRole('menuitemradio', { name: 'Squash and merge' })).toHaveAttribute(
+    'aria-checked',
+    'true'
+  );
+  await page.keyboard.press('Escape');
+  await expect(menu).toHaveCount(0);
+
+  // The thread's other pull request, whose checks still run, auto-merges with it.
+  await strip(page).getByRole('button').nth(0).click();
+  await expect(panel(page).locator('.mrpr-panel-title')).toHaveText(PULLS.sessionStore.title);
+  await expect(panel(page).getByRole('button', { name: 'Auto-merge (squash)' })).toBeVisible({
+    timeout: 30_000,
+  });
+
+  // And after the page loads again.
+  await page.goto(`/home/${encodeURIComponent(roomId)}`);
+  await expect(card(page, roots.sessions)).toBeVisible({ timeout: 120_000 });
+  await openTokenEndpoint(page);
+  await expect(squash).toBeVisible();
+  expect(writes).toEqual([]);
+  expect(unanswered).toEqual([]);
+  expect(warnings).toEqual([]);
+});
+
+test('a pull request closed with two clicks reopens from the menu', async ({ page }) => {
+  test.setTimeout(4 * 60_000);
+  const { tokenEndpoint } = PULLS;
+  const writes: Write[] = [];
+  const unanswered = await stubGitHub(page, writes);
+  const warnings = listenerWarnings(page);
+  await openRoom(page);
+  await openTokenEndpoint(page);
+  const more = panel(page).getByRole('button', { name: 'More actions' });
+  const menu = page.getByRole('menu', { name: 'More actions' });
+  const badge = panel(page).locator('.mrpr-badge-state');
+  const merge = panel(page).getByRole('button', { name: 'Merge', exact: true });
+  const pull = `/repos/acme/${tokenEndpoint.repo}/pulls/${tokenEndpoint.number}`;
+
+  await more.click();
+  await menu.getByRole('menuitem', { name: 'Close pull request' }).click();
+  expect(writes).toEqual([]);
+  await menu.getByRole('menuitem', { name: 'Confirm close?' }).click();
+  await expect(badge).toHaveText('Closed', { timeout: 30_000 });
+  await expect(merge).toHaveCount(0);
+  expect(writes).toEqual([{ method: 'PATCH', pathname: pull, body: { state: 'closed' } }]);
+  await shot(page, 'actions-closed');
+
+  await more.click();
+  await menu.getByRole('menuitem', { name: 'Reopen pull request' }).click();
+  await expect(badge).toHaveCount(0, { timeout: 30_000 });
+  await expect(merge).toBeVisible();
+  expect(writes).toEqual([
+    { method: 'PATCH', pathname: pull, body: { state: 'closed' } },
+    { method: 'PATCH', pathname: pull, body: { state: 'open' } },
+  ]);
+  expect(unanswered).toEqual([]);
+  expect(warnings).toEqual([]);
+});
+
+test("a branch behind its base updates from the base branch's warning", async ({ page }) => {
+  test.setTimeout(4 * 60_000);
+  const { tokenEndpoint } = PULLS;
+  const pull = `/repos/acme/${tokenEndpoint.repo}/pulls/${tokenEndpoint.number}`;
+  const writes: Write[] = [];
+  const unanswered = await stubGitHub(page, writes, { behind: { [pull]: 2 } });
+  const warnings = listenerWarnings(page);
+  await openRoom(page);
+  await openTokenEndpoint(page);
+  const warning = panel(page).getByRole('button', { name: 'Warnings for main' });
+  await warning.click();
+  await expect(page.getByText(`${tokenEndpoint.branch} is 2 commits behind main`)).toBeVisible();
+  await shot(page, 'actions-behind', { keepPointer: true });
+  await page.getByRole('button', { name: 'Update branch', exact: true }).click();
+  await expect(panel(page).getByText('Branch updated')).toBeVisible({ timeout: 30_000 });
+  expect(writes).toEqual([
+    {
+      method: 'PUT',
+      pathname: `${pull}/update-branch`,
+      body: { expected_head_sha: headSha(tokenEndpoint) },
+    },
+  ]);
+  // Its refetch finds the branch up to date.
+  await expect(warning).toHaveCount(0, { timeout: 30_000 });
+  await shot(page, 'actions-updated');
+  expect(unanswered).toEqual([]);
+  expect(warnings).toEqual([]);
+});
+
+test("on a phone the panel's header has the controls", async ({ browser, baseURL }) => {
+  test.setTimeout(4 * 60_000);
+  const context = await browser.newContext({ baseURL, ...PHONE_CONTEXT });
+  const page = await context.newPage();
+  try {
+    const unanswered = await stubGitHub(page);
+    const warnings = listenerWarnings(page);
+    await openRoom(page);
+    await expectChips(cardChips(page, roots.sessions), [PULLS.sessionStore]);
+    await cardChips(page, roots.sessions).first().click();
+    await expect(panel(page).locator('.mrpr-panel-title')).toHaveText(PULLS.sessionStore.title, {
+      timeout: 30_000,
+    });
+    await expect(panel(page).getByRole('button', { name: 'Auto-merge (merge)' })).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(panel(page).getByRole('button', { name: 'More actions' })).toBeVisible();
+    await expect(panel(page).getByText(/^Loading/)).toHaveCount(0);
+    await shot(page, 'actions-phone');
+    expect(unanswered).toEqual([]);
+    expect(warnings).toEqual([]);
+  } finally {
+    await context.close();
+  }
 });
