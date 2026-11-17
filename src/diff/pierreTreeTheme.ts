@@ -1,4 +1,4 @@
-// Ported from T3 Code (https://github.com/pingdotgg/t3code, apps/web/src/pierre-tree-theme.ts at 8ab427c6), MIT, Copyright (c) 2026 T3 Tools Inc. See NOTICE.
+// Ported from T3 Code (https://github.com/pingdotgg/t3code, apps/web/src/pierre-tree-theme.ts at 6dd092315e), MIT, Copyright (c) 2026 T3 Tools Inc. See NOTICE.
 // The file tree in the app's colors and font: Pierre draws it in a shadow root, which takes these
 // styles and inherits the --pr-* variables of pluginRootStyle().
 import type { CSSProperties } from 'react';
@@ -63,5 +63,7 @@ export function pierreTreeStyle(colorScheme: 'light' | 'dark'): CSSProperties {
   return {
     colorScheme,
     ['--trees-fg-override' as string]: 'var(--pr-fg)',
+    ['--trees-fg-muted-override' as string]: 'var(--pr-muted)',
+    ['--trees-status-ignored-override' as string]: 'var(--pr-muted)',
   };
 }

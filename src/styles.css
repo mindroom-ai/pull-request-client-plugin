@@ -527,12 +527,15 @@
 .mrpr-file-meta .mrpr-diffstat {
   font-family: var(--pr-font-mono);
 }
+/* The mark's label is as tall as the diff's header (diffHeaderHeight), so a click just above or
+   below its text ticks it rather than folding the file. */
 .mrpr-viewed {
   display: inline-flex;
   flex-shrink: 0;
   align-items: center;
   gap: 6px;
   min-inline-size: 4.5rem;
+  block-size: 32px;
   color: var(--pr-muted);
   font-family: var(--pr-font-sans);
   font-size: 11px;
@@ -549,6 +552,10 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+/* A file without a diff has no header to fold, so its mark keeps the height of its text. */
+.mrpr-no-diff-head .mrpr-viewed {
+  block-size: auto;
 }
 
 /* What did not load of the threads or the commits, above the diffs. */
