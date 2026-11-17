@@ -1,7 +1,8 @@
 // Ported from T3 Code (https://github.com/pingdotgg/t3code, apps/web/src/components/pullRequest/PullRequestBaseBranch.tsx at 8ab427c6), MIT, Copyright (c) 2026 T3 Tools Inc. See NOTICE.
 // The base branch of the header, with a warning button that opens a popover when the pull request
 // has fallen behind it or conflicts with it. A viewer who can write may update a branch that is
-// behind and does not conflict from there, by merging the base in or by rebasing onto it.
+// behind and mergeable from there (the panel passes `onUpdate` only then), by merging the base in
+// or by rebasing onto it.
 import { useRef, useState, type MouseEvent } from 'react';
 import FocusTrap from 'focus-trap-react';
 import type { RectCords } from 'folds';

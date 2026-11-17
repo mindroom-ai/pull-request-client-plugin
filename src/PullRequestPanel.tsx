@@ -388,8 +388,12 @@ export default function PullRequestPanel({
                   baseBranch={pr.baseRef}
                   headBranch={pr.headRef}
                   freshness={freshness}
+                  // As T3 Code: an update only for a branch GitHub found mergeable, not while it
+                  // still computes that (null) nor for one that conflicts.
                   onUpdate={
-                    actions.repo?.canWrite ? (action) => actions.perform(action) : undefined
+                    actions.repo?.canWrite && pr.mergeable === true
+                      ? (action) => actions.perform(action)
+                      : undefined
                   }
                   updating={actions.pending !== null}
                 />

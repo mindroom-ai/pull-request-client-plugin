@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PullRequest, PullRequestRef } from '../github';
 import plugin from '../index';
 import { HeaderActions } from './HeaderActions';
-import { usePullRequestActions } from './usePullRequestActions';
+import { resetPullRequestActions, usePullRequestActions } from './usePullRequestActions';
 
 vi.mock('focus-trap-react', async () => ({
   default: (await import('../testing/focusTrapStandIn')).FocusTrapStandIn,
@@ -132,7 +132,8 @@ const openMenu = async (view: View) => {
 beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   localStorage.clear();
-  localStorage.setItem(`${STORAGE}githubToken`, 'tok');
+  // Not a word of GitHub's reasons: a reason with the token in it is not shown.
+  localStorage.setItem(`${STORAGE}githubToken`, 'ghp_test');
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   repository = {
     viewerPermission: 'WRITE',
@@ -155,6 +156,7 @@ beforeEach(() => {
 });
 afterEach(async () => {
   await answerHeld();
+  resetPullRequestActions();
   vi.unstubAllGlobals();
 });
 
@@ -200,13 +202,46 @@ describe('HeaderActions', () => {
     await waitUntil(() => expect(view.getByRole('button', { name: 'Merge' })));
     await click(view.getByRole('button', { name: 'Merge' }));
     await click(view.getByRole('button', { name: 'Confirm merge?' }));
-    await waitUntil(() => expect(view.getByRole('status')).toBeTruthy());
+    await waitUntil(() =>
+      expect(view.getByRole('status').textContent).toContain('Could not merge this pull request')
+    );
     const status = view.getByRole('status');
-    expect(status.textContent).toContain('Could not merge this pull request');
+    // The hint, then GitHub's own reason.
     expect(status.textContent).toContain(
-      'GitHub refused it. The saved token may not have write access to this repository (Pull requests and Contents: Read and write).'
+      'GitHub refused it. The saved token may not have write access to this repository (Pull requests and Contents: Read and write). Resource not accessible by personal access token'
     );
     expect(status.textContent).not.toContain('Could not reach GitHub.');
+  });
+
+  it("shows GitHub's reason after the hint, as for a token its organization has not allowed", async () => {
+    const sso =
+      'Resource protected by organization SAML enforcement. You must grant your Personal Access token access to this organization.';
+    writeAnswer = async () => respond({ message: sso }, 403);
+    const view = await show();
+    await openMenu(view);
+    await click(row(view, 'Convert to draft'));
+    await waitUntil(() => expect(view.getByRole('status').textContent).toContain(sso));
+    expect(view.getByRole('status').textContent).toContain(
+      'The saved token may not have write access to this repository'
+    );
+  });
+
+  it('keeps its status region in place, so that what it says next is announced', async () => {
+    writeAnswer = () => hold(() => respond({ message: 'Pull Request is not mergeable' }, 405));
+    const view = await show();
+    await waitUntil(() => expect(view.getByRole('button', { name: 'Merge' })));
+    const region = view.getByRole('status');
+    expect(region.textContent).toBe('');
+    await openMenu(view);
+    await click(row(view, 'Convert to draft'));
+    expect(view.getByRole('status')).toBe(region);
+    expect(region.textContent).toBe('Converting to draft...');
+    await answerHeld();
+    await waitUntil(() => expect(region.textContent).toContain('Could not convert'));
+    expect(view.getByRole('status')).toBe(region);
+    await click(view.getByRole('button', { name: 'Dismiss' }));
+    expect(view.getByRole('status')).toBe(region);
+    expect(region.textContent).toBe('');
   });
 
   it("shows GitHub's reason for a refusal after the title", async () => {
@@ -220,7 +255,7 @@ describe('HeaderActions', () => {
     );
     expect(view.getByRole('status').textContent).toContain('Could not merge this pull request');
     await click(view.getByRole('button', { name: 'Dismiss' }));
-    expect(view.queryByRole('status')).toBeNull();
+    expect(view.getByRole('status').textContent).toBe('');
   });
 
   it("lists an open pull request's actions in the menu's order", async () => {
@@ -233,18 +268,8 @@ describe('HeaderActions', () => {
       'Rebase and merge',
     ]);
     expect(methods[0].getAttribute('aria-checked')).toBe('true');
-    const labels = [
-      'Merge now',
-      'Enable auto-merge',
-      'Disable auto-merge',
-      'Ready for review',
-      'Convert to draft',
-      'Close pull request',
-      'Reopen pull request',
-      'Delete branch',
-      'Refresh',
-    ];
-    expect(labels.filter((label) => view.queryByText(label) !== null)).toEqual([
+    // The rows as drawn, top to bottom: the method group is only radios.
+    expect(view.getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
       'Enable auto-merge',
       'Convert to draft',
       'Close pull request',

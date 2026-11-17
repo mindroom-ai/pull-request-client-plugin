@@ -335,7 +335,8 @@ export function HeaderActions({
 
 /**
  * What runs when no control on screen says so, and what came of the last action: a failure with
- * why, or a success that nothing else on screen shows.
+ * why, or a success that nothing else on screen shows. The status region stays drawn while it
+ * has nothing to say, as some screen readers announce only a change in one already there.
  */
 function ResultLine({
   pending,
@@ -347,46 +348,59 @@ function ResultLine({
   onDismiss: () => void;
 }) {
   const t = usePluginTranslation('pull-requests');
+  const shown =
+    pending === null && result !== null && (result.outcome === 'failed' || DONE.has(result.action))
+      ? result
+      : null;
+  let content: ReactNode = null;
   if (pending !== null) {
-    return (
-      <div role="status" className="mrpr-action-result">
-        {t(`actions.pending.${pending}`)}
-      </div>
-    );
-  }
-  if (result === null) return null;
-  if (result.outcome === 'done' && !DONE.has(result.action)) return null;
-  const dismiss = t('actions.dismiss');
-  let text: ReactNode;
-  if (result.outcome === 'done') {
-    text = <span>{t(`actions.done.${result.action}`)}</span>;
-  } else {
-    const { kind, detail } = result.error;
-    const why = kind === 'refused' ? detail : t(`actions.hint.${kind}`);
-    text = (
-      <span>
-        <strong className="mrpr-action-result-title">{t(`actions.failed.${result.action}`)}</strong>
-        {why ? ` ${why}` : null}
-      </span>
+    content = t(`actions.pending.${pending}`);
+  } else if (shown !== null) {
+    const dismiss = t('actions.dismiss');
+    let text: ReactNode;
+    if (shown.outcome === 'done') {
+      text = <span>{t(`actions.done.${shown.action}`)}</span>;
+    } else {
+      const { kind, detail } = shown.error;
+      // A refusal is GitHub's reason alone. Without access the hint comes first, then GitHub's
+      // reason when it gave one: an organization that has not allowed the token, or a limit,
+      // reads as that and not only as missing access.
+      const hint = kind === 'refused' ? null : t(`actions.hint.${kind}`);
+      const why = [hint, kind === 'refused' || kind === 'noAccess' ? detail : null]
+        .filter(Boolean)
+        .join(' ');
+      text = (
+        <span>
+          <strong className="mrpr-action-result-title">
+            {t(`actions.failed.${shown.action}`)}
+          </strong>
+          {why ? ` ${why}` : null}
+        </span>
+      );
+    }
+    content = (
+      <>
+        {text}
+        <IconTooltip label={dismiss}>
+          {(triggerRef) => (
+            <IconButton
+              ref={triggerRef}
+              size="300"
+              radii="300"
+              className="mrpr-action-result-dismiss"
+              aria-label={dismiss}
+              onClick={onDismiss}
+            >
+              <X aria-hidden className="mrpr-button-icon" />
+            </IconButton>
+          )}
+        </IconTooltip>
+      </>
     );
   }
   return (
-    <div role="status" className="mrpr-action-result">
-      {text}
-      <IconTooltip label={dismiss}>
-        {(triggerRef) => (
-          <IconButton
-            ref={triggerRef}
-            size="300"
-            radii="300"
-            className="mrpr-action-result-dismiss"
-            aria-label={dismiss}
-            onClick={onDismiss}
-          >
-            <X aria-hidden className="mrpr-button-icon" />
-          </IconButton>
-        )}
-      </IconTooltip>
+    <div role="status" className={content === null ? 'mrpr-sr-only' : 'mrpr-action-result'}>
+      {content}
     </div>
   );
 }

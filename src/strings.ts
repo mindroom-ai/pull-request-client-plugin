@@ -117,7 +117,8 @@ export const en = {
       'update-branch-rebase': 'Could not rebase this branch',
       'delete-branch': 'Could not delete this branch',
     },
-    // Why, by the failure's kind; a refusal shows GitHub's own reason instead.
+    // Why, by the failure's kind; a refusal shows GitHub's own reason instead, and a failure
+    // without access shows it after the hint.
     hint: {
       noAccess:
         'GitHub refused it. The saved token may not have write access to this repository (Pull requests and Contents: Read and write).',

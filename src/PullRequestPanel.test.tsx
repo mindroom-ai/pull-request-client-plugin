@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PullRequestRef } from './github';
 import plugin from './index';
 import PullRequestPanel from './PullRequestPanel';
+import { resetPullRequestActions } from './actions/usePullRequestActions';
 import { useShownPullRequest } from './shownPullRequest';
 
 // The Code tab's diff libraries need a browser; the tab stands in as its file paths, what it was
@@ -125,6 +126,7 @@ beforeEach(() => {
   vi.stubGlobal('fetch', fetchMock);
 });
 afterEach(() => {
+  resetPullRequestActions();
   vi.unstubAllGlobals();
 });
 
@@ -812,12 +814,15 @@ describe('PullRequestPanel', () => {
       expect(headerRow(view)?.textContent).toContain('Open on GitHub');
     });
 
+    // As T3 Code: only a branch GitHub found mergeable, not one it is still computing (null).
     it.each([
-      ['WRITE', true],
-      ['READ', false],
-    ])(
-      'the base warning offers the update with %s permission: %s',
-      async (viewerPermission, offered) => {
+      ['WRITE', true, true],
+      ['READ', true, false],
+      ['WRITE', null, false],
+      ['WRITE', false, false],
+    ] as const)(
+      'the base warning offers the update with %s permission and mergeable %s: %s',
+      async (viewerPermission, mergeable, offered) => {
         localStorage.setItem(
           'mindroom.plugin:%40plugin-tester%3Aexample.org/pull-requests/githubToken',
           'tok'
@@ -846,7 +851,7 @@ describe('PullRequestPanel', () => {
           if (url.includes('/files') || url.includes('/commits') || url.includes('/comments'))
             return respond([]);
           if (url.includes('/reviews')) return respond([]);
-          return respond(pull({ head, base }));
+          return respond(pull({ head, base, mergeable }));
         });
         const view = await show();
         await waitUntil(() =>

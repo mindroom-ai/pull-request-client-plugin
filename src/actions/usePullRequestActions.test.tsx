@@ -5,7 +5,7 @@ import { renderPluginComponent } from '@mindroom/client-sdk/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PullRequest, PullRequestRef } from '../github';
 import plugin from '../index';
-import { usePullRequestActions } from './usePullRequestActions';
+import { resetPullRequestActions, usePullRequestActions } from './usePullRequestActions';
 
 const STORAGE = 'mindroom.plugin:%40plugin-tester%3Aexample.org/pull-requests/';
 const GRAPHQL = 'https://api.github.com/graphql';
@@ -116,6 +116,21 @@ const show = (pullRequestRef?: PullRequestRef, pullRequest?: PullRequest) =>
 
 const loaded = () => waitUntil(() => expect(actions.repo).toBeDefined());
 
+// Two runners at once, as two panels (or a panel and its next mount) have them.
+const both: ReturnType<typeof usePullRequestActions>[] = [];
+function Pair({ refs }: { refs: [PullRequestRef, PullRequestRef] }) {
+  both[0] = usePullRequestActions(refs[0], pull);
+  both[1] = usePullRequestActions(refs[1], pull);
+  return null;
+}
+const showPair = (refs: [PullRequestRef, PullRequestRef]) =>
+  renderPluginComponent(
+    <QueryClientProvider client={client}>
+      <Pair refs={refs} />
+    </QueryClientProvider>,
+    { id: 'pull-requests', plugin }
+  );
+
 beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   localStorage.clear();
@@ -130,6 +145,7 @@ beforeEach(() => {
 });
 afterEach(async () => {
   await answerHeld();
+  resetPullRequestActions();
   vi.unstubAllGlobals();
 });
 
@@ -238,16 +254,98 @@ describe('usePullRequestActions', () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['pull-requests', 'pr', 'o', 'r', 7] });
   });
 
-  it('does not refresh after a failure that is not a refusal', async () => {
-    writeAnswer = async () => respond({ message: 'Resource not accessible' }, 403);
-    await show(refA, pull);
+  it.each([
+    [
+      'without access',
+      async () => respond({ message: 'Resource not accessible' }, 403),
+      'noAccess',
+    ],
+    ['with a server error', async () => respond({ message: 'Server Error' }, 502), 'failed'],
+    [
+      'without an answer',
+      async (): Promise<Response> => {
+        throw new TypeError('Failed to fetch');
+      },
+      'failed',
+    ],
+  ] as const)(
+    'refreshes the pull request after a failure %s, as GitHub may have taken the write',
+    async (_name, answer, kind) => {
+      writeAnswer = answer;
+      await show(refA, pull);
+      await loaded();
+      const invalidate = vi.spyOn(client, 'invalidateQueries');
+      act(() => actions.perform('close'));
+      await waitUntil(() => expect(actions.result?.outcome).toBe('failed'));
+      const result = actions.result;
+      expect(result?.outcome === 'failed' && result.error.kind).toBe(kind);
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ['pull-requests', 'pr', 'o', 'r', 7] });
+    }
+  );
+
+  it('locks a pull request by its owner and repository in any case', async () => {
+    writeAnswer = () => hold(() => respond({ merged: true }));
+    const upper: PullRequestRef = { owner: 'O', repo: 'R', number: 7 };
+    await showPair([refA, upper]);
+    await waitUntil(() => expect(both[1]!.repo).toBeDefined());
+    await waitUntil(() => expect(both[0]!.repo).toBeDefined());
+    act(() => both[0]!.perform('merge'));
+    act(() => both[1]!.perform('close'));
+    expect(both[1]!.pending).toBe('merge');
+    await waitUntil(() =>
+      expect(writes()).toEqual(['PUT https://api.github.com/repos/o/r/pulls/7/merge'])
+    );
+    await answerHeld();
+    expect(writes()).toHaveLength(1);
+    // One outcome too, whichever casing shows it.
+    expect(both[1]!.result).toEqual({ action: 'merge', outcome: 'done' });
+  });
+
+  it('shows the running action on every runner of the pull request', async () => {
+    writeAnswer = () => hold(() => respond({ merged: true }));
+    await showPair([refA, refA]);
+    await waitUntil(() => expect(both[0]!.repo).toBeDefined());
+    act(() => both[0]!.perform('merge'));
+    expect(both[0]!.pending).toBe('merge');
+    expect(both[1]!.pending).toBe('merge');
+    await answerHeld();
+    expect(both[1]!.pending).toBeNull();
+    expect(both[1]!.result).toEqual({ action: 'merge', outcome: 'done' });
+  });
+
+  it('shows the running action again when the panel opens anew mid-action', async () => {
+    writeAnswer = () => hold(() => respond({ merged: true }));
+    const first = await show(refA, pull);
     await loaded();
-    const invalidate = vi.spyOn(client, 'invalidateQueries');
+    act(() => actions.perform('merge'));
+    first.unmount();
+    await show(refA, pull);
+    expect(actions.pending).toBe('merge');
     act(() => actions.perform('close'));
-    await waitUntil(() => expect(actions.result?.outcome).toBe('failed'));
+    await waitUntil(() => expect(writes()).toHaveLength(1));
+    await answerHeld();
+    expect(writes()).toEqual(['PUT https://api.github.com/repos/o/r/pulls/7/merge']);
+    expect(actions.pending).toBeNull();
+    expect(actions.result).toEqual({ action: 'merge', outcome: 'done' });
+  });
+
+  it('shows a failure on its own pull request when that one is shown again', async () => {
+    writeAnswer = () => hold(() => respond({ message: 'Pull Request is not mergeable' }, 405));
+    const view = await show(refA, pull);
+    await loaded();
+    act(() => actions.perform('merge'));
+    const pullB = { ...pull, url: 'https://github.com/o/r/pull/8' };
+    view.rerender(ui(refB, pullB));
+    await answerHeld();
+    // Never on the other one.
+    expect(actions.result).toBeNull();
+    view.rerender(ui(refA, pull));
     const result = actions.result;
-    expect(result?.outcome === 'failed' && result.error.kind).toBe('noAccess');
-    expect(invalidate).not.toHaveBeenCalled();
+    expect(result?.outcome === 'failed' && result.error.detail).toBe(
+      'Pull Request is not mergeable'
+    );
+    act(() => actions.dismissResult());
+    expect(actions.result).toBeNull();
   });
 
   it('keeps the chosen method, and remembers it for the next pull request', async () => {

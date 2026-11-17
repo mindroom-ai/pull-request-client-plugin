@@ -1,11 +1,10 @@
 // The header's actions on one pull request: the merge method, one action at a time, and its
 // outcome, for the panel to pass to every control that starts one.
-import { useState } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { usePluginStorage } from '@mindroom/client-sdk/core';
 import {
   GitHubWriteError,
-  pullRequestUrl,
   runPullRequestAction,
   type MergeMethod,
   type PullRequest,
@@ -21,9 +20,37 @@ export type ActionResult =
   | { action: PullRequestAction; outcome: 'done' }
   | { action: PullRequestAction; outcome: 'failed'; error: GitHubWriteError };
 
-// The pull requests (by URL) with an action running, across every panel: a second click, or a
-// second control, while one runs sends nothing.
-const inFlight = new Set<string>();
+// What runs on each pull request and what came of its last action, across every panel and
+// every mount of one: a second click, or a second control, while one runs sends nothing, and a
+// panel opened again on a pull request mid-action shows it running. By `actionKey`.
+type Entry = { pending: PullRequestAction | null; result: ActionResult | null };
+const IDLE: Entry = { pending: null, result: null };
+const entries = new Map<string, Entry>();
+const listeners = new Set<() => void>();
+
+const entryOf = (key: string): Entry => entries.get(key) ?? IDLE;
+function setEntry(key: string, entry: Entry) {
+  if (entry.pending === null && entry.result === null) entries.delete(key);
+  else entries.set(key, entry);
+  listeners.forEach((listener) => listener());
+}
+function subscribe(listener: () => void) {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+/** Forgets every action and outcome, so that each test starts from none. */
+export function resetPullRequestActions() {
+  entries.clear();
+  listeners.forEach((listener) => listener());
+}
+
+// GitHub's owners and repositories ignore case, so `Acme/Repo#7` and `acme/repo#7` are one pull
+// request, with one lock.
+const actionKey = (ref: PullRequestRef) =>
+  `${ref.owner.toLowerCase()}/${ref.repo.toLowerCase()}#${ref.number}`;
 
 const METHOD_KEY = 'mergeMethod';
 const METHODS: readonly string[] = ['merge', 'squash', 'rebase'];
@@ -56,53 +83,43 @@ export function usePullRequestActions(
   const storage = usePluginStorage('pull-requests');
   const storedToken = useStoredToken();
   const queryClient = useQueryClient();
-  const url = ref ? pullRequestUrl(ref) : undefined;
+  const key = ref ? actionKey(ref) : undefined;
+  // Another pull request's entry is never read here, so its action and outcome never show.
+  const entry = useSyncExternalStore(subscribe, () => (key === undefined ? IDLE : entryOf(key)));
 
-  const [chosen, setChosen] = useState<{ url: string; method: MergeMethod } | null>(null);
-  // What runs, by pull request, so another one shown meanwhile reads as idle and its answer ends
-  // only its own.
-  const [running, setRunning] = useState<Readonly<Record<string, PullRequestAction>>>({});
-  // The outcome belongs to the pull request shown when it came; showing another one drops it.
-  const [outcome, setOutcome] = useState<{ url: string | undefined; result: ActionResult | null }>({
-    url,
-    result: null,
-  });
-  if (outcome.url !== url) setOutcome({ url, result: null });
+  const [chosen, setChosen] = useState<{ key: string; method: MergeMethod } | null>(null);
 
   const method = shownRepo
     ? resolveMergeMethod(
         shownRepo.mergeMethods,
-        chosen && chosen.url === url ? chosen.method : null,
+        chosen && chosen.key === key ? chosen.method : null,
         asMethod(storage.getItem(METHOD_KEY))
       )
     : null;
 
   const perform = (action: PullRequestAction) => {
-    if (!ref || !pr || url === undefined || inFlight.has(url)) return;
+    // The store, not what this render read: a second click in the same event finds it locked.
+    if (!ref || !pr || key === undefined || entryOf(key).pending !== null) return;
     const stored = storedToken();
     if (stored === undefined) return;
     if (MERGES.has(action) && method === null) return;
-    inFlight.add(url);
-    setRunning((current) => ({ ...current, [url]: action }));
-    setOutcome({ url, result: null });
-    const finish = (result: ActionResult, refresh: boolean) => {
-      inFlight.delete(url);
-      if (refresh) {
-        void queryClient.invalidateQueries({
-          queryKey: ['pull-requests', 'pr', ref.owner, ref.repo, ref.number],
-        });
-      }
-      setRunning(({ [url]: _done, ...rest }) => rest);
-      setOutcome((current) => (current.url === url ? { url, result } : current));
+    setEntry(key, { pending: action, result: null });
+    const finish = (result: ActionResult) => {
+      // Whatever came, GitHub may hold another state than the one loaded: a refusal says it
+      // moved, and a failed answer may come after GitHub took the write.
+      void queryClient.invalidateQueries({
+        queryKey: ['pull-requests', 'pr', ref.owner, ref.repo, ref.number],
+      });
+      // The outcome stays with its own pull request, to show when that one is shown again.
+      setEntry(key, { pending: null, result });
     };
     // Only the merges read the method, and they do not start without one.
     runPullRequestAction(ref, pr, action, method ?? 'merge', stored).then(
-      () => finish({ action, outcome: 'done' }, true),
+      () => finish({ action, outcome: 'done' }),
       (caught: unknown) => {
         const error =
           caught instanceof GitHubWriteError ? caught : new GitHubWriteError('failed', 0);
-        // A refusal means GitHub's state moved from what was loaded, so load it again.
-        finish({ action, outcome: 'failed', error }, error.kind === 'refused');
+        finish({ action, outcome: 'failed', error });
       }
     );
   };
@@ -111,14 +128,18 @@ export function usePullRequestActions(
     repo: shownRepo,
     method,
     chooseMethod: (next) => {
-      if (url === undefined) return;
-      setChosen({ url, method: next });
+      if (key === undefined) return;
+      setChosen({ key, method: next });
       // The next pull request starts with the method used last.
       storage.setItem(METHOD_KEY, next);
     },
-    pending: url !== undefined && pr ? running[url] ?? null : null,
-    result: pr && outcome.url === url ? outcome.result : null,
+    pending: pr ? entry.pending : null,
+    result: pr ? entry.result : null,
     perform,
-    dismissResult: () => setOutcome({ url, result: null }),
+    dismissResult: () => {
+      if (key === undefined) return;
+      const current = entryOf(key);
+      if (current.result !== null) setEntry(key, { ...current, result: null });
+    },
   };
 }
