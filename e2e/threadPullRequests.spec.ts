@@ -34,7 +34,10 @@ import { touch } from '@mindroom/e2e/touch';
 // its branch goes), sees GitHub's reason for a refused merge, chooses the merge method that the
 // next pull request and the next page load keep, closes and reopens a pull request, and updates a
 // branch behind its base from the base branch's warning (and is told only that the update was
-// requested when GitHub has not made it yet), with the header's controls on a phone.
+// requested when GitHub has not made it yet), with the header's controls on a phone; and without
+// a token, with the GitHub account connected in the room's MindRoom server (which the page also
+// answers), the chips, the panel and a merge go through that server, and the page asks GitHub
+// nothing itself.
 // Set MRPR_SHOTS=<directory> to save the screenshots of the pull request.
 
 const LINK_EVENT = 'com.mindroom.thread.pull_request';
@@ -361,6 +364,48 @@ const REPOSITORY = {
 };
 
 type Write = { method: string; pathname: string; body: unknown };
+type Answer = { status: number; json: unknown };
+
+// The room's MindRoom server, which the page reaches at `mindroom.computers.apiUrl`.
+const MINDROOM = 'http://127.0.0.1:29597';
+// The GitHub account the lead connected in MindRoom.
+const CONNECTED_LOGIN = 'platform-lead';
+
+/**
+ * Answers the routes of the room's MindRoom server at `origin` that the page uses with the lead
+ * connected to GitHub there: the sign-in (`POST /api/client-sessions`), the connection's status
+ * and GitHub's requests, which `answer` answers as GitHub, as MindRoom passes them on.
+ */
+const stubMindroom = async (
+  page: Page,
+  origin: string,
+  answer: (method: string, pathname: string, body: unknown) => Answer
+) => {
+  await page.route(`${origin}/**`, async (route) => {
+    const request = route.request();
+    if (request.method() === 'OPTIONS') {
+      await route.fulfill({ status: 204, headers: CORS });
+      return;
+    }
+    const { pathname } = new URL(request.url());
+    if (pathname === '/api/client-sessions' && request.method() === 'POST') {
+      const expires = Math.floor(Date.now() / 1000) + 3600;
+      await route.fulfill({
+        headers: CORS,
+        json: { session_token: 'mindroom-session', expires_at: expires },
+      });
+    } else if (pathname === '/api/github/status') {
+      await route.fulfill({ headers: CORS, json: { connected: true, login: CONNECTED_LOGIN } });
+    } else if (pathname === '/api/github/request') {
+      const sent = request.postDataJSON() as { method: string; path: string; body?: unknown };
+      const github = new URL(`https://api.github.com${sent.path}`);
+      const { status, json } = answer(sent.method, github.pathname, sent.body ?? null);
+      await route.fulfill({ headers: CORS, json: { status, body: json, headers: {} } });
+    } else {
+      await route.fulfill({ status: 404, headers: CORS, json: { error: 'not_found' } });
+    }
+  });
+};
 
 /**
  * Answers GitHub's API in the page; the returned list collects the paths it had no answer for.
@@ -382,7 +427,13 @@ const stubGitHub = async (
     refuse = {},
     behind = {},
     lateUpdate = false,
-  }: { refuse?: Record<string, string>; behind?: Record<string, number>; lateUpdate?: boolean } = {}
+    mindroom,
+  }: {
+    refuse?: Record<string, string>;
+    behind?: Record<string, number>;
+    lateUpdate?: boolean;
+    mindroom?: string;
+  } = {}
 ): Promise<string[]> => {
   const unanswered: string[] = [];
   const moved = new Map<string, Pull['state']>();
@@ -393,23 +444,16 @@ const stubGitHub = async (
   // GitHub has taken but not made yet, with the reads that still show the old head.
   const heads = new Map<string, string>();
   const updating = new Map<string, { reads: number; sha: string }>();
-  await page.route('https://api.github.com/**', async (route) => {
-    const request = route.request();
-    if (request.method() === 'OPTIONS') {
-      await route.fulfill({ status: 204, headers: CORS });
-      return;
-    }
-    const { pathname } = new URL(request.url());
-    if (request.method() !== 'GET') {
-      const body: unknown = request.postDataJSON();
+  // GitHub's answer to `method` on `pathname`, with the request's `body`.
+  const answer = (method: string, pathname: string, body: unknown): Answer => {
+    if (method !== 'GET') {
       const query = (body as { query?: unknown } | null)?.query;
       if (
         pathname === '/graphql' &&
         typeof query === 'string' &&
         query.includes('viewerPermission')
       ) {
-        await route.fulfill({ headers: CORS, json: { data: { repository: REPOSITORY } } });
-        return;
+        return { status: 200, json: { data: { repository: REPOSITORY } } };
       }
       const graphql = pathname === '/graphql' && typeof query === 'string' ? query : '';
       const variables = (body as { variables?: Record<string, unknown> } | null)?.variables ?? {};
@@ -431,24 +475,19 @@ const stubGitHub = async (
         const now = asked ? moved.get(pullPath(asked)) ?? asked.state : undefined;
         const state = now === 'merged' ? 'MERGED' : now === 'closed' ? 'CLOSED' : 'OPEN';
         const repository = { pullRequest: asked ? { state } : null };
-        await route.fulfill({ headers: CORS, json: { data: { node: { ref }, repository } } });
-        return;
+        return { status: 200, json: { data: { node: { ref }, repository } } };
       }
       if (graphql.includes('updateRefs')) {
-        writes.push({ method: request.method(), pathname, body });
+        writes.push({ method, pathname, body });
         const { repositoryId: repository, refUpdates } = variables.input as {
           repositoryId: string;
           refUpdates: { name: string }[];
         };
         refUpdates.forEach(({ name }) => deleted.add(`${repository} ${name}`));
-        await route.fulfill({
-          headers: CORS,
-          json: { data: { updateRefs: { clientMutationId: null } } },
-        });
-        return;
+        return { status: 200, json: { data: { updateRefs: { clientMutationId: null } } } };
       }
       if (graphql.includes('updatePullRequestBranch')) {
-        writes.push({ method: request.method(), pathname, body });
+        writes.push({ method, pathname, body });
         const branch = ALL_PULLS.find((candidate) => pullId(candidate) === variables.pullRequestId);
         // The head GitHub's answer names: the one it was sent while the update is still to come.
         let headRefOid = String(variables.expectedHeadOid);
@@ -459,40 +498,28 @@ const stubGitHub = async (
           heads.set(pullPath(branch), headRefOid);
           delete behindNow[pullPath(branch)];
         }
-        await route.fulfill({
-          headers: CORS,
+        return {
+          status: 200,
           json: { data: { updatePullRequestBranch: { pullRequest: { headRefOid } } } },
-        });
-        return;
+        };
       }
-      const write = `${request.method()} ${pathname}`;
+      const write = `${method} ${pathname}`;
       const [, pull, part] =
         /^(\/repos\/acme\/[^/]+\/pulls\/\d+)(?:\/(merge))?$/.exec(pathname) ?? [];
-      const known =
-        (request.method() === 'PUT' && pull && part) ||
-        (request.method() === 'PATCH' && pull && !part);
+      const known = (method === 'PUT' && pull && part) || (method === 'PATCH' && pull && !part);
       if (known) {
-        writes.push({ method: request.method(), pathname, body });
-        if (write in refuse) {
-          await route.fulfill({ status: 405, headers: CORS, json: { message: refuse[write] } });
-          return;
-        }
+        writes.push({ method, pathname, body });
+        if (write in refuse) return { status: 405, json: { message: refuse[write] } };
         if (part === 'merge') moved.set(pull!, 'merged');
-        if (request.method() === 'PATCH') {
+        if (method === 'PATCH') {
           const { state } = body as { state: 'open' | 'closed' };
           moved.set(pull!, state);
         }
         // What GitHub answers; the panel reads only the status.
-        await route.fulfill(
-          part === 'merge'
-            ? { headers: CORS, json: { merged: true, message: 'Merged' } }
-            : { headers: CORS, json: body }
-        );
-        return;
+        return { status: 200, json: part === 'merge' ? { merged: true, message: 'Merged' } : body };
       }
       unanswered.push(write);
-      await route.fulfill({ status: 404, headers: CORS, json: { message: 'Not Found' } });
-      return;
+      return { status: 404, json: { message: 'Not Found' } };
     }
     const update = updating.get(pathname);
     if (update && update.reads > 0) {
@@ -502,14 +529,24 @@ const stubGitHub = async (
       heads.set(pathname, update.sha);
       delete behindNow[pathname];
     }
-    const answer = gitHubAnswer(pathname, moved, behindNow, heads);
-    if (answer === undefined) unanswered.push(pathname);
-    await route.fulfill(
-      answer === undefined
-        ? { status: 404, headers: CORS, json: { message: 'Not Found' } }
-        : { headers: CORS, json: answer }
-    );
+    const read = gitHubAnswer(pathname, moved, behindNow, heads);
+    if (read === undefined) unanswered.push(pathname);
+    return read === undefined
+      ? { status: 404, json: { message: 'Not Found' } }
+      : { status: 200, json: read };
+  };
+  await page.route('https://api.github.com/**', async (route) => {
+    const request = route.request();
+    const method = request.method();
+    if (method === 'OPTIONS') {
+      await route.fulfill({ status: 204, headers: CORS });
+      return;
+    }
+    const { pathname } = new URL(request.url());
+    const body: unknown = method === 'GET' ? undefined : request.postDataJSON();
+    await route.fulfill({ headers: CORS, ...answer(method, pathname, body) });
   });
+  if (mindroom) await stubMindroom(page, mindroom, answer);
   return unanswered;
 };
 
@@ -1589,4 +1626,55 @@ test("on a phone the panel's header has the controls", async ({ browser, baseURL
   } finally {
     await context.close();
   }
+});
+
+test("without a token, the GitHub account connected in MindRoom reads and merges through the room's MindRoom server", async ({
+  page,
+}) => {
+  test.setTimeout(4 * 60_000);
+  const writes: Write[] = [];
+  const unanswered = await stubGitHub(page, writes, { mindroom: MINDROOM });
+  const fromPage: string[] = [];
+  page.on('request', (request) => {
+    if (request.url().startsWith('https://api.github.com/')) fromPage.push(request.url());
+  });
+  // The deployment's MindRoom server, which the room has as it has a MindRoom agent.
+  await page.route('**/config.json', async (route) => {
+    const config = await (await route.fetch()).json();
+    const mindroom = { ...config.mindroom, computers: { apiUrl: MINDROOM } };
+    await route.fulfill({ json: { ...config, mindroom } });
+  });
+  await loginWithPassword(page, { homeserver: HOMESERVER, ...lead });
+  await page.goto(`/home/${encodeURIComponent(roomId)}`);
+  await expect(card(page, roots.sessions)).toBeVisible({ timeout: 120_000 });
+
+  // The chips have their checks' marks, which need an account.
+  const { tokenEndpoint } = PULLS;
+  await expectChips(cardChips(page, roots.sessions), THREADS.sessions.pulls);
+  await cardChips(page, roots.sessions).nth(1).click();
+  await expect(panel(page).locator('.mrpr-panel-title')).toHaveText(tokenEndpoint.title, {
+    timeout: 30_000,
+  });
+  await expect(
+    panel(page).getByText(`Using your GitHub account connected in MindRoom (@${CONNECTED_LOGIN})`)
+  ).toBeVisible();
+  await expect(panel(page).getByRole('button', { name: 'Forget token' })).toHaveCount(0);
+  const merge = panel(page).getByRole('button', { name: 'Merge', exact: true });
+  await expect(merge).toBeVisible({ timeout: 30_000 });
+  await expect(panel(page).getByText(/^Loading/)).toHaveCount(0);
+  await shot(page, 'mindroom-connected');
+
+  await merge.click();
+  await panel(page).getByRole('button', { name: 'Confirm merge?' }).click();
+  await expect(panel(page).locator('.mrpr-badge-state')).toHaveText('Merged', { timeout: 30_000 });
+  expect(writes).toEqual([
+    {
+      method: 'PUT',
+      pathname: `/repos/acme/${tokenEndpoint.repo}/pulls/${tokenEndpoint.number}/merge`,
+      body: { merge_method: 'merge', sha: headSha(tokenEndpoint) },
+    },
+  ]);
+  // Every request went through MindRoom: the page itself asked GitHub nothing.
+  expect(fromPage).toEqual([]);
+  expect(unanswered).toEqual([]);
 });
