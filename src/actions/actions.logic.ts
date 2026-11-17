@@ -14,6 +14,15 @@ export type PrimaryControl =
   | 'merge'
   | null;
 
+// The states in which GitHub merges at once. It refuses to arm auto-merge in them, so there
+// the pull request merges and auto-merge is not offered (T3 Code's IMMEDIATELY_MERGEABLE).
+const MERGES_NOW: ReadonlySet<string | null> = new Set(['clean', 'has_hooks', 'unstable']);
+
+/** Whether auto-merge can be armed: the repository allows it, and GitHub would not merge now. */
+function canArmAutoMerge(pr: PullRequest, repo: Repository): boolean {
+  return repo.autoMergeAllowed && !MERGES_NOW.has(pr.mergeableState);
+}
+
 /** The header's one control; checks not loaded yet, or none at all, count as passing. */
 export function primaryControl(
   pr: PullRequest,
@@ -26,7 +35,7 @@ export function primaryControl(
   if (pr.draft) return repo.canWrite ? 'ready' : null;
   if (pr.autoMerge) return 'auto-merge-armed';
   if (repo.mergeMethods.length === 0) return null;
-  if ((checks === 'pending' || checks === 'failing') && repo.autoMergeAllowed) {
+  if ((checks === 'pending' || checks === 'failing') && canArmAutoMerge(pr, repo)) {
     return 'enable-auto-merge';
   }
   return repo.canWrite ? 'merge' : null;
@@ -68,7 +77,7 @@ export function menuActions(
   if ((primary === 'enable-auto-merge' || primary === 'auto-merge-armed') && !pr.draft) {
     actions.push('merge');
   }
-  if (open && !armed && primary === 'merge' && repo.autoMergeAllowed) {
+  if (open && !armed && primary === 'merge' && canArmAutoMerge(pr, repo)) {
     actions.push('enable-auto-merge');
   }
   // GitHub may keep the auto-merge it merged with on a merged pull request, so only an open one.

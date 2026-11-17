@@ -213,7 +213,12 @@ const apiPull = (pull: Pull) => {
     requested_reviewers: (pull.reviewers ?? []).map(gitHubUser),
     requested_teams: [],
     mergeable: done ? null : true,
-    mergeable_state: done ? null : 'clean',
+    // A required check that runs or fails keeps GitHub from merging at once.
+    mergeable_state: done
+      ? null
+      : pull.checks === 'running' || pull.checks === 'failing'
+      ? 'blocked'
+      : 'clean',
     auto_merge: null,
     head: { sha: headSha(pull), ref: pull.branch, repo },
     base: { ref: pull.base ?? 'main', repo },

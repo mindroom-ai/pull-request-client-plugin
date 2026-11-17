@@ -84,7 +84,7 @@ After any success: invalidate the PR's query prefix (`['pull-requests', owner, r
 3. draft: Ready for review (with push), else nothing
 4. auto-merge armed: badge "Auto-merge (squash)"
 5. no allowed method: nothing
-6. checks pending or failing (not none) and `autoMergeAllowed`: Auto-merge (method)
+6. checks pending or failing (not none), `autoMergeAllowed`, and GitHub would not merge now (`mergeableState` is not `clean`, `has_hooks` or `unstable`): Auto-merge (method). GitHub refuses `enablePullRequestAutoMerge` on a pull request it can merge at once, so in those three states the control is Merge and the menu lists no Enable auto-merge (T3's `IMMEDIATELY_MERGEABLE` and `canMergeNow`).
 7. Merge (method)
 
 `blocked` and `behind` still merge: GitHub refuses with its own reason (required reviews, branch protection), and the result line shows it.

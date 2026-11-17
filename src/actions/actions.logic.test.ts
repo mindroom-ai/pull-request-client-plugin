@@ -45,6 +45,8 @@ const repository: Repository = {
 const pr = (extra: Partial<PullRequest>): PullRequest => ({ ...pullRequest, ...extra });
 const repo = (extra: Partial<Repository>): Repository => ({ ...repository, ...extra });
 const armed = { autoMerge: { method: 'squash' as const } };
+// What GitHub does not merge yet: a required check still runs, or a review is missing.
+const blocked = { mergeableState: 'blocked' };
 
 describe('primaryControl', () => {
   it('shows a merged pull request as merged', () => {
@@ -78,11 +80,21 @@ describe('primaryControl', () => {
   });
 
   it('offers auto-merge while checks are pending and the repository allows it', () => {
-    expect(primaryControl(pullRequest, repository, 'pending')).toBe('enable-auto-merge');
+    expect(primaryControl(pr(blocked), repository, 'pending')).toBe('enable-auto-merge');
+    expect(primaryControl(pr(blocked), repository, 'failing')).toBe('enable-auto-merge');
   });
 
+  // GitHub refuses to arm auto-merge on a pull request it can merge at once.
+  it.each(['clean', 'has_hooks', 'unstable'])(
+    'offers merge, not auto-merge, on a pull request GitHub can merge now (%s)',
+    (mergeableState) => {
+      expect(primaryControl(pr({ mergeableState }), repository, 'pending')).toBe('merge');
+      expect(primaryControl(pr({ mergeableState }), repository, 'failing')).toBe('merge');
+    }
+  );
+
   it('offers merge on failing checks when the repository allows no auto-merge', () => {
-    expect(primaryControl(pullRequest, repo({ autoMergeAllowed: false }), 'failing')).toBe('merge');
+    expect(primaryControl(pr(blocked), repo({ autoMergeAllowed: false }), 'failing')).toBe('merge');
   });
 
   it('counts checks not loaded yet, or none at all, as passing', () => {
@@ -137,9 +149,16 @@ describe('menuActions', () => {
   const menu = (subject: PullRequest, inRepo: Repository = repository) =>
     menuActions(subject, inRepo, primaryControl(subject, inRepo, 'passing'));
 
-  it('offers auto-merge, draft and close on an open pull request with passing checks', () => {
-    expect(menu(pullRequest)).toEqual(['enable-auto-merge', 'draft', 'close']);
+  it('offers auto-merge, draft and close on an open pull request GitHub does not merge yet', () => {
+    expect(menu(pr(blocked))).toEqual(['enable-auto-merge', 'draft', 'close']);
   });
+
+  it.each(['clean', 'has_hooks', 'unstable'])(
+    'offers no auto-merge on a pull request GitHub can merge now (%s)',
+    (mergeableState) => {
+      expect(menu(pr({ mergeableState }))).toEqual(['draft', 'close']);
+    }
+  );
 
   it('offers merge now and disabling auto-merge once it is armed', () => {
     expect(menu(pr(armed))).toEqual(['merge', 'disable-auto-merge', 'draft', 'close']);

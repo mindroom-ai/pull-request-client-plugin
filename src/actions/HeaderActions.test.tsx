@@ -50,6 +50,8 @@ const open: PullRequest = {
   url: 'https://github.com/o/r/pull/7',
 };
 const merged: PullRequest = { ...open, state: 'merged', mergedAt: '2026-11-15T00:00:00Z' };
+// What GitHub does not merge yet: a required check still runs, or a review is missing.
+const blocked: PullRequest = { ...open, mergeableState: 'blocked' };
 
 let repository: Record<string, unknown>;
 let checkRuns: Record<string, unknown>[];
@@ -259,7 +261,7 @@ describe('HeaderActions', () => {
   });
 
   it("lists an open pull request's actions in the menu's order", async () => {
-    const view = await show();
+    const view = await show(blocked);
     await openMenu(view);
     const methods = view.getAllByRole('menuitemradio');
     expect(methods.map((method) => method.textContent)).toEqual([
@@ -271,6 +273,23 @@ describe('HeaderActions', () => {
     // The rows as drawn, top to bottom: the method group is only radios.
     expect(view.getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
       'Enable auto-merge',
+      'Convert to draft',
+      'Close pull request',
+      'Refresh',
+    ]);
+  });
+
+  it('offers no auto-merge on a pull request GitHub can merge now, which it would refuse', async () => {
+    checkRuns = [{ name: 'ci', status: 'in_progress', conclusion: null }];
+    const view = await show();
+    await waitUntil(() =>
+      expect(
+        client.getQueryState(['pull-requests', 'pr', 'o', 'r', 7, true, 'checks', 'head7'])
+      ).toMatchObject({ status: 'success' })
+    );
+    expect(view.getByRole('button', { name: 'Merge' })).toBeTruthy();
+    await openMenu(view);
+    expect(view.getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
       'Convert to draft',
       'Close pull request',
       'Refresh',
@@ -293,7 +312,7 @@ describe('HeaderActions', () => {
 
   it('offers auto-merge while the checks run', async () => {
     checkRuns = [{ name: 'ci', status: 'in_progress', conclusion: null }];
-    const view = await show();
+    const view = await show(blocked);
     await waitUntil(() => expect(view.getByRole('button', { name: 'Auto-merge (merge)' })));
     await click(view.getByRole('button', { name: 'Auto-merge (merge)' }));
     expect(view.getByRole('button', { name: 'Confirm auto-merge?' })).toBeTruthy();
