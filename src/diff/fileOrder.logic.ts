@@ -1,4 +1,4 @@
-// Ported from T3 Code (https://github.com/pingdotgg/t3code, apps/web/src/components/pullRequest/pullRequestFileOrder.logic.ts at 8ab427c6), MIT, Copyright (c) 2026 T3 Tools Inc. See NOTICE.
+// Ported from T3 Code (https://github.com/pingdotgg/t3code, apps/web/src/components/pullRequest/pullRequestFileOrder.logic.ts at aace48bfe4), MIT, Copyright (c) 2026 T3 Tools Inc. See NOTICE.
 // The order of a pull request's diffs: source files after what they import, then the tests in the
 // order of the source they cover, then generated files and lockfiles.
 import type { FileDiffMetadata } from '@pierre/diffs';
@@ -25,7 +25,8 @@ const GENERATED_DIRECTORIES = new Set([
   'vendor',
 ]);
 const TEST_DIRECTORIES = new Set(['__tests__', 'tests', 'test']);
-const MODULE_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'];
+// `.mts` also ends in `.ts`, so the longer extensions come first.
+const MODULE_EXTENSIONS = ['.mts', '.cts', '.mjs', '.cjs', '.tsx', '.jsx', '.ts', '.js'];
 
 function diffFileTier(path: string): DiffFileTier {
   const segments = path.split('/');
@@ -59,6 +60,17 @@ function baseName(path: string): string {
   return stripExtension(path.split('/').at(-1) ?? '');
 }
 
+// An import leaves out a module's extension but keeps a dotted name such as `b.logic`, so the
+// module map's keys strip only the extensions an import can leave out.
+function stripModuleExtension(path: string): string {
+  const extension = MODULE_EXTENSIONS.find((candidate) => path.endsWith(candidate));
+  return extension === undefined ? path : path.slice(0, -extension.length);
+}
+
+function moduleName(path: string): string {
+  return stripModuleExtension(path.split('/').at(-1) ?? '');
+}
+
 function resolveRelative(fromPath: string, specifier: string): string {
   const segments = fromPath.split('/').slice(0, -1);
   for (const part of specifier.split('/')) {
@@ -75,25 +87,22 @@ function importedPaths(
   path: string,
   lines: ReadonlyArray<string>,
   byModulePath: ReadonlyMap<string, string>,
-  byBaseName: ReadonlyMap<string, string>
+  byModuleName: ReadonlyMap<string, string>
 ): ReadonlySet<string> {
   const imported = new Set<string>();
   for (const line of lines) {
     IMPORT_SPECIFIER.lastIndex = 0;
     let match = IMPORT_SPECIFIER.exec(line);
     while (match !== null) {
-      const specifier = match[1] ?? '';
-      const withExtension = specifier.startsWith('.')
-        ? resolveRelative(path, specifier)
-        : specifier;
-      // Module-map keys omit extensions, which can differ from disk.
-      const extension = MODULE_EXTENSIONS.find((candidate) => withExtension.endsWith(candidate));
-      const resolved =
-        extension === undefined ? withExtension : withExtension.slice(0, -extension.length);
+      // A bundler's query, such as `?worker` or `?url`, names the same file.
+      const specifier = (match[1] ?? '').replace(/\?.*$/, '');
+      const resolved = stripModuleExtension(
+        specifier.startsWith('.') ? resolveRelative(path, specifier) : specifier
+      );
       const target =
         byModulePath.get(resolved) ??
         byModulePath.get(`${resolved}/index`) ??
-        byBaseName.get(baseName(resolved));
+        byModuleName.get(moduleName(resolved));
       if (target !== undefined && target !== path) imported.add(target);
       match = IMPORT_SPECIFIER.exec(line);
     }
@@ -141,22 +150,27 @@ export function orderDiffFiles(files: ReadonlyArray<FileDiffMetadata>): FileDiff
 
   const sourcePaths = [...byPath.keys()].filter((path) => tiers.get(path) === 'source');
   const byModulePath = new Map<string, string>();
-  const ambiguousBaseNames = new Set<string>();
-  const byBaseName = new Map<string, string>();
+  const ambiguousModuleNames = new Set<string>();
+  const byModuleName = new Map<string, string>();
   for (const path of sourcePaths) {
-    byModulePath.set(stripExtension(path), path);
-    const base = baseName(path);
-    if (byBaseName.has(base)) ambiguousBaseNames.add(base);
-    byBaseName.set(base, path);
+    byModulePath.set(stripModuleExtension(path), path);
+    const name = moduleName(path);
+    if (byModuleName.has(name)) ambiguousModuleNames.add(name);
+    byModuleName.set(name, path);
   }
-  for (const base of ambiguousBaseNames) byBaseName.delete(base);
+  for (const name of ambiguousModuleNames) byModuleName.delete(name);
 
   const imports = new Map<string, ReadonlySet<string>>();
   for (const path of sourcePaths) {
     const file = byPath.get(path)!;
     imports.set(
       path,
-      importedPaths(path, [...file.additionLines, ...file.deletionLines], byModulePath, byBaseName)
+      importedPaths(
+        path,
+        [...file.additionLines, ...file.deletionLines],
+        byModulePath,
+        byModuleName
+      )
     );
   }
   const orderedSource = orderByImports(sourcePaths, imports);
