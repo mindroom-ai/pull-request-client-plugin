@@ -1,4 +1,4 @@
-// Ported from T3 Code (https://github.com/pingdotgg/t3code, packages/shared/src/changedFileKind.ts at 8ab427c6), MIT, Copyright (c) 2026 T3 Tools Inc. See NOTICE.
+// Ported from T3 Code (https://github.com/pingdotgg/t3code, packages/shared/src/changedFileKind.ts at 348009de22), MIT, Copyright (c) 2026 T3 Tools Inc. See NOTICE.
 // The kind of a changed file by its path, for the header's line breakdown and the test file filter.
 
 export type ChangedFileKind = 'code' | 'test' | 'generated' | 'docs';
@@ -45,7 +45,7 @@ const MOCK_DIRS = new Set([
 ]);
 
 const TEST_NAME =
-  /(\.(test|spec|e2e|eval)\.[^.]+$|_(test|spec)\.[^.]+$|^test_.+\.py$|^conftest\.py$|^(vitest|jest)\.setup\.[^.]+$)/i;
+  /(\.(test|spec|e2e|eval|stories)\.[^.]+$|_(test|spec)\.[^.]+$|^test_.+\.py$|^conftest\.py$|^(vitest|jest)\.setup\.[^.]+$)/i;
 // Case-sensitive: `FooTest.java` is a test class, `Latest.java` is not.
 const CLASS_TEST_NAME = /(Tests?|Spec)\.(java|kt|kts|scala|groovy|cs|php|swift|m)$/;
 const TEST_DIRS = new Set([
@@ -64,7 +64,10 @@ const DOCS_NAME = /\.(md|mdx|markdown|rst|adoc|txt)$/i;
 // Plain-text files that tools read as config or input, not prose.
 const NOT_DOCS_NAME = /^(requirements.*|constraints.*|CMakeLists|robots|llms)\.txt$/i;
 
-/** Whether a changed file is a test or test support (mocks, fixtures, snapshots). */
+/**
+ * Whether a changed file is a test or test support (mocks, fixtures, snapshots, Storybook
+ * stories).
+ */
 export function isTestFile(path: string): boolean {
   return changedFileKind(path) === 'test';
 }

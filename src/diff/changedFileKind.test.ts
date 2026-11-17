@@ -1,4 +1,4 @@
-// Ported from T3 Code (https://github.com/pingdotgg/t3code, packages/shared/src/changedFileKind.test.ts at 8ab427c6), MIT, Copyright (c) 2026 T3 Tools Inc. See NOTICE.
+// Ported from T3 Code (https://github.com/pingdotgg/t3code, packages/shared/src/changedFileKind.test.ts at 348009de22), MIT, Copyright (c) 2026 T3 Tools Inc. See NOTICE.
 import { describe, expect, it } from 'vitest';
 
 import { changedFileKind, isTestFile } from './changedFileKind';
@@ -11,6 +11,19 @@ describe('changedFileKind', () => {
     ['convex/_generated/api.d.ts', 'generated'],
     ['src/agent.eval.ts', 'test'],
     ['evals/title-generation.ts', 'test'],
+    ['src/Button.stories.tsx', 'test'],
+    ['src/Button.stories.ts', 'test'],
+    ['src/Button.stories.js', 'test'],
+    ['src/Button.stories.jsx', 'test'],
+    ['src/Button.stories.mjs', 'test'],
+    ['src/Button.stories.svelte', 'test'],
+    ['src/Button.stories.mdx', 'test'],
+    ['src\\Button.STORIES.TSX', 'test'],
+    ['src/Button.stories.generated.ts', 'generated'],
+    ['__mocks__/Button.stories.tsx', 'test'],
+    ['src/stories.ts', 'code'],
+    ['src/stories/Button.tsx', 'code'],
+    ['.storybook/main.ts', 'code'],
     ['README.md', 'docs'],
     ['tests/README.md', 'test'],
   ] as const)('%s is %s', (path, kind) => {
