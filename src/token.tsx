@@ -259,6 +259,10 @@ export function GitHubConnectedNote() {
   return <>{login ? t('token.connected', { login, how }) : t('token.connectedNoLogin', { how })}</>;
 }
 
+// The token's routes change what MindRoom keeps for the person, and the token goes in the body: a
+// redirect, which the browser would follow to another origin with the body, fails instead.
+const NO_REDIRECT: RequestRedirect = 'error';
+
 /** Why saving a token in MindRoom failed: GitHub refused it, it is no token, or anything else. */
 type SaveProblem = 'rejected' | 'invalid' | 'failed';
 
@@ -292,6 +296,7 @@ function useServerToken() {
               method: 'PUT',
               body: JSON.stringify({ token }),
               headers: { 'Content-Type': 'application/json' },
+              redirect: NO_REDIRECT,
             })
           );
         } catch (error) {
@@ -311,7 +316,9 @@ function useServerToken() {
       /** Removes it there; resolves to whether it did. */
       remove: async (): Promise<boolean> => {
         try {
-          answered(await server.request('/api/github/token', { method: 'DELETE' }));
+          answered(
+            await server.request('/api/github/token', { method: 'DELETE', redirect: NO_REDIRECT })
+          );
           return true;
         } catch {
           return false;

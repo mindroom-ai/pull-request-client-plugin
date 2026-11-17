@@ -557,6 +557,31 @@ describe('the token saved in MindRoom', () => {
     await waitUntil(() => expect(view.getByTestId('reader').textContent).toBe('with the token'));
   });
 
+  it('saves and removes it without following a redirect, which would take the token elsewhere', async () => {
+    const mindroom = githubServer(github);
+    const view = await show(
+      mindroom.server,
+      <>
+        <TokenForm reason="override" />
+        <RemoveServerToken />
+        <NamedReader name="reader" />
+      </>
+    );
+    await waitUntil(() => expect(accesses.reader?.connection).toBe('app'));
+    await chooseMindroom(view);
+    await save(view, 'ghp_good');
+    await waitUntil(() => expect(accesses.reader?.connection).toBe('token'));
+    await click(view.getByRole('button', { name: 'Remove token from MindRoom' }));
+    await waitUntil(() => expect(accesses.reader?.connection).toBe('app'));
+    const sent = mindroom.server.request.mock.calls
+      .filter(([path]) => path === '/api/github/token')
+      .map(([, init]) => [init?.method, init?.redirect]);
+    expect(sent).toEqual([
+      ['PUT', 'error'],
+      ['DELETE', 'error'],
+    ]);
+  });
+
   it('removes it from MindRoom, going back to the App, as the status it answers says', async () => {
     const mindroom = githubServer(github);
     await mindroom.server.request('/api/github/token', {
