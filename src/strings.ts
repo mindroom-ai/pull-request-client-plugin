@@ -129,12 +129,15 @@ export const en = {
       'update-branch-rebase': 'Could not rebase this branch',
       'delete-branch': 'Could not delete this branch',
     },
-    // Why, by the failure's kind; a refusal shows GitHub's own reason instead, and a failure
-    // without access shows it after the hint.
+    // Why, by the failure's kind; a refusal shows GitHub's own reason instead, and the others
+    // (but a refused token) show it after the hint. `failed` is a request GitHub never
+    // answered, `server` one it answered with an error of its own.
     hint: {
       noAccess:
         'GitHub refused it. The saved token may not have write access to this repository (Pull requests and Contents: Read and write).',
       badToken: 'GitHub refused the saved token.',
+      rateLimited: "GitHub's rate limit is used up for now. Try again later.",
+      server: 'GitHub answered with an error.',
       branchMoved: 'The branch has new commits since this pull request, so it was not deleted.',
       failed: 'Could not reach GitHub.',
     },

@@ -98,6 +98,8 @@ The panel covers the conversation on a phone; the header controls are the same, 
 - 401: the token is refused (existing `badToken` state).
 - 403 or 404 on a write: "GitHub refused it. The saved token may not have write access to this repository (Pull requests and Contents: Read and write)."
 - 405, 409, 422: GitHub's `message` ("Pull Request is not mergeable", "Head branch was modified"), then a refetch, so the header shows the new state.
+- 429, or 403 with `x-ratelimit-remaining: 0` or `retry-after`, or GraphQL's `RATE_LIMITED`: "GitHub's rate limit is used up for now. Try again later.", then GitHub's `message`.
+- Any other status (5xx): "GitHub answered with an error.", then GitHub's `message`.
 - Network failure: "Could not reach GitHub." The control re-enables; nothing is retried on its own.
 
 ## Testing

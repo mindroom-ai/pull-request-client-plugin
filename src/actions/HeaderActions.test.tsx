@@ -241,6 +241,38 @@ describe('HeaderActions', () => {
     );
   });
 
+  it.each([
+    [
+      "a server error, with GitHub's message",
+      async () => respond({ message: 'Server Error' }, 502),
+      'Could not close this pull request GitHub answered with an error. Server Error',
+    ],
+    [
+      'a server error without a message',
+      async () => new Response('', { status: 500 }),
+      'Could not close this pull request GitHub answered with an error.',
+    ],
+    [
+      "a rate limit, with GitHub's message",
+      async () => respond({ message: 'You have exceeded a secondary rate limit.' }, 429),
+      "Could not close this pull request GitHub's rate limit is used up for now. Try again later. You have exceeded a secondary rate limit.",
+    ],
+    [
+      'no answer',
+      async (): Promise<Response> => {
+        throw new TypeError('Failed to fetch');
+      },
+      'Could not close this pull request Could not reach GitHub.',
+    ],
+  ])('says what went wrong after %s', async (_name, answer, line) => {
+    writeAnswer = answer;
+    const view = await show();
+    await openMenu(view);
+    await click(row(view, 'Close pull request'));
+    await click(row(view, 'Confirm close?'));
+    await waitUntil(() => expect(view.getByRole('status').textContent).toBe(line));
+  });
+
   it('keeps its status region in place, so that what it says next is announced', async () => {
     writeAnswer = () => hold(() => respond({ message: 'Pull Request is not mergeable' }, 405));
     const view = await show();

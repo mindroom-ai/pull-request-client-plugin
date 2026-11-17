@@ -401,14 +401,16 @@ function ResultLine({
     if (shown.outcome !== 'failed') {
       text = <span>{t(`actions.${shown.outcome}.${shown.action}`)}</span>;
     } else {
-      const { kind, detail } = shown.error;
-      // A refusal is GitHub's reason alone. Without access the hint comes first, then GitHub's
-      // reason when it gave one: an organization that has not allowed the token, or a limit,
-      // reads as that and not only as missing access.
-      const hint = kind === 'refused' ? null : t(`actions.hint.${kind}`);
-      const why = [hint, kind === 'refused' || kind === 'noAccess' ? detail : null]
-        .filter(Boolean)
-        .join(' ');
+      const { kind, status, detail } = shown.error;
+      // A refusal is GitHub's reason alone. Any other failure has a hint first, then GitHub's
+      // reason when it gave one: an organization that has not allowed the token reads as that
+      // and not only as missing access, and a limit or a server error says which. A failure
+      // GitHub answered is not one of reaching it. A refused token needs no more than its hint.
+      const hint =
+        kind === 'refused'
+          ? null
+          : t(kind === 'failed' && status !== 0 ? 'actions.hint.server' : `actions.hint.${kind}`);
+      const why = [hint, kind === 'badToken' ? null : detail].filter(Boolean).join(' ');
       text = (
         <span>
           <strong className="mrpr-action-result-title">

@@ -43,7 +43,12 @@ function subscribe(listener: () => void) {
   };
 }
 
-/** Forgets every action and outcome, so that each test starts from none. */
+/**
+ * Forgets every action and outcome. Only the tests call it: this state is the module's, not a
+ * component's, so that it outlives a panel, which also makes it outlive a test. An outcome
+ * stays until it is dismissed, and the tests act on one pull request, so without this a test
+ * would start with the outcome of the one before it.
+ */
 export function resetPullRequestActions() {
   entries.clear();
   listeners.forEach((listener) => listener());

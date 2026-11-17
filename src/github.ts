@@ -168,7 +168,15 @@ async function getJson(
 
 // `branchMoved` is this module's own refusal: the branch to delete got commits since its pull
 // request, so it is left alone.
-export type GitHubWriteErrorKind = 'noAccess' | 'refused' | 'badToken' | 'branchMoved' | 'failed';
+// `failed` with status 0 is a request GitHub never answered; with another status, an answer
+// that is none of the rest, a server error among them.
+export type GitHubWriteErrorKind =
+  | 'noAccess'
+  | 'refused'
+  | 'badToken'
+  | 'rateLimited'
+  | 'branchMoved'
+  | 'failed';
 
 /** A write GitHub refused or did not take, with GitHub's own reason in `detail` when it gave one. */
 export class GitHubWriteError extends Error {
@@ -182,8 +190,12 @@ export class GitHubWriteError extends Error {
   }
 }
 
-function writeErrorKind(status: number): GitHubWriteErrorKind {
+function writeErrorKind(response: Response): GitHubWriteErrorKind {
+  const { status, headers } = response;
   if (status === 401) return 'badToken';
+  // GitHub's limits answer 429, or 403 with no requests left or with a time to retry after.
+  const limited = headers.get('x-ratelimit-remaining') === '0' || headers.has('retry-after');
+  if (status === 429 || (status === 403 && limited)) return 'rateLimited';
   // A token without write access to the repository gets these, not a 401.
   if (status === 403 || status === 404) return 'noAccess';
   if (status === 405 || status === 409 || status === 422) return 'refused';
@@ -228,7 +240,7 @@ async function sendRest(
   const answer: unknown = await response.json().catch(() => null);
   if (!response.ok) {
     throw new GitHubWriteError(
-      writeErrorKind(response.status),
+      writeErrorKind(response),
       response.status,
       reason(record(answer)?.message, token)
     );
@@ -250,7 +262,12 @@ async function graphql(
   if (!answer) throw new GitHubWriteError('failed', 200);
   const [error] = list(answer.errors);
   if (error) {
-    const kind = error.type === 'FORBIDDEN' || error.type === 'NOT_FOUND' ? 'noAccess' : 'refused';
+    const kind =
+      error.type === 'FORBIDDEN' || error.type === 'NOT_FOUND'
+        ? 'noAccess'
+        : error.type === 'RATE_LIMITED'
+        ? 'rateLimited'
+        : 'refused';
     throw new GitHubWriteError(kind, 200, reason(error.message, token));
   }
   return record(answer.data);

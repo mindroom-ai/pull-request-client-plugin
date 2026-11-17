@@ -1240,6 +1240,35 @@ describe('the write error kinds', () => {
     });
   });
 
+  it("keeps GitHub's message on a failure it answered", async () => {
+    expect(await failure(json({ message: 'Server Error' }, { status: 502 }))).toMatchObject({
+      kind: 'failed',
+      status: 502,
+      detail: 'Server Error',
+    });
+  });
+
+  it.each([
+    ['429', { status: 429 }],
+    ['403 with no requests left', { status: 403, headers: { 'x-ratelimit-remaining': '0' } }],
+    ['403 with a time to retry after', { status: 403, headers: { 'retry-after': '60' } }],
+  ])("is rate limited on %s, with GitHub's message", async (_name, init) => {
+    const message = 'You have exceeded a secondary rate limit.';
+    expect(await failure(json({ message }, init))).toMatchObject({
+      kind: 'rateLimited',
+      status: init.status,
+      detail: message,
+    });
+  });
+
+  it("is rate limited on GraphQL's RATE_LIMITED", async () => {
+    const errors = [{ type: 'RATE_LIMITED', message: 'API rate limit exceeded' }];
+    expect(await graphqlFailure(json({ errors }))).toMatchObject({
+      kind: 'rateLimited',
+      detail: 'API rate limit exceeded',
+    });
+  });
+
   it('is failed with status 0 when GitHub cannot be reached', async () => {
     expect(await failure(new TypeError('Failed to fetch'))).toMatchObject({
       kind: 'failed',
