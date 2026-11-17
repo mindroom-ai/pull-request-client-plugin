@@ -8,6 +8,7 @@ import { GitHubError, type Commit, type PullRequestFile, type ReviewComment } fr
 import plugin from './index';
 import type { ReviewThread } from './reviewThreads';
 import { CodeTab, type ListState } from './CodeTab';
+import { fnv1a32 } from './diff/diffRendering';
 import { trapOptions } from './testing/focusTrapStandIn';
 
 vi.mock('focus-trap-react', async () => ({
@@ -737,6 +738,78 @@ describe('CodeTab', () => {
       expect(itemOf('src/app.ts')?.collapsed).toBe(false);
       await chooseCommit(tab, 'All commits');
       expect(itemOf('src/app.ts')?.collapsed).toBe(true);
+    });
+
+    it('a viewed file folds and opens with its mark, also one another tab sets', async () => {
+      const key =
+        'mindroom.plugin:%40plugin-tester%3Aexample.org/pull-requests/viewed:mindroom-ai/mindroom-chat#200';
+      const patch = FILES[0]?.patch ?? '';
+      // Another tab of the same account writes the marks, and this one hears of it.
+      const markElsewhere = (paths: string[]) =>
+        act(() => {
+          if (paths.length === 0) localStorage.removeItem(key);
+          else
+            localStorage.setItem(
+              key,
+              JSON.stringify(Object.fromEntries(paths.map((path) => [path, fnv1a32(patch)])))
+            );
+          window.dispatchEvent(new StorageEvent('storage', { key }));
+        });
+      localStorage.setItem(key, JSON.stringify({ 'src/app.ts': fnv1a32(patch) }));
+      const tab = await show();
+      expect(viewedBox(tab, 'src/app.ts').checked).toBe(true);
+      expect(itemOf('src/app.ts')?.collapsed).toBe(true);
+
+      // Opened by hand, it stays open as it is unmarked, and folds as it is marked again.
+      await click(foldToggle(tab, 'src/app.ts'));
+      expect(itemOf('src/app.ts')?.collapsed).toBe(false);
+      await click(viewedBox(tab, 'src/app.ts'));
+      expect(viewedBox(tab, 'src/app.ts').checked).toBe(false);
+      expect(itemOf('src/app.ts')?.collapsed).toBe(false);
+      await click(viewedBox(tab, 'src/app.ts'));
+      expect(itemOf('src/app.ts')?.collapsed).toBe(true);
+
+      markElsewhere([]);
+      expect(viewedBox(tab, 'src/app.ts').checked).toBe(false);
+      expect(itemOf('src/app.ts')?.collapsed).toBe(false);
+      markElsewhere(['src/app.ts', 'README.md']);
+      expect(itemOf('src/app.ts')?.collapsed).toBe(true);
+      expect(itemOf('README.md')?.collapsed).toBe(true);
+
+      // Expand all files outranks the marks.
+      await click(tab.getByRole('button', { name: 'Collapse all files' }));
+      await click(tab.getByRole('button', { name: 'Expand all files' }));
+      expect(itemOf('src/app.ts')?.collapsed).toBe(false);
+      tab.unmount();
+
+      await show();
+      expect(itemOf('src/app.ts')?.collapsed).toBe(true);
+    });
+
+    it('a viewed file a push changes opens, as Changed', async () => {
+      const first = await show();
+      await click(viewedBox(first, 'src/app.ts'));
+      first.unmount();
+
+      const client = new QueryClient();
+      const at = (patch: string) => (
+        <QueryClientProvider client={client}>
+          <Holder
+            files={FILES.map((entry) =>
+              entry.path === 'src/app.ts' ? { ...entry, patch } : entry
+            )}
+          />
+        </QueryClientProvider>
+      );
+      const tab = await renderPluginComponent(at(FILES[0]?.patch ?? ''), {
+        id: 'pull-requests',
+        plugin,
+      });
+      expect(itemOf('src/app.ts')?.collapsed).toBe(true);
+      // The pull request's files load again after a push, while the tab is open.
+      tab.rerender(at('@@ -1 +1 @@\n-old\n+newer'));
+      expect(viewedBox(tab, 'src/app.ts').getAttribute('aria-label')).toBe('Changed');
+      expect(itemOf('src/app.ts')?.collapsed).toBe(false);
     });
 
     it('Shift-click marks a range', async () => {

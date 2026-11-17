@@ -1,32 +1,35 @@
-// Ported from T3 Code (https://github.com/pingdotgg/t3code, apps/web/src/components/pullRequest/pullRequestDiff.logic.ts and apps/web/src/lib/diffCollapse.ts at 8ab427c6), MIT, Copyright (c) 2026 T3 Tools Inc. See NOTICE.
+// Ported from T3 Code (https://github.com/pingdotgg/t3code, apps/web/src/components/pullRequest/pullRequestDiff.logic.ts, apps/web/src/lib/diffCollapse.ts and packages/client-runtime/src/pullRequestDiffFold.ts at 1f698f01d9), MIT, Copyright (c) 2026 T3 Tools Inc. See NOTICE.
 // Which diffs of the Code tab are folded, and which files a Shift-click on a viewed mark covers.
 
 /** What the toolbar's collapse or expand all last asked for; null while it has not been used. */
 export type DiffFoldOverride = 'expanded' | 'folded' | null;
 
-/** Fold choices are kept relative to the toolbar's, so a file folds against what it asked for. */
+/** The reader's own fold of each file. It is absolute, so a viewed mark that changes keeps it. */
+export type FileDiffFoldChoices = ReadonlyMap<string, boolean>;
+
+/**
+ * A reader's own fold wins. Otherwise the toolbar's collapse or expand all decides, and before it
+ * is used a file is folded while it is viewed, as GitHub folds it.
+ */
 export function isFileDiffCollapsed(
   fileKey: string,
   foldOverride: DiffFoldOverride,
-  toggledFileKeys: ReadonlySet<string>
+  choices: FileDiffFoldChoices,
+  viewed = false
 ): boolean {
-  const foldedByDefault = foldOverride === 'folded';
-  return toggledFileKeys.has(fileKey) ? !foldedByDefault : foldedByDefault;
+  return choices.get(fileKey) ?? (foldOverride === null ? viewed : foldOverride === 'folded');
 }
 
-/** Folds a file marked viewed and unfolds one unmarked, leaving one already so as it is. */
-export function toggleFileDiffFoldForViewed(
+/** Records the reader's fold of a file, or clears it with undefined. */
+export function withFileDiffFold(
+  choices: FileDiffFoldChoices,
   fileKey: string,
-  viewed: boolean,
-  foldOverride: DiffFoldOverride,
-  toggledFileKeys: ReadonlySet<string>
-): ReadonlySet<string> {
-  if (isFileDiffCollapsed(fileKey, foldOverride, toggledFileKeys) === viewed) {
-    return toggledFileKeys;
-  }
-  const next = new Set(toggledFileKeys);
-  if (next.has(fileKey)) next.delete(fileKey);
-  else next.add(fileKey);
+  collapsed: boolean | undefined
+): FileDiffFoldChoices {
+  if (choices.get(fileKey) === collapsed) return choices;
+  const next = new Map(choices);
+  if (collapsed === undefined) next.delete(fileKey);
+  else next.set(fileKey, collapsed);
   return next;
 }
 
