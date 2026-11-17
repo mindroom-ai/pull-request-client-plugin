@@ -1,4 +1,4 @@
-import { useQuery, type Query, type QueryClient } from '@tanstack/react-query';
+import { isCancelledError, useQuery, type Query, type QueryClient } from '@tanstack/react-query';
 import {
   fetchBehindBy,
   fetchChecks,
@@ -17,11 +17,13 @@ import {
   type PullRequest,
   type PullRequestRef,
 } from './github';
-import { useGitHubAccess } from './token';
+import { useGitHubAccess, type AccessKey } from './token';
 
 // A refusal GitHub gave twice would be the same again; only a failed request is worth another try.
+// A read cancelled because its key no longer names the access (`authFor`) is not tried again.
 const retry = (count: number, error: Error) =>
-  (error instanceof GitHubError || error instanceof GitHubWriteError) && error.kind !== 'failed'
+  isCancelledError(error) ||
+  ((error instanceof GitHubError || error instanceof GitHubWriteError) && error.kind !== 'failed')
     ? false
     : count < 2;
 
@@ -44,7 +46,7 @@ export const repositoryKey = (ref: PullRequestRef | undefined) =>
 // The token's value never goes in a key (keys show in devtools and error reports); how GitHub is
 // reached does (`GitHubAccess.key`), so a result for a public pull request is not reused for the
 // private view of it, nor one read through MindRoom for one read with a token.
-const keyOf = (ref: PullRequestRef | undefined, access: boolean | string) =>
+const keyOf = (ref: PullRequestRef | undefined, access: AccessKey) =>
   [...pullRequestKey(ref), access] as const;
 
 /**
@@ -52,21 +54,27 @@ const keyOf = (ref: PullRequestRef | undefined, access: boolean | string) =>
  * settles once the pull request itself is read again. Its other parts (the files, the checks,
  * the comments) are not waited for: a large pull request's files take long, and nothing that
  * depends on the write reads them. Resolves to whether that read worked: false leaves on screen
- * the pull request from before the write. True also when nothing on screen reads it.
+ * the pull request from before the write. True also when nothing on screen reads it. `access`,
+ * the key of the access the write went with, is the read that counts: what another room shows
+ * of the pull request with another access (anonymously, as not found) is asked again too, each
+ * with the access its own key names (`authFor`), but says nothing of this write.
  */
 export async function refreshPullRequest(
   queryClient: QueryClient,
-  ref: PullRequestRef
+  ref: PullRequestRef,
+  access: AccessKey
 ): Promise<boolean> {
   const queryKey = pullRequestKey(ref);
+  const used = [...queryKey, access];
   // The pull request's own query has only how GitHub is reached after the start they all share.
-  const own = (query: Query) => query.queryKey.length === queryKey.length + 1;
+  const own = (query: Query) => query.queryKey.length === used.length;
+  const read = (query: Query) => own(query) && query.queryKey[queryKey.length] === access;
   // Each query once: asked again by both, the first request would be dropped for the second.
-  void queryClient.invalidateQueries({ queryKey, predicate: (query) => !own(query) });
-  await queryClient.invalidateQueries({ queryKey, predicate: own });
+  void queryClient.invalidateQueries({ queryKey, predicate: (query) => !read(query) });
+  await queryClient.invalidateQueries({ queryKey, predicate: read });
   // Only what is on screen was asked again; a failure of an earlier read, as the one without a
   // token of a private pull request, is not this read's.
-  const shown = queryClient.getQueryCache().findAll({ queryKey, predicate: own, type: 'active' });
+  const shown = queryClient.getQueryCache().findAll({ queryKey, predicate: read, type: 'active' });
   return shown.every((query) => query.state.status !== 'error');
 }
 
@@ -86,7 +94,8 @@ export function usePullRequest(ref: PullRequestRef | undefined, options: Refetch
   const access = useGitHubAccess();
   return useQuery({
     queryKey: keyOf(ref, access.key),
-    queryFn: ({ signal }) => fetchPullRequest(ref as PullRequestRef, access.current(), signal),
+    queryFn: ({ signal }) =>
+      fetchPullRequest(ref as PullRequestRef, access.authFor(access.key), signal),
     enabled: ref !== undefined && !access.pending,
     staleTime: STALE_TIME,
     retry,
@@ -98,7 +107,8 @@ export function usePullRequestFiles(ref: PullRequestRef | undefined, enabled: bo
   const access = useGitHubAccess();
   return useQuery({
     queryKey: [...keyOf(ref, access.key), 'files'] as const,
-    queryFn: ({ signal }) => fetchPullRequestFiles(ref as PullRequestRef, access.current(), signal),
+    queryFn: ({ signal }) =>
+      fetchPullRequestFiles(ref as PullRequestRef, access.authFor(access.key), signal),
     enabled: enabled && ref !== undefined && !access.pending,
     staleTime: STALE_TIME,
     retry,
@@ -120,7 +130,7 @@ export function useRepository(ref: PullRequestRef | undefined) {
     queryKey: [...repositoryKey(ref), access.key] as const,
     queryFn: ({ signal }) => {
       const { owner, repo } = ref as PullRequestRef;
-      const auth = access.current();
+      const auth = access.authFor(access.key);
       // Forgotten after the render that enabled the query; no request goes without one.
       if (auth === undefined) throw new GitHubWriteError('badToken', 0);
       return fetchRepository(owner, repo, auth, signal);
@@ -143,7 +153,7 @@ export function useHeadBranchSha(ref: PullRequestRef, pr: PullRequest, enabled: 
   return useQuery({
     queryKey: [...keyOf(ref, access.key), 'head-branch', pr.headRepoId, pr.headRef] as const,
     queryFn: ({ signal }) => {
-      const auth = access.current();
+      const auth = access.authFor(access.key);
       // Forgotten after the render that enabled the query; no request goes without one.
       if (auth === undefined) throw new GitHubWriteError('badToken', 0);
       return fetchHeadBranch(ref, pr, auth, signal);
@@ -166,7 +176,7 @@ function useRefQuery<T>(
   const access = useGitHubAccess();
   return useQuery({
     queryKey: [...keyOf(ref, access.key), ...part] as const,
-    queryFn: ({ signal }) => load(ref as PullRequestRef, access.current(), signal),
+    queryFn: ({ signal }) => load(ref as PullRequestRef, access.authFor(access.key), signal),
     enabled: enabled && ref !== undefined && !access.pending,
     staleTime: STALE_TIME,
     retry,

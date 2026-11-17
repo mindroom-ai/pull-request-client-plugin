@@ -11,7 +11,13 @@ import {
   type ReactNode,
   type Ref,
 } from 'react';
-import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import {
+  CancelledError,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+  type QueryKey,
+} from '@tanstack/react-query';
 import { usePluginStorage, usePluginTranslation } from '@mindroom/client-sdk/core';
 import { useMatrixClient } from '@mindroom/client-sdk/matrix';
 import { useMindroomServerStatus, type MindroomServer } from '@mindroom/client-sdk/server';
@@ -42,23 +48,26 @@ export function useGitHubToken(): {
   const storage = usePluginStorage('pull-requests');
   const queryClient = useQueryClient();
   const token = useSyncExternalStore(subscribe, () => storage.getItem(KEY)) ?? undefined;
-  const changed = useCallback(() => {
-    notify();
-    // What the old token (or none) was refused says nothing about the new one, and results
-    // fetched with it may differ now. The queries read the stored token as they fetch, so this
-    // refetch already uses the new one.
-    readAgain(queryClient);
-  }, [queryClient]);
+  const changed = useCallback(
+    (stored: boolean) => {
+      notify();
+      // What the old token (or none) was refused says nothing about the new one, and results
+      // fetched with it may differ now. A new token keeps the token's keys, so what shows under
+      // them is read again here, with the new one.
+      readAgain(queryClient, stored ? true : undefined);
+    },
+    [queryClient]
+  );
   return useMemo(
     () => ({
       token,
       setToken: (value: string) => {
         storage.setItem(KEY, value);
-        changed();
+        changed(true);
       },
       forget: () => {
         storage.removeItem(KEY);
-        changed();
+        changed(false);
       },
     }),
     [changed, storage, token]
@@ -101,18 +110,39 @@ const statusStaleTime = (status: ServerStatus | undefined) =>
 const identity = (status: ServerStatus) =>
   status.connected ? `connected:${status.login ?? ''}` : 'none';
 
+/** How GitHub is reached in a key of `queries.ts`, after the pull request or the repository. */
+const accessOf = (queryKey: QueryKey) => queryKey[queryKey[1] === 'repo' ? 4 : 5];
+
+const serverKey = (origin: string, login: string | undefined) =>
+  `server:${origin}:${login ?? 'unknown'}`;
+
 /**
- * Everything read so far was read as another account, or as none. A refusal is not asked again
- * when its part next shows (`retryOnMount: false`), which is right only for the account that got
- * it, so the refusals with nothing read are forgotten: they are asked anew then. The rest is asked
- * again where it shows, and stays on screen meanwhile.
+ * The parts reach GitHub as another account now, or as none. Nothing is read again here under the
+ * keys they leave: a read there would go with the new access (or be cancelled, `authFor`), and the
+ * parts read under their new keys themselves. What was read stays, stale, for its own access; the
+ * part that shows it next reads it again. A refusal is not asked again when its part next shows
+ * (`retryOnMount: false`), so the refusals with nothing read that no part shows are forgotten:
+ * they are asked anew then. One a part shows is asked again once that part shows it anew, under a
+ * key it changes to. `refetch`, the key the parts keep (a new token's), is read again where it
+ * shows.
  */
-function readAgain(queryClient: QueryClient) {
-  void queryClient.resetQueries({
-    queryKey: ['pull-requests'],
-    predicate: ({ state }) => state.status === 'error' && state.data === undefined,
+function readAgain(queryClient: QueryClient, refetch?: AccessKey) {
+  const queryKey = ['pull-requests'];
+  queryClient
+    .getQueryCache()
+    .findAll({
+      queryKey,
+      type: 'inactive',
+      predicate: ({ state }) => state.status === 'error' && state.data === undefined,
+    })
+    .forEach((query) => query.reset());
+  void queryClient.invalidateQueries({ queryKey, refetchType: 'none' });
+  if (refetch === undefined) return;
+  void queryClient.refetchQueries({
+    queryKey,
+    type: 'active',
+    predicate: (query) => accessOf(query.queryKey) === refetch,
   });
-  void queryClient.invalidateQueries({ queryKey: ['pull-requests'] });
 }
 
 /** Keeps `status` as the server's, and reads everything again when it names another connection. */
@@ -150,6 +180,9 @@ function viaServer(
   };
 }
 
+/** What the query keys carry of how GitHub is reached, as `GitHubAccess.key`. */
+export type AccessKey = boolean | string;
+
 /** How the parts reach GitHub now, as `useGitHubAccess` gives it. */
 export type GitHubAccess = {
   /** With the token stored in the browser, through MindRoom, or neither (anonymous, no writes). */
@@ -161,17 +194,28 @@ export type GitHubAccess = {
    * `server:<origin>:<login>` through MindRoom (`unknown` for a login the server did not name),
    * so no two of them share what was read.
    */
-  key: boolean | string;
+  key: AccessKey;
   /**
    * While the room does not know its server yet, or the server has not said whether GitHub is
    * connected there, with no token stored; nothing should read yet.
    */
   pending: boolean;
-  /** How a request that starts now goes, for one that runs after the render that started it. */
-  current(): GitHubAuth | undefined;
+  /**
+   * How a request that starts now goes, and the key that names it, for one that runs after the
+   * render that started it, as a write does.
+   */
+  current(): { key: AccessKey; auth: GitHubAuth | undefined };
+  /**
+   * How a read under `key` goes, which is the access the key names and never another: without one
+   * for `false`; else the access now, when that is still the one `key` names. When it is not, the
+   * read throws `CancelledError`, which leaves what was read under `key` as it was; the parts
+   * read under their new key.
+   */
+  authFor(key: AccessKey): GitHubAuth | undefined;
   /**
    * Asks the server again whether GitHub is connected there, as a part's Try again does; resolves
-   * to whether it names another connection now, after which everything is read again.
+   * to whether the parts read again by themselves now, under the keys of another connection: one
+   * that differs from the one before, or the first connected one when none was known.
    */
   recheck(): Promise<boolean>;
 };
@@ -210,33 +254,59 @@ export function useGitHubAccess(): GitHubAccess {
   });
   const connected = server !== undefined && token === undefined && status.data?.connected === true;
   const login = connected ? status.data?.login : undefined;
-  const current = useCallback((): GitHubAuth | undefined => {
+  const current = useCallback((): { key: AccessKey; auth: GitHubAuth | undefined } => {
     const stored = storedToken();
-    if (stored !== undefined) return stored;
-    if (server === undefined) return undefined;
-    const now = queryClient.getQueryData<ServerStatus>(statusKey(server.origin));
-    if (!now?.connected) return undefined;
-    return viaServer(queryClient, server, `${userId} ${now.login ?? ''}`);
+    if (stored !== undefined) return { key: true, auth: stored };
+    const now = server && queryClient.getQueryData<ServerStatus>(statusKey(server.origin));
+    if (!server || !now?.connected) return { key: false, auth: undefined };
+    return {
+      key: serverKey(server.origin, now.login),
+      auth: viaServer(queryClient, server, `${userId} ${now.login ?? ''}`),
+    };
   }, [queryClient, server, storedToken, userId]);
+  const authFor = useCallback(
+    (key: AccessKey): GitHubAuth | undefined => {
+      // Anonymous is always at hand, also in a room that reads otherwise now and shares the key.
+      if (key === false) return undefined;
+      const now = current();
+      if (now.key !== key) throw new CancelledError({ revert: true });
+      return now.auth;
+    },
+    [current]
+  );
   const recheck = useCallback(async () => {
     if (!server || storedToken() !== undefined) return false;
     const key = statusKey(server.origin);
     const before = queryClient.getQueryData<ServerStatus>(key);
     await queryClient.invalidateQueries({ queryKey: key });
     const now = queryClient.getQueryData<ServerStatus>(key);
-    return now !== undefined && (before === undefined || identity(before) !== identity(now));
+    if (now === undefined) return false;
+    // A first status after a failed one reads everything again only when it is connected,
+    // through the new keys; one that is not leaves the reading again to the caller.
+    return before === undefined ? now.connected : identity(before) !== identity(now);
   }, [queryClient, server, storedToken]);
   return useMemo(
     () => ({
       via: token !== undefined ? 'token' : connected ? 'server' : undefined,
       login,
-      key:
-        token !== undefined ? true : connected ? `server:${origin}:${login ?? 'unknown'}` : false,
+      key: token !== undefined ? true : connected ? serverKey(origin, login) : false,
       pending: token === undefined && (serverPending || (server !== undefined && status.isPending)),
       current,
+      authFor,
       recheck,
     }),
-    [connected, current, login, origin, recheck, server, serverPending, status.isPending, token]
+    [
+      authFor,
+      connected,
+      current,
+      login,
+      origin,
+      recheck,
+      server,
+      serverPending,
+      status.isPending,
+      token,
+    ]
   );
 }
 

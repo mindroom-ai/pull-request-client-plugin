@@ -1,6 +1,11 @@
 // @vitest-environment jsdom
 import type { ReactNode } from 'react';
-import { focusManager, QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import {
+  CancelledError,
+  focusManager,
+  QueryClient,
+  QueryClientProvider,
+} from '@tanstack/react-query';
 import { createClient } from 'matrix-js-sdk';
 import { act } from 'react-dom/test-utils';
 import { MindroomServerError, type MindroomServer } from '@mindroom/client-sdk/server';
@@ -46,6 +51,11 @@ function Reader() {
   accesses.reader = useGitHubAccess();
   return <>{usePullRequest(REF).data?.title}</>;
 }
+/** Reads the same pull request, its title in the element `name`. */
+function NamedReader({ name }: { name: string }) {
+  accesses[name] = useGitHubAccess();
+  return <span data-testid={name}>{usePullRequest(REF).data?.title}</span>;
+}
 
 let client: QueryClient;
 const tree = (server: MindroomServer | undefined, children: ReactNode, pending = false) => (
@@ -75,7 +85,7 @@ describe('useGitHubAccess', () => {
     await show(undefined);
     const { a } = accesses;
     expect(a).toMatchObject({ via: undefined, key: false, pending: false, login: undefined });
-    expect(a?.current()).toBeUndefined();
+    expect(a?.current().auth).toBeUndefined();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -98,7 +108,7 @@ describe('useGitHubAccess', () => {
     expect(accesses.b?.via).toBe('server');
     // One status for the server, however many parts ask.
     expect(server.request).toHaveBeenCalledTimes(1);
-    const auth = accesses.a?.current() as GitHubViaServer;
+    const auth = accesses.a?.current().auth as GitHubViaServer;
     expect(auth.server).toBe(server);
     // The rate limit's budget is the account's, never a token.
     expect(auth.account).toBe('@plugin-tester:example.org octo');
@@ -165,7 +175,7 @@ describe('useGitHubAccess', () => {
     const server = serverWith(() => Promise.resolve({ connected: true, login: 'octo' }));
     await show(server);
     expect(accesses.a).toMatchObject({ via: 'token', key: true, pending: false });
-    expect(accesses.a?.current()).toBe('ghp_test');
+    expect(accesses.a?.current().auth).toBe('ghp_test');
     expect(server.request).not.toHaveBeenCalled();
   });
 
@@ -180,25 +190,25 @@ describe('useGitHubAccess', () => {
     await show(server);
     await waitUntil(() => expect(accesses.a?.pending).toBe(false));
     expect(accesses.a).toMatchObject({ via: undefined, key: false });
-    expect(accesses.a?.current()).toBeUndefined();
+    expect(accesses.a?.current().auth).toBeUndefined();
   });
 
   it('drops to anonymous once the server says the connection went away', async () => {
     const server = serverWith(() => Promise.resolve({ connected: true, login: 'octo' }));
     await show(server);
     await waitUntil(() => expect(accesses.a?.via).toBe('server'));
-    const auth = accesses.a?.current() as GitHubViaServer;
+    const auth = accesses.a?.current().auth as GitHubViaServer;
     act(() => auth.disconnected());
     await waitUntil(() => expect(accesses.a?.via).toBeUndefined());
     expect(accesses.a?.key).toBe(false);
-    expect(accesses.a?.current()).toBeUndefined();
+    expect(accesses.a?.current().auth).toBeUndefined();
   });
 
   it('asks the status again on focus half a minute after the connection went away', async () => {
     const server = serverWith(() => Promise.resolve({ connected: true, login: 'octo' }));
     await show(server);
     await waitUntil(() => expect(accesses.a?.via).toBe('server'));
-    act(() => (accesses.a?.current() as GitHubViaServer).disconnected());
+    act(() => (accesses.a?.current().auth as GitHubViaServer).disconnected());
     await waitUntil(() => expect(accesses.a?.via).toBeUndefined());
     expect(server.request).toHaveBeenCalledTimes(1);
     vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + 10_000 });
@@ -220,6 +230,136 @@ describe('useGitHubAccess', () => {
       focusManager.setFocused(undefined);
       vi.useRealTimers();
     }
+  });
+});
+
+describe('a change of the connection', () => {
+  const PULL = ['pull-requests', 'pr', 'o', 'r', 7] as const;
+  /** Every title the cache stores under the pull request's key for `access`, as it stores it. */
+  const titlesUnder = (access: boolean | string) => {
+    const titles: string[] = [];
+    const key = JSON.stringify([...PULL, access]);
+    client.getQueryCache().subscribe(({ query }) => {
+      const title = (query.state.data as { title?: string } | undefined)?.title;
+      if (JSON.stringify(query.queryKey) === key && title !== undefined) titles.push(title);
+    });
+    return titles;
+  };
+  /** Reads the pull request in a room with `server`, or none. */
+  const room = (name: string, server: MindroomServer | undefined) => (
+    <GitHubServerContext.Provider value={{ server, pending: false }}>
+      <NamedReader name={name} />
+    </GitHubServerContext.Provider>
+  );
+  const rooms = (children: ReactNode) =>
+    renderPluginComponent(<QueryClientProvider client={client}>{children}</QueryClientProvider>, {
+      id: 'pull-requests',
+      plugin,
+    });
+  /**
+   * A server that reads the pull request as `login()`, the title saying whose read it was, after
+   * `delay` ms.
+   */
+  const serverAs = (login: () => string | undefined, delay = 5) => {
+    const server = serverWith(() => Promise.resolve({ connected: true }));
+    server.request.mockImplementation(async (path: string) => {
+      const now = login();
+      if (path === '/api/github/status') return { connected: now !== undefined, login: now };
+      if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
+      return { status: 200, body: { ...apiPull, title: `read as ${now}` }, headers: {} };
+    });
+    return server;
+  };
+
+  it('never stores what the server read under the anonymous key a room without one shows', async () => {
+    // Anonymously, the private pull request is not there.
+    const notFound = () => new Response(JSON.stringify({ message: 'Not Found' }), { status: 404 });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve(notFound()))
+    );
+    let login: string | undefined;
+    const server = serverAs(() => login);
+    const anonymous = titlesUnder(false);
+    const view = await rooms(
+      <>
+        {room('plain', undefined)}
+        {room('served', server)}
+      </>
+    );
+    await waitUntil(() => expect(client.getQueryState([...PULL, false])?.status).toBe('error'));
+    login = 'octo';
+    await act(() => accesses.served?.recheck());
+    await waitUntil(() => expect(view.getByTestId('served').textContent).toBe('read as octo'));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(view.getByTestId('plain').textContent).toBe('');
+    expect(anonymous).toEqual([]);
+    // The room without a server, shown alone, has still only what it may read.
+    view.rerender(
+      <QueryClientProvider client={client}>{room('plain', undefined)}</QueryClientProvider>
+    );
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(view.getByTestId('plain').textContent).toBe('');
+    expect(anonymous).toEqual([]);
+  });
+
+  it("never stores one login's reads under another's key", async () => {
+    let login = 'alice';
+    // Answered before the parts render the new login's keys.
+    const server = serverAs(() => login, 0);
+    const alices = titlesUnder(`server:${ORIGIN}:alice`);
+    const bobs = titlesUnder(`server:${ORIGIN}:bob`);
+    const view = await rooms(room('served', server));
+    await waitUntil(() => expect(view.getByTestId('served').textContent).toBe('read as alice'));
+    login = 'bob';
+    await act(() => accesses.served?.recheck());
+    await waitUntil(() => expect(view.getByTestId('served').textContent).toBe('read as bob'));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(alices.filter((title) => title !== 'read as alice')).toEqual([]);
+    expect(bobs.filter((title) => title !== 'read as bob')).toEqual([]);
+  });
+
+  it('gives a read only the access its key names', async () => {
+    const server = serverAs(() => 'alice');
+    await rooms(room('served', server));
+    await waitUntil(() => expect(accesses.served?.key).toBe(`server:${ORIGIN}:alice`));
+    const access = accesses.served as GitHubAccess;
+    expect(access.authFor(false)).toBeUndefined();
+    expect((access.authFor(`server:${ORIGIN}:alice`) as GitHubViaServer).server).toBe(server);
+    // Another login's key, or the token's while none is stored, is not read at all.
+    expect(() => access.authFor(`server:${ORIGIN}:bob`)).toThrow(CancelledError);
+    expect(() => access.authFor(true)).toThrow(CancelledError);
+  });
+});
+
+describe('recheck', () => {
+  it('says nothing changed when a status that had failed now says not connected', async () => {
+    let status: () => Promise<unknown> = () =>
+      Promise.reject(new MindroomServerError('Unavailable', 503, { error: 'x' }));
+    const server = serverWith(() => status());
+    await show(server);
+    await waitUntil(() => expect(accesses.a?.pending).toBe(false));
+    status = () => Promise.resolve({ connected: false });
+    let changed: boolean | undefined;
+    await act(async () => {
+      changed = await accesses.a?.recheck();
+    });
+    // So Try again reads again itself: nothing else does.
+    expect(changed).toBe(false);
+  });
+
+  it('says it changed when a status that had failed now says connected', async () => {
+    let status: () => Promise<unknown> = () =>
+      Promise.reject(new MindroomServerError('Unavailable', 503, { error: 'x' }));
+    const server = serverWith(() => status());
+    await show(server);
+    await waitUntil(() => expect(accesses.a?.pending).toBe(false));
+    status = () => Promise.resolve({ connected: true, login: 'octo' });
+    let changed: boolean | undefined;
+    await act(async () => {
+      changed = await accesses.a?.recheck();
+    });
+    expect(changed).toBe(true);
   });
 });
 

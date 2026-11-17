@@ -119,7 +119,8 @@ export function usePullRequestActions(
   const perform = (action: PullRequestAction) => {
     // The store, not what this render read: a second click in the same event finds it locked.
     if (!ref || !pr || key === undefined || entryOf(key).pending !== null) return;
-    const auth = access.current();
+    // The access now, and its key, under which the pull request is read again after the write.
+    const { key: used, auth } = access.current();
     if (auth === undefined) return;
     if (MERGES.has(action) && method === null) return;
     setEntry(key, { pending: action, result: null });
@@ -130,7 +131,7 @@ export function usePullRequestActions(
         // moved, and a failed answer may come after GitHub took the write. The action runs on
         // until that state is read: unlocked before, the controls would offer the pull request
         // as it was (a second merge of a merged one, which GitHub then refuses).
-        read = await refreshPullRequest(queryClient, ref);
+        read = await refreshPullRequest(queryClient, ref, used);
       } finally {
         // The outcome stays with its own pull request, to show when that one is shown again.
         const outcome =
