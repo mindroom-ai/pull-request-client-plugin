@@ -104,22 +104,27 @@ export function usePullRequestActions(
     if (stored === undefined) return;
     if (MERGES.has(action) && method === null) return;
     setEntry(key, { pending: action, result: null });
-    const finish = (result: ActionResult) => {
-      // Whatever came, GitHub may hold another state than the one loaded: a refusal says it
-      // moved, and a failed answer may come after GitHub took the write.
-      void queryClient.invalidateQueries({
-        queryKey: ['pull-requests', 'pr', ref.owner, ref.repo, ref.number],
-      });
-      // The outcome stays with its own pull request, to show when that one is shown again.
-      setEntry(key, { pending: null, result });
+    const finish = async (result: ActionResult) => {
+      try {
+        // Whatever came, GitHub may hold another state than the one loaded: a refusal says it
+        // moved, and a failed answer may come after GitHub took the write. The action runs on
+        // until that state is read: unlocked before, the controls would offer the pull request
+        // as it was (a second merge of a merged one, which GitHub then refuses).
+        await queryClient.invalidateQueries({
+          queryKey: ['pull-requests', 'pr', ref.owner, ref.repo, ref.number],
+        });
+      } finally {
+        // The outcome stays with its own pull request, to show when that one is shown again.
+        setEntry(key, { pending: null, result });
+      }
     };
     // Only the merges read the method, and they do not start without one.
-    runPullRequestAction(ref, pr, action, method ?? 'merge', stored).then(
+    void runPullRequestAction(ref, pr, action, method ?? 'merge', stored).then(
       () => finish({ action, outcome: 'done' }),
       (caught: unknown) => {
         const error =
           caught instanceof GitHubWriteError ? caught : new GitHubWriteError('failed', 0);
-        finish({ action, outcome: 'failed', error });
+        return finish({ action, outcome: 'failed', error });
       }
     );
   };

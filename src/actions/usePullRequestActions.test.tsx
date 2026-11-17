@@ -5,10 +5,12 @@ import { renderPluginComponent } from '@mindroom/client-sdk/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PullRequest, PullRequestRef } from '../github';
 import plugin from '../index';
+import { usePullRequest } from '../queries';
 import { resetPullRequestActions, usePullRequestActions } from './usePullRequestActions';
 
 const STORAGE = 'mindroom.plugin:%40plugin-tester%3Aexample.org/pull-requests/';
 const GRAPHQL = 'https://api.github.com/graphql';
+const PULL_URL = 'https://api.github.com/repos/o/r/pulls/7';
 
 const refA: PullRequestRef = { owner: 'o', repo: 'r', number: 7 };
 const refB: PullRequestRef = { owner: 'o', repo: 'r', number: 8 };
@@ -46,6 +48,19 @@ const pull: PullRequest = {
   url: 'https://github.com/o/r/pull/7',
 };
 
+// The pull request as GitHub's REST API sends it, for the panel's own query of it.
+const apiPull = (extra: Record<string, unknown> = {}) => ({
+  title: 'T',
+  state: 'open',
+  node_id: 'PR_kw7',
+  mergeable: true,
+  mergeable_state: 'clean',
+  head: { sha: 'head7', ref: 'feature', repo: { full_name: 'o/r', node_id: 'R_or' } },
+  base: { ref: 'main', repo: { full_name: 'o/r' } },
+  html_url: 'https://github.com/o/r/pull/7',
+  ...extra,
+});
+
 const repository = {
   viewerPermission: 'WRITE',
   mergeCommitAllowed: true,
@@ -75,10 +90,15 @@ const waitUntil = async (check: () => void) => {
 const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>();
 const isRepositoryQuery = (url: string, init?: RequestInit) =>
   url === GRAPHQL && String(init?.body).includes('repository(');
+const isRead = (url: string, init?: RequestInit) =>
+  isRepositoryQuery(url, init) || init?.method === undefined;
 const writes = () =>
   fetchMock.mock.calls
-    .filter(([url, init]) => !isRepositoryQuery(url, init))
+    .filter(([url, init]) => !isRead(url, init))
     .map(([url, init]) => `${init?.method} ${url}`);
+// The times the pull request itself was read.
+const pullReads = () =>
+  fetchMock.mock.calls.filter(([url, init]) => url === PULL_URL && !init?.method);
 
 // The writes a test holds until it answers them; every one is answered after the test, so no
 // pull request stays locked for the next.
@@ -93,6 +113,7 @@ const answerHeld = async () => {
 };
 
 let writeAnswer: () => Promise<Response>;
+let pullAnswer: () => Promise<Response>;
 
 let actions: ReturnType<typeof usePullRequestActions>;
 function Probe({
@@ -117,6 +138,26 @@ const show = (pullRequestRef?: PullRequestRef, pullRequest?: PullRequest) =>
 
 const loaded = () => waitUntil(() => expect(actions.repo).toBeDefined());
 
+// As the panel has it: the pull request is a query, which the read after an action asks again.
+let shown: PullRequest | undefined;
+function Panel() {
+  const query = usePullRequest(refA);
+  shown = query.data;
+  actions = usePullRequestActions(refA, query.data);
+  return null;
+}
+const showPanel = async () => {
+  const view = await renderPluginComponent(
+    <QueryClientProvider client={client}>
+      <Panel />
+    </QueryClientProvider>,
+    { id: 'pull-requests', plugin }
+  );
+  await waitUntil(() => expect(shown).toBeDefined());
+  await loaded();
+  return view;
+};
+
 // Two runners at once, as two panels (or a panel and its next mount) have them.
 const both: ReturnType<typeof usePullRequestActions>[] = [];
 function Pair({ refs }: { refs: [PullRequestRef, PullRequestRef] }) {
@@ -138,10 +179,13 @@ beforeEach(() => {
   localStorage.setItem(`${STORAGE}githubToken`, 'tok');
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   writeAnswer = async () => respond({ merged: true });
+  pullAnswer = async () => respond(apiPull());
+  shown = undefined;
   fetchMock.mockReset();
-  fetchMock.mockImplementation(async (url, init) =>
-    isRepositoryQuery(url, init) ? respond({ data: { repository } }) : writeAnswer()
-  );
+  fetchMock.mockImplementation(async (url, init) => {
+    if (isRepositoryQuery(url, init)) return respond({ data: { repository } });
+    return url === PULL_URL && !init?.method ? pullAnswer() : writeAnswer();
+  });
   vi.stubGlobal('fetch', fetchMock);
 });
 afterEach(async () => {
@@ -238,6 +282,35 @@ describe('usePullRequestActions', () => {
     expect(actions.pending).toBeNull();
     act(() => actions.dismissResult());
     expect(actions.result).toBeNull();
+  });
+
+  it('keeps the pull request locked until it is read again after the write', async () => {
+    await showPanel();
+    // GitHub merges it, and the read after that is slow.
+    const mergedPull = apiPull({ state: 'closed', merged_at: '2026-11-16T00:00:00Z' });
+    pullAnswer = () => hold(() => respond(mergedPull));
+    act(() => actions.perform('merge'));
+    await waitUntil(() => expect(pullReads()).toHaveLength(2));
+    // The write is answered, but the panel still shows the open pull request: unlocked now, its
+    // Merge would send a second merge of a merged pull request.
+    expect(shown?.state).toBe('open');
+    expect(actions.pending).toBe('merge');
+    expect(actions.result).toBeNull();
+    act(() => actions.perform('merge'));
+    await answerHeld();
+    await waitUntil(() => expect(actions.pending).toBeNull());
+    expect(shown?.state).toBe('merged');
+    expect(actions.result).toEqual({ action: 'merge', outcome: 'done' });
+    expect(writes()).toEqual([`PUT ${PULL_URL}/merge`]);
+  });
+
+  it('unlocks when the read after the write fails', async () => {
+    await showPanel();
+    pullAnswer = async () => respond({ message: 'Not Found' }, 404);
+    act(() => actions.perform('close'));
+    await waitUntil(() => expect(actions.result).toEqual({ action: 'close', outcome: 'done' }));
+    expect(actions.pending).toBeNull();
+    expect(pullReads()).toHaveLength(2);
   });
 
   it('reports a refusal, and refreshes the pull request whose state moved', async () => {
