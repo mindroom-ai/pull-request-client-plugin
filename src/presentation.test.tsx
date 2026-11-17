@@ -85,6 +85,27 @@ describe('PullRequestCheckStatusLabel', () => {
     ).toBe(7);
   });
 
+  it('shows a cancelled check as a gray stop sign, not as a failure', async () => {
+    const view = await render(
+      <ul>
+        <li>
+          <PullRequestCheckStatusIcon status="cancelled" />
+        </li>
+        <li>
+          <PullRequestCheckStatusIcon status="failure" />
+        </li>
+      </ul>
+    );
+    const [cancelled, failure] = [...view.container.querySelectorAll('svg')].map(
+      (icon) => icon.classList
+    );
+    expect(cancelled?.contains('lucide-octagon-x')).toBe(true);
+    expect(cancelled?.contains('mrpr-tone-muted')).toBe(true);
+    expect(cancelled?.contains('mrpr-tone-failure')).toBe(false);
+    expect(failure?.contains('lucide-circle-x')).toBe(true);
+    expect(failure?.contains('mrpr-tone-failure')).toBe(true);
+  });
+
   it('asks a workflow run for approval rather than action', async () => {
     const run = 'https://github.com/a/b/actions/runs/12/job/34';
     const view = await render(

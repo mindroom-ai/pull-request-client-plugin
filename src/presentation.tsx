@@ -1,4 +1,4 @@
-// Ported from T3 Code (https://github.com/pingdotgg/t3code, apps/web/src/components/pullRequest/pullRequestIcons.tsx and pullRequestPresentation.tsx at 8ab427c6), MIT, Copyright (c) 2026 T3 Tools Inc. See NOTICE.
+// Ported from T3 Code (https://github.com/pingdotgg/t3code, apps/web/src/components/pullRequest/pullRequestIcons.tsx and pullRequestPresentation.tsx at 8ab427c6 (and 3a30b011c3)), MIT, Copyright (c) 2026 T3 Tools Inc. See NOTICE.
 // How a pull request's state, author, diff counts and age look, shared by the card and the panel.
 import { Children, isValidElement, useState, type CSSProperties, type ReactNode } from 'react';
 import { usePluginTranslation } from '@mindroom/client-sdk/core';
@@ -13,6 +13,7 @@ import {
   GitPullRequestClosed,
   GitPullRequestDraft,
   LoaderCircle,
+  OctagonX,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -182,7 +183,7 @@ const CHECK_STATUS_PRESENTATION = {
   },
   success: { key: 'success', Icon: CircleCheck, toneClassName: 'mrpr-tone-success' },
   failure: { key: 'failure', Icon: CircleX, toneClassName: 'mrpr-tone-failure' },
-  cancelled: { key: 'cancelled', Icon: CircleX, toneClassName: 'mrpr-tone-failure' },
+  cancelled: { key: 'cancelled', Icon: OctagonX, toneClassName: 'mrpr-tone-muted' },
   skipped: { key: 'skipped', Icon: CircleSlash, toneClassName: 'mrpr-tone-muted' },
   neutral: { key: 'neutral', Icon: CircleDashed, toneClassName: 'mrpr-tone-muted' },
 } as const satisfies Record<CheckStatus, { key: string; Icon: unknown; toneClassName: string }>;
