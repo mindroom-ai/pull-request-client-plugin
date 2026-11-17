@@ -4,9 +4,9 @@ import { useState, useSyncExternalStore } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { usePluginStorage } from '@mindroom/client-sdk/core';
 import {
-  fetchPullRequest,
   GitHubWriteError,
   runPullRequestAction,
+  type ActionOutcome,
   type MergeMethod,
   type PullRequest,
   type PullRequestAction,
@@ -17,9 +17,9 @@ import { useRepository } from '../queries';
 import { useGitHubToken, useStoredToken } from '../token';
 import { resolveMergeMethod } from './actions.logic';
 
-// `requested`: GitHub took an update of the branch, but did not show its new head in time.
+// `requested`: GitHub took an update of the branch, but answered before it had made it.
 export type ActionResult =
-  | { action: PullRequestAction; outcome: 'done' | 'requested' }
+  | { action: PullRequestAction; outcome: ActionOutcome }
   | { action: PullRequestAction; outcome: 'failed'; error: GitHubWriteError };
 
 // What runs on each pull request and what came of its last action, across every panel and
@@ -66,30 +66,6 @@ const asMethod = (value: string | null): MergeMethod | null =>
 
 // Only these two merge, so only they need a method.
 const MERGES: ReadonlySet<PullRequestAction> = new Set(['merge', 'enable-auto-merge']);
-
-// GitHub answers an update of the branch before it has made the branch's new commit.
-const UPDATES: ReadonlySet<PullRequestAction> = new Set(['update-branch', 'update-branch-rebase']);
-const HEAD_POLL_MS = 2_000;
-const HEAD_WAIT_MS = 30_000;
-
-/**
- * Whether GitHub shows the pull request on another head than the loaded one within half a
- * minute: asked at once, then every two seconds. Until it does, the panel's own read would
- * still get the old head, show the branch as behind, and send that head with a merge, which
- * GitHub refuses.
- */
-async function headMoved(ref: PullRequestRef, pr: PullRequest, token: string): Promise<boolean> {
-  for (let waited = 0; ; waited += HEAD_POLL_MS) {
-    // A read that fails tells nothing; the next one may.
-    const head = await fetchPullRequest(ref, token).then(
-      (now) => now.headSha,
-      () => pr.headSha
-    );
-    if (head !== pr.headSha) return true;
-    if (waited >= HEAD_WAIT_MS) return false;
-    await new Promise((resolve) => setTimeout(resolve, HEAD_POLL_MS));
-  }
-}
 
 /**
  * The panel's one runner, called before the pull request loads: until `ref` and `pr` are both
@@ -161,10 +137,7 @@ export function usePullRequestActions(
     };
     // Only the merges read the method, and they do not start without one.
     void runPullRequestAction(ref, pr, action, method ?? 'merge', stored).then(
-      async () => {
-        const moved = !UPDATES.has(action) || (await headMoved(ref, pr, stored));
-        return finish({ action, outcome: moved ? 'done' : 'requested' });
-      },
+      (outcome) => finish({ action, outcome }),
       (caught: unknown) => {
         const error =
           caught instanceof GitHubWriteError ? caught : new GitHubWriteError('failed', 0);

@@ -1002,7 +1002,7 @@ describe('runPullRequestAction', () => {
 
   it('deletes the branch in the head repository only where the pull request left it', async () => {
     const { outcome, sent } = await deleteBranch('head7');
-    expect(outcome).toBeUndefined();
+    expect(outcome).toBe('done');
     // Never REST's unconditional DELETE of the ref: GitHub checks the commit as it deletes.
     expect(sent.map(({ method, url }) => `${method} ${url}`)).toEqual([
       'POST https://api.github.com/graphql',
@@ -1031,7 +1031,7 @@ describe('runPullRequestAction', () => {
 
   it('counts a branch already gone as deleted, and deletes nothing', async () => {
     const { outcome, sent } = await deleteBranch(null);
-    expect(outcome).toBeUndefined();
+    expect(outcome).toBe('done');
     expect(sent).toHaveLength(1);
     expect((sent[0]!.body as { query: string }).query).not.toContain('updateRefs');
   });
@@ -1084,7 +1084,33 @@ describe('runPullRequestAction', () => {
           variables: { pullRequestId: 'PR_kw7', expectedHeadOid: 'head7', updateMethod },
         },
       });
-      expect((sent.body as { query: string }).query).toContain('updatePullRequestBranch');
+      const { query } = sent.body as { query: string };
+      expect(query).toContain('updatePullRequestBranch');
+      // The answer tells whether the branch has its new commit yet.
+      expect(query.replace(/\s+/g, ' ')).toContain('pullRequest { headRefOid }');
+    }
+  );
+
+  it.each([
+    ['a new head is done', { pullRequest: { headRefOid: 'head8' } }, 'done'],
+    ['the head it had is only requested', { pullRequest: { headRefOid: 'head7' } }, 'requested'],
+    ['no pull request is only requested', { pullRequest: null }, 'requested'],
+    ['nothing is only requested', null, 'requested'],
+  ] as const)(
+    'an update of the branch GitHub answers with %s',
+    async (_name, updatePullRequestBranch, outcome) => {
+      vi.stubGlobal('fetch', () => Promise.resolve(json({ data: { updatePullRequestBranch } })));
+      expect(
+        await runPullRequestAction(writeRef, writePull, 'update-branch', 'squash', 'tok')
+      ).toBe(outcome);
+    }
+  );
+
+  it.each(['merge', 'close', 'reopen', 'ready', 'draft', 'enable-auto-merge'] as const)(
+    '%s that GitHub took is done',
+    async (action) => {
+      vi.stubGlobal('fetch', () => Promise.resolve(json({ data: {} })));
+      expect(await runPullRequestAction(writeRef, writePull, action, 'squash', 'tok')).toBe('done');
     }
   );
 

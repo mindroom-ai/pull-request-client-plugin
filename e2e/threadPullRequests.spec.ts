@@ -33,7 +33,8 @@ import { touch } from '@mindroom/e2e/touch';
 // who can write merges a pull request from the panel's header with two clicks (and is asked before
 // its branch goes), sees GitHub's reason for a refused merge, chooses the merge method that the
 // next pull request and the next page load keep, closes and reopens a pull request, and updates a
-// branch behind its base from the base branch's warning, with the header's controls on a phone.
+// branch behind its base from the base branch's warning (and is told only that the update was
+// requested when GitHub has not made it yet), with the header's controls on a phone.
 // Set MRPR_SHOTS=<directory> to save the screenshots of the pull request.
 
 const LINK_EVENT = 'com.mindroom.thread.pull_request';
@@ -366,11 +367,12 @@ type Write = { method: string; pathname: string; body: unknown };
  * It answers the repository's GraphQL query, GraphQL's read of where a branch points (at its
  * pull request's head, until the branch is deleted) and the writes, which `writes` collects: a
  * merge, after which the pull request reads as merged; a close or a reopen, after which it reads
- * so; GraphQL's update of a branch, which GitHub makes after it answers (the first read of the
- * pull request after it still has the old head; the next has the new one, behind no more); and
- * GraphQL's deletion of a branch, after which it is gone. A write in `refuse` (by method and path) GitHub refuses with
- * 405 and its message; a pull request in `behind` (by path) starts that many commits behind its
- * base.
+ * so; GraphQL's update of a branch, whose answer names the pull request's new head, behind no
+ * more; and GraphQL's deletion of a branch, after which it is gone. A write in `refuse` (by
+ * method and path) GitHub refuses with 405 and its message; a pull request in `behind` (by path)
+ * starts that many commits behind its base. With `lateUpdate` GitHub makes an update of a branch
+ * after it answers: its answer names the old head, the first read of the pull request after it
+ * still has that head, and the next one has the new head.
  */
 const stubGitHub = async (
   page: Page,
@@ -378,7 +380,8 @@ const stubGitHub = async (
   {
     refuse = {},
     behind = {},
-  }: { refuse?: Record<string, string>; behind?: Record<string, number> } = {}
+    lateUpdate = false,
+  }: { refuse?: Record<string, string>; behind?: Record<string, number>; lateUpdate?: boolean } = {}
 ): Promise<string[]> => {
   const unanswered: string[] = [];
   const moved = new Map<string, Pull['state']>();
@@ -435,10 +438,18 @@ const stubGitHub = async (
       if (graphql.includes('updatePullRequestBranch')) {
         writes.push({ method: request.method(), pathname, body });
         const branch = ALL_PULLS.find((candidate) => pullId(candidate) === variables.pullRequestId);
-        if (branch) updating.set(pullPath(branch), { reads: 1, sha: updatedSha(branch) });
+        // The head GitHub's answer names: the one it was sent while the update is still to come.
+        let headRefOid = String(variables.expectedHeadOid);
+        if (branch && lateUpdate) {
+          updating.set(pullPath(branch), { reads: 1, sha: updatedSha(branch) });
+        } else if (branch) {
+          headRefOid = updatedSha(branch);
+          heads.set(pullPath(branch), headRefOid);
+          delete behindNow[pullPath(branch)];
+        }
         await route.fulfill({
           headers: CORS,
-          json: { data: { updatePullRequestBranch: { clientMutationId: null } } },
+          json: { data: { updatePullRequestBranch: { pullRequest: { headRefOid } } } },
         });
         return;
       }
@@ -1477,9 +1488,7 @@ test("a branch behind its base updates from the base branch's warning", async ({
   await expect(page.getByText(`${tokenEndpoint.branch} is 2 commits behind main`)).toBeVisible();
   await shot(page, 'actions-behind', { keepPointer: true });
   await page.getByRole('button', { name: 'Update branch', exact: true }).click();
-  // GitHub answers before the branch has its new commit, and the first read after it still has
-  // the old head: the update runs on until a read shows the new one.
-  await expect(panel(page).getByText('Updating branch...')).toBeVisible();
+  // GitHub's answer names the new head, so the branch is updated.
   await expect(panel(page).getByText('Branch updated')).toBeVisible({ timeout: 30_000 });
   expect(writes.map(({ method, pathname }) => `${method} ${pathname}`)).toEqual(['POST /graphql']);
   expect((writes[0].body as { variables: unknown }).variables).toEqual({
@@ -1500,6 +1509,46 @@ test("a branch behind its base updates from the base branch's warning", async ({
     pathname: `${pull}/merge`,
     body: { merge_method: 'merge', sha: updatedSha(tokenEndpoint) },
   });
+  expect(unanswered).toEqual([]);
+  expect(warnings).toEqual([]);
+});
+
+test('an update GitHub has not made yet is only requested, and Refresh shows it once made', async ({
+  page,
+}) => {
+  test.setTimeout(4 * 60_000);
+  const { tokenEndpoint } = PULLS;
+  const pull = `/repos/acme/${tokenEndpoint.repo}/pulls/${tokenEndpoint.number}`;
+  const writes: Write[] = [];
+  const unanswered = await stubGitHub(page, writes, { behind: { [pull]: 2 }, lateUpdate: true });
+  const warnings = listenerWarnings(page);
+  await openRoom(page);
+  await openTokenEndpoint(page);
+  const warning = panel(page).getByRole('button', { name: 'Warnings for main' });
+  await warning.click();
+  await page.getByRole('button', { name: 'Update with rebase', exact: true }).click();
+  // GitHub's answer names the head the panel has, and the read after it still has that head:
+  // the line does not claim the branch is rebased, and the branch still shows as behind.
+  const result = panel(page).locator('.mrpr-action-result');
+  await expect(result).toHaveText('Branch rebase requested', { timeout: 30_000 });
+  await expect(panel(page).getByText('Branch rebased')).toHaveCount(0);
+  expect((writes[0].body as { variables: unknown }).variables).toEqual({
+    pullRequestId: pullId(tokenEndpoint),
+    expectedHeadOid: headSha(tokenEndpoint),
+    updateMethod: 'REBASE',
+  });
+  await expect(warning).toBeVisible();
+  await shot(page, 'actions-update-requested', { keepPointer: true });
+  await page.keyboard.press('Escape');
+
+  // GitHub has made the commit by the next read, which Refresh asks for.
+  await panel(page).getByRole('button', { name: 'More actions' }).click();
+  await page
+    .getByRole('menu', { name: 'More actions' })
+    .getByRole('menuitem', { name: 'Refresh' })
+    .click();
+  await expect(warning).toHaveCount(0, { timeout: 30_000 });
+  expect(writes).toHaveLength(1);
   expect(unanswered).toEqual([]);
   expect(warnings).toEqual([]);
 });

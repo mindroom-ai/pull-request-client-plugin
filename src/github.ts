@@ -895,7 +895,7 @@ const UPDATE_BRANCH = `mutation(
       expectedHeadOid: $expectedHeadOid
       updateMethod: $updateMethod
     }
-  ) { clientMutationId }
+  ) { pullRequest { headRefOid } }
 }`;
 
 const HEAD_BRANCH_QUERY = `query($repositoryId: ID!, $ref: String!) {
@@ -956,6 +956,12 @@ async function deleteHeadBranch(pr: PullRequest, token: string): Promise<void> {
 }
 
 /**
+ * How an action GitHub took ended. `requested` is an update of the branch that GitHub took but
+ * has not made yet: it may make the branch's new commit after it answers.
+ */
+export type ActionOutcome = 'done' | 'requested';
+
+/**
  * One action on a pull request, as it was loaded: the writes that depend on its head send the
  * loaded head sha, so GitHub refuses them if the branch moved since.
  */
@@ -965,43 +971,43 @@ export async function runPullRequestAction(
   action: PullRequestAction,
   method: MergeMethod,
   token: string
-): Promise<void> {
+): Promise<ActionOutcome> {
   const pull = `${repoPath(ref)}/pulls/${ref.number}`;
   const pullRequestId = pr.nodeId;
   switch (action) {
     case 'merge':
       await sendRest('PUT', `${pull}/merge`, { merge_method: method, sha: pr.headSha }, token);
-      return;
+      return 'done';
     case 'close':
       await sendRest('PATCH', pull, { state: 'closed' }, token);
-      return;
+      return 'done';
     case 'reopen':
       await sendRest('PATCH', pull, { state: 'open' }, token);
-      return;
+      return 'done';
     case 'delete-branch':
       await deleteHeadBranch(pr, token);
-      return;
+      return 'done';
     case 'ready':
       await graphql(ON_PULL_REQUEST('markPullRequestReadyForReview'), { pullRequestId }, token);
-      return;
+      return 'done';
     case 'draft':
       await graphql(ON_PULL_REQUEST('convertPullRequestToDraft'), { pullRequestId }, token);
-      return;
+      return 'done';
     case 'disable-auto-merge':
       await graphql(ON_PULL_REQUEST('disablePullRequestAutoMerge'), { pullRequestId }, token);
-      return;
+      return 'done';
     case 'enable-auto-merge':
       await graphql(
         ENABLE_AUTO_MERGE,
         { pullRequestId, mergeMethod: method.toUpperCase(), expectedHeadOid: pr.headSha },
         token
       );
-      return;
-    // One path for both ways, as T3 Code. GitHub makes the branch's new commit after it
-    // answers, so the caller waits for the new head before it says the branch is updated.
+      return 'done';
+    // One path for both ways, as T3 Code. GitHub's answer names the pull request's head: a
+    // new one says the branch is updated, the loaded one that its new commit is still to come.
     case 'update-branch':
-    case 'update-branch-rebase':
-      await graphql(
+    case 'update-branch-rebase': {
+      const data = await graphql(
         UPDATE_BRANCH,
         {
           pullRequestId,
@@ -1010,6 +1016,8 @@ export async function runPullRequestAction(
         },
         token
       );
-      return;
+      const head = record(record(data?.updatePullRequestBranch)?.pullRequest)?.headRefOid;
+      return typeof head === 'string' && head !== pr.headSha ? 'done' : 'requested';
+    }
   }
 }

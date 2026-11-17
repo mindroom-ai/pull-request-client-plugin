@@ -112,7 +112,7 @@ export const en = {
       'update-branch': 'Branch updated',
       'update-branch-rebase': 'Branch rebased',
     },
-    // GitHub took the update, but its new commit did not show in time.
+    // GitHub took the update, but answered before the branch had its new commit.
     requested: {
       'update-branch': 'Branch update requested',
       'update-branch-rebase': 'Branch rebase requested',

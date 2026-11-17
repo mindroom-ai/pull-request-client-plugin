@@ -846,7 +846,9 @@ describe('PullRequestPanel', () => {
         fetchMock.mockImplementation(async (url, init) => {
           if (url === GRAPHQL && String(init?.body).includes('updatePullRequestBranch')) {
             updated = true;
-            return respond({ data: { updatePullRequestBranch: { clientMutationId: null } } });
+            return respond({
+              data: { updatePullRequestBranch: { pullRequest: { headRefOid: 'def456' } } },
+            });
           }
           if (url === GRAPHQL) return respond({ data: { repository } });
           if (url.includes('/compare/')) return respond({ behind_by: updated ? 0 : 2 });
