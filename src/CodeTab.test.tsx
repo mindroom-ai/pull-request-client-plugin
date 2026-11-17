@@ -875,7 +875,8 @@ describe('CodeTab', () => {
       expect(titleOf('packages/sdk/src/components/')).toBe(
         'packages/sdk/src/components: 2 lines added, 1 removed'
       );
-      // The folder that shares its path with a file is named without the file's alias.
+      // A folder at a file's path: only the file is aliased, never the folder, and selectionPath
+      // keeps the folder's real path should that change.
       expect(titleOf('src/a.ts/')).toBe('src/a.ts: 4 lines added, 2 removed');
       expect(titleOf('src/')).toBe('src: 7 lines added, 2 removed');
     });

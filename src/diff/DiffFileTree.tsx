@@ -126,7 +126,8 @@ export function DiffFileTree({ entries, onSelectFile, ariaLabel }: DiffFileTreeP
       return {
         text: `${added} ${removed}`,
         // The plural follows the number; the text shows it formatted, as the row does. The path is
-        // the whole folder's, which a narrow tree may cut.
+        // the whole folder's, which a narrow tree may cut. Folders are never aliased, only files;
+        // selectionPath keeps the path real should that change.
         title: t('code.folderLines', {
           count: lines.additions,
           path: presented.selectionPath(item.path).replace(/\/$/, ''),
