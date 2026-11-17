@@ -18,6 +18,8 @@ const plugin: ClientPlugin = {
     {
       match: (url) => parsePullRequestUrl(url) !== undefined,
       Component: PullRequestCard,
+      // The card's request, so a click while the panel shows this pull request opens it on GitHub.
+      sidePanel: { id: 'pull-request', request: (url) => parsePullRequestUrl(url) },
     },
   ],
   sidePanels: [

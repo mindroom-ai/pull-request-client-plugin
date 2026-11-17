@@ -2,7 +2,7 @@
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A [MindRoom Chat](https://github.com/mindroom-ai/mindroom-chat) client plugin for GitHub pull requests. Click a pull request link in a room's message, and a small card shows the pull request: its repository and number, state, title and author. From the card, the pull request opens in a side panel of the room, which only reads from GitHub:
+A [MindRoom Chat](https://github.com/mindroom-ai/mindroom-chat) client plugin for GitHub pull requests. Click a pull request link in a room's message, and the pull request opens in a side panel of the room, which only reads from GitHub; a second click, while the panel shows that pull request, opens it on GitHub. On a phone, the click shows a small card with the pull request: its repository and number, state, title and author, and from the card, the pull request opens in the side panel. The side panel shows:
 
 - The header: the repository and number, the title, the author, when it was updated, a button that copies the `gh pr checkout` command, the base branch (with a warning when the branch is behind it or conflicts) and the head branch, the Draft, Merged, Closed and Auto-merge badges, the files and lines changed (split into code, tests, generated files and docs in a tooltip), and the checks' summary, which opens the list of checks.
 - Summary: the reviewers and their verdicts, the labels, the description, the checks, and the conversation (comments, reviews and review threads) with a filter for bots and a Newest or Oldest first order.
