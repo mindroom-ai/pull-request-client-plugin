@@ -370,5 +370,7 @@ export const en = {
     connectedNoLogin: 'Using your GitHub account connected in MindRoom.',
     overrides: 'A token saved here is used instead.',
     useToken: 'Use a token instead',
+    // Closes the form opened by Use a token instead, keeping MindRoom's connection.
+    cancel: 'Cancel',
   },
 };

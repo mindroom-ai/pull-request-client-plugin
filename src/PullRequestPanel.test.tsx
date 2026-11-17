@@ -998,6 +998,18 @@ describe('with the GitHub account connected in MindRoom', () => {
     expect(new Headers(init?.headers).get('authorization')).toBe('Bearer ghp_mine');
   });
 
+  it('closes the form opened to use a token instead without saving one', async () => {
+    const mindroom = githubServer(github);
+    roomServer.current = mindroom.server;
+    const view = await show();
+    await click(await view.findByRole('button', { name: 'Use a token instead' }));
+    expect(view.getByLabelText('GitHub token')).toBeTruthy();
+    await click(view.getByRole('button', { name: 'Cancel' }));
+    expect(view.queryByLabelText('GitHub token')).toBeNull();
+    expect(view.getByRole('button', { name: 'Use a token instead' })).toBeTruthy();
+    expect(view.getByText(/connected in MindRoom/)).toBeTruthy();
+  });
+
   it('says MindRoom must connect GitHub again when GitHub refuses its account', async () => {
     const mindroom = githubServer(async (url, init) =>
       init?.method === 'PUT' ? respond({ message: 'Bad credentials' }, 401) : github(url, init)

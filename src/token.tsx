@@ -313,10 +313,13 @@ export function useGitHubAccess(): GitHubAccess {
 export function TokenForm({
   reason,
   inputRef,
+  onCancel,
 }: {
   /** Why it shows; `override`, to use a token instead of MindRoom's connection, has no hint. */
   reason: 'notFound' | 'rateLimited' | 'badToken' | 'override';
   inputRef?: Ref<HTMLInputElement>;
+  /** Closes the form without saving, for one the person opened; without it, none shows. */
+  onCancel?: () => void;
 }) {
   const t = usePluginTranslation('pull-requests');
   const { setToken } = useGitHubToken();
@@ -350,6 +353,11 @@ export function TokenForm({
         <button className="mrpr-button" type="submit">
           {t('token.save')}
         </button>
+        {onCancel ? (
+          <button className="mrpr-button" type="button" onClick={onCancel}>
+            {t('token.cancel')}
+          </button>
+        ) : null}
       </div>
       <p className="mrpr-status">{t('token.note')}</p>
     </form>

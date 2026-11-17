@@ -466,7 +466,12 @@ function Panel({ roomId, request }: PanelProps) {
           {/* One token form for every part below that a token would let load. */}
           {tokenForm.reason || (overriding && via === 'server') ? (
             <div className="mrpr-panel-token">
-              <TokenForm reason={tokenForm.reason ?? 'override'} inputRef={tokenForm.inputRef} />
+              <TokenForm
+                reason={tokenForm.reason ?? 'override'}
+                inputRef={tokenForm.inputRef}
+                // Only the form opened to use a token instead closes: a failure keeps the other.
+                onCancel={tokenForm.reason ? undefined : () => setOverriding(false)}
+              />
             </div>
           ) : null}
           <TabBar
