@@ -73,7 +73,7 @@ After any success: invalidate the PR's query prefix (`['pull-requests', owner, r
 
 ### Merge method
 
-`resolveMergeMethod(allowed, chosen, lastChosen)`: the PR's choice in the menu, then the last method chosen (plugin storage key `mergeMethod`, per account), then the first allowed. MindRoom has no project settings, so T3's project default step drops out.
+`resolveMergeMethod(allowed, chosen, lastChosen)`: the PR's choice in the menu, then the last method chosen (plugin storage key `mergeMethod`, per account), then the first allowed. MindRoom has no project settings, so T3's project default step drops out. A pull request with auto-merge armed starts with the armed method as its choice (T3 `PullRequestDetailPanel.tsx:568-573`), so Merge now merges as the badge says; it is not stored as the last method chosen.
 
 ### Primary control
 

@@ -521,6 +521,60 @@ describe('usePullRequestActions', () => {
     expect(actions.method).toBe('rebase');
   });
 
+  describe('with auto-merge armed', () => {
+    const armed = (method: 'merge' | 'squash' | 'rebase') => ({ ...pull, autoMerge: { method } });
+    const mergeBody = () => {
+      const [, init] = fetchMock.mock.calls.find(([url]) => url === `${PULL_URL}/merge`)!;
+      return JSON.parse(String(init?.body));
+    };
+
+    it('starts on the armed method, which Merge now then merges with, as the badge says', async () => {
+      localStorage.setItem(`${STORAGE}mergeMethod`, 'rebase');
+      await show(refA, armed('squash'));
+      await loaded();
+      expect(actions.method).toBe('squash');
+      act(() => actions.perform('merge'));
+      await waitUntil(() => expect(actions.result).toEqual({ action: 'merge', outcome: 'done' }));
+      expect(mergeBody()).toEqual({ merge_method: 'squash', sha: 'head7' });
+      // Not the viewer's own choice, so the next pull request does not start on it.
+      expect(localStorage.getItem(`${STORAGE}mergeMethod`)).toBe('rebase');
+    });
+
+    it('starts on it when auto-merge is armed while the pull request shows', async () => {
+      const view = await show(refA, pull);
+      await loaded();
+      expect(actions.method).toBe('merge');
+      view.rerender(ui(refA, armed('rebase')));
+      expect(actions.method).toBe('rebase');
+    });
+
+    it('keeps a method chosen after that', async () => {
+      const view = await show(refA, armed('squash'));
+      await loaded();
+      act(() => actions.chooseMethod('rebase'));
+      expect(actions.method).toBe('rebase');
+      // The same pull request read again does not take the choice back.
+      view.rerender(ui(refA, { ...armed('squash'), updatedAt: 'later' }));
+      expect(actions.method).toBe('rebase');
+    });
+
+    it('does not start another pull request on it', async () => {
+      const view = await show(refA, armed('squash'));
+      await loaded();
+      expect(actions.method).toBe('squash');
+      view.rerender(ui(refB, { ...pull, url: 'https://github.com/o/r/pull/8' }));
+      expect(actions.method).toBe('merge');
+    });
+
+    it('falls back when the repository no longer allows the armed method', async () => {
+      const allowed = { ...repository, squashMergeAllowed: false };
+      fetchMock.mockImplementation(async () => respond({ data: { repository: allowed } }));
+      await show(refA, armed('squash'));
+      await loaded();
+      expect(actions.method).toBe('merge');
+    });
+  });
+
   it('falls back to an allowed method when the remembered one is not', async () => {
     localStorage.setItem(`${STORAGE}mergeMethod`, 'rebase');
     const allowed = { ...repository, mergeCommitAllowed: false, rebaseMergeAllowed: false };

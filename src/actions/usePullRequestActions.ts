@@ -114,6 +114,16 @@ export function usePullRequestActions(
   const entry = useSyncExternalStore(subscribe, () => (key === undefined ? IDLE : entryOf(key)));
 
   const [chosen, setChosen] = useState<{ key: string; method: MergeMethod } | null>(null);
+  // A pull request with auto-merge armed starts on the armed method, as in T3 Code, so that
+  // Merge now merges the way its badge says. Taken once for each method it is armed with: a
+  // method chosen after that holds, and the armed one is not kept as the viewer's own choice.
+  const armedMethod = pr?.autoMerge?.method;
+  const armedKey = `${key}:${armedMethod ?? ''}`;
+  const [seenArmedKey, setSeenArmedKey] = useState<string | null>(null);
+  if (seenArmedKey !== armedKey) {
+    setSeenArmedKey(armedKey);
+    if (key !== undefined && armedMethod !== undefined) setChosen({ key, method: armedMethod });
+  }
 
   const method = shownRepo
     ? resolveMergeMethod(
