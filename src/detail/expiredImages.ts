@@ -1,7 +1,8 @@
 // An attachment's signed address in GitHub's HTML (`private-user-images`) expires a few minutes
 // after GitHub gave it, so an image first shown later fails to load. The query that carried its
 // body, fetched again, gives new addresses. At most once a minute per query: an image that is
-// really broken must not ask GitHub over and over.
+// really broken must not ask GitHub over and over. A failure within that minute fetches again
+// when the minute ends.
 import { useEffect, useState } from 'react';
 import { useQueryClient, type Query } from '@tanstack/react-query';
 import { forgetSigned, type ImageSources } from '../images';
@@ -9,6 +10,7 @@ import { forgetSigned, type ImageSources } from '../images';
 const SIGNED = 'https://private-user-images.githubusercontent.com/';
 const MINUTE = 60_000;
 const lastRefetch = new WeakMap<Query, number>();
+const waiting = new WeakSet<Query>();
 
 /** Whether a query's answer, a pull request or a page of a list, holds the body of these images. */
 function carries(data: unknown, images: ImageSources): boolean {
@@ -37,10 +39,21 @@ export function useRefetchOnExpiredImage(images: ImageSources) {
         .findAll({ queryKey: ['pull-requests'] })
         .find((candidate) => carries(candidate.state.data, images));
       if (!query) return;
-      const last = lastRefetch.get(query);
-      if (last !== undefined && Date.now() - last < MINUTE) return;
-      lastRefetch.set(query, Date.now());
-      void queryClient.refetchQueries({ queryKey: query.queryKey, exact: true });
+      const refetch = () => {
+        waiting.delete(query);
+        lastRefetch.set(query, Date.now());
+        // A fetch already running brings the new addresses too; it is joined, not restarted.
+        void queryClient.refetchQueries(
+          { queryKey: query.queryKey, exact: true },
+          { cancelRefetch: false }
+        );
+      };
+      const wait = (lastRefetch.get(query) ?? -Infinity) + MINUTE - Date.now();
+      if (wait <= 0) refetch();
+      else if (!waiting.has(query)) {
+        waiting.add(query);
+        setTimeout(refetch, wait);
+      }
     };
     // An image's error does not bubble, but it passes its ancestors on the way down.
     element.addEventListener('error', onError, true);

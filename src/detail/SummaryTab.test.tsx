@@ -179,8 +179,11 @@ beforeEach(() => {
   vi.stubGlobal('fetch', fetchMock);
   // jsdom has no scrollIntoView.
   Element.prototype.scrollIntoView = vi.fn();
+  // A held back refetch waits on a timer; it must not outlive its test.
+  vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ['setTimeout', 'clearTimeout', 'Date'] });
 });
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -372,6 +375,91 @@ describe('SummaryTab', () => {
       expect((await view.findByAltText('A')).getAttribute('src')).toBe(a2)
     );
     expect((await view.findByAltText('B')).getAttribute('src')).toBe(b2);
+  });
+
+  it('a failure within the minute after a refetch fetches again when the minute ends', async () => {
+    const U2 = '99999999-2222-3333-4444-555555555555';
+    const signed2 = (key: string) => signed(key).replace(UUID, U2);
+    const html = (a: string, b: string) =>
+      `<p><img src="${a.replace('&', '&amp;')}" alt="A"> <img src="${b.replace(
+        '&',
+        '&amp;'
+      )}" alt="B"></p>`;
+    const answer = {
+      title: 'Shots',
+      state: 'open',
+      body: `![A](${ATTACHMENT}) ![B](https://github.com/user-attachments/assets/${U2})`,
+      body_html: html(SIGNED, signed2('first')),
+      head: { sha: HEAD },
+    };
+    serve({ pull: answer });
+    const client = new QueryClient({ defaultOptions: { queries: { retryDelay: 0 } } });
+    const view = await renderPluginComponent(
+      <QueryClientProvider client={client}>
+        <FetchedSummary />
+      </QueryClientProvider>,
+      { id: 'pull-requests', plugin }
+    );
+    const src = async (alt: string) => (await view.findByAltText(alt)).getAttribute('src');
+    answer.body_html = html(signed('second'), signed2('second'));
+    await fail(await view.findByAltText('A'));
+    await vi.waitFor(async () => expect(await src('A')).toBe(signed('second')));
+    expect(calls('/pulls/200')).toBe(2);
+    // B had not failed, so it keeps its address; it fails 10 s later, inside the minute.
+    expect(await src('B')).toBe(signed2('first'));
+    await act(() => vi.advanceTimersByTimeAsync(10_000));
+    answer.body_html = html(signed('third'), signed2('third'));
+    await fail(await view.findByAltText('B'));
+    await act(() => vi.advanceTimersByTimeAsync(20));
+    expect(calls('/pulls/200')).toBe(2);
+    await act(() => vi.advanceTimersByTimeAsync(50_000));
+    await vi.waitFor(async () => expect(await src('B')).toBe(signed2('third')));
+    expect(calls('/pulls/200')).toBe(3);
+  });
+
+  it('an image failing while the panel fetches the pull request joins that fetch', async () => {
+    serve({
+      pull: {
+        title: 'Shots',
+        state: 'open',
+        body: `![Before](${ATTACHMENT})`,
+        body_html: `<p><img src="${SIGNED_HTML}" alt="Before"></p>`,
+        head: { sha: HEAD },
+      },
+    });
+    const served = fetchMock.getMockImplementation()!;
+    let aborted = 0;
+    fetchMock.mockImplementation(async (url, init) => {
+      // After the first answer, GitHub takes longer than S3 takes to refuse an expired image.
+      if (url.endsWith('/pulls/200') && calls('/pulls/200') > 1) {
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(resolve, 150);
+          init?.signal?.addEventListener('abort', () => {
+            aborted += 1;
+            clearTimeout(timer);
+            reject(new DOMException('aborted', 'AbortError'));
+          });
+        });
+      }
+      return served(url, init);
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retryDelay: 0 } } });
+    const ui = (
+      <QueryClientProvider client={client}>
+        <FetchedSummary />
+      </QueryClientProvider>
+    );
+    const first = await renderPluginComponent(ui, { id: 'pull-requests', plugin });
+    await first.findByAltText('Before');
+    first.unmount();
+    // Reopened ten minutes later on the cached answer: stale, and its signed image has expired.
+    const query = client.getQueryCache().find({ queryKey: ['pull-requests'], exact: false })!;
+    query.setState({ dataUpdatedAt: Date.now() - 600_000 });
+    const view = await renderPluginComponent(ui, { id: 'pull-requests', plugin });
+    expect(calls('/pulls/200')).toBe(2);
+    await fail(await view.findByAltText('Before'));
+    await act(() => vi.advanceTimersByTimeAsync(400));
+    expect({ fetches: calls('/pulls/200'), aborted }).toEqual({ fetches: 2, aborted: 0 });
   });
 
   it("fetches a comment's list again when its signed image fails, not for another image", async () => {
