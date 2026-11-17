@@ -132,13 +132,14 @@ describe('PullRequestCard', () => {
     ).toBeTruthy();
     expect(
       view.getByText(
-        'Using your GitHub account connected in MindRoom (@octo). A token saved here is used instead.'
+        'Signed in as octo through MindRoom (GitHub App). A token saved here is used instead.'
       )
     ).toBeTruthy();
     expect(fetchMock).not.toHaveBeenCalled();
-    // A token saved here reads from the browser, and MindRoom is asked nothing more.
+    // A token kept in this browser alone reads from it, and MindRoom is asked nothing more.
     fetchMock.mockImplementation(async () => respond(pull()));
     const asked = mindroom.server.request.mock.calls.length;
+    await click(view.getByLabelText('Only this browser'));
     await type(view.getByLabelText('GitHub token'), 'ghp_secret');
     await click(view.getByRole('button', { name: 'Save' }));
     expect(await view.findByText('Add pull request cards')).toBeTruthy();

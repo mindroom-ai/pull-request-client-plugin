@@ -5,13 +5,17 @@ import { TokenForm, useGitHubAccess, useGitHubToken, usePanelTokenFormFor } from
 /** Why GitHub gave no answer, in one sentence, by the error and how GitHub is reached. */
 export function useGitHubErrorMessage(error: unknown): string {
   const t = usePluginTranslation('pull-requests');
-  const { via } = useGitHubAccess();
+  const { via, connection } = useGitHubAccess();
   const kind = error instanceof GitHubError ? error.kind : 'failed';
   const status = error instanceof GitHubError ? error.status : 0;
   if (kind === 'failed') {
     return status === 0 ? t('error.failed') : t('error.failedStatus', { status });
   }
   if (kind === 'notFound' && via === 'token') return t('error.notFoundWithToken');
+  if (via === 'server' && connection === 'token') {
+    if (kind === 'notFound') return t('error.notFoundWithServerToken');
+    if (kind === 'badToken') return t('error.badServerToken');
+  }
   if (kind === 'notFound' && via === 'server') return t('error.notFoundWithServer');
   if (kind === 'badToken' && via === 'server') return t('error.badConnection');
   return t(`error.${kind}`);

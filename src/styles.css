@@ -122,6 +122,13 @@
   display: flex;
   gap: 6px;
 }
+/* Where the token is saved, in a room with a MindRoom server: there or in this browser alone. */
+.mrpr-token-where {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 12px;
+}
 /* The panel's one token form, between the header and the tabs. */
 .mrpr-panel-token {
   flex-shrink: 0;

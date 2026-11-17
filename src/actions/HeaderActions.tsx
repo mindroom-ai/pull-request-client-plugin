@@ -402,7 +402,7 @@ function ResultLine({
   onDismiss: () => void;
 }) {
   const t = usePluginTranslation('pull-requests');
-  const { via } = useGitHubAccess();
+  const { via, connection } = useGitHubAccess();
   const announced = pending === null && resultAnnounced;
   const shown = pending === null && !announced ? result : null;
   let content: ReactNode = null;
@@ -428,9 +428,13 @@ function ResultLine({
               kind === 'failed' && status !== 0
                 ? 'actions.hint.server'
                 : kind === 'noAccess' && via === 'server'
-                ? 'actions.hint.noAccessServer'
+                ? connection === 'token'
+                  ? 'actions.hint.noAccessServerToken'
+                  : 'actions.hint.noAccessServer'
                 : kind === 'badToken' && via === 'server'
-                ? 'actions.hint.badConnection'
+                ? connection === 'token'
+                  ? 'actions.hint.badServerToken'
+                  : 'actions.hint.badConnection'
                 : `actions.hint.${kind}`
             );
       const why = [hint, kind === 'badToken' ? null : detail].filter(Boolean).join(' ');

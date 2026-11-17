@@ -20,7 +20,11 @@ import {
 } from '@tanstack/react-query';
 import { usePluginStorage, usePluginTranslation } from '@mindroom/client-sdk/core';
 import { useMatrixClient } from '@mindroom/client-sdk/matrix';
-import { useMindroomServerStatus, type MindroomServer } from '@mindroom/client-sdk/server';
+import {
+  MindroomServerError,
+  useMindroomServerStatus,
+  type MindroomServer,
+} from '@mindroom/client-sdk/server';
 import { GitHubError, type GitHubAuth, type GitHubViaServer } from './github';
 
 const KEY = 'githubToken';
@@ -95,7 +99,16 @@ export function RoomGitHub({ roomId, children }: { roomId: string; children: Rea
   return <GitHubServerContext.Provider value={value}>{children}</GitHubServerContext.Provider>;
 }
 
-type ServerStatus = { connected: boolean; login: string | undefined };
+type ServerStatus = {
+  connected: boolean;
+  login: string | undefined;
+  /** With the token the person saved in MindRoom, or the GitHub App connection, while connected. */
+  via?: 'token' | 'app';
+  /** While `via` is the token: whether MindRoom goes with the App once the token is removed. */
+  appConnected?: boolean;
+};
+
+const NOT_CONNECTED: ServerStatus = { connected: false, login: undefined };
 
 // Not under `pull-requests`, whose queries a new token asks again: the status is the server's.
 const statusKey = (origin: string) => ['pull-requests-github-status', origin] as const;
@@ -108,7 +121,7 @@ const statusStaleTime = (status: ServerStatus | undefined) =>
 
 /** Which connection a status names, for telling when it changed. */
 const identity = (status: ServerStatus) =>
-  status.connected ? `connected:${status.login ?? ''}` : 'none';
+  status.connected ? `connected:${status.via ?? ''}:${status.login ?? ''}` : 'none';
 
 /** How GitHub is reached in a key of `queries.ts`, after the pull request or the repository. */
 const accessOf = (queryKey: QueryKey) => queryKey[queryKey[1] === 'repo' ? 4 : 5];
@@ -145,21 +158,35 @@ function readAgain(queryClient: QueryClient, refetch?: AccessKey) {
   });
 }
 
-/** Keeps `status` as the server's, and reads everything again when it names another connection. */
+/**
+ * Keeps `status` as the server's, and reads everything again when it names another connection.
+ * Another way to the same login keeps its keys, so what shows under them is read again here.
+ */
 function setStatus(queryClient: QueryClient, origin: string, status: ServerStatus) {
   const before = queryClient.getQueryData<ServerStatus>(statusKey(origin));
   queryClient.setQueryData(statusKey(origin), status);
-  if (before && identity(before) !== identity(status)) readAgain(queryClient);
+  if (!before || identity(before) === identity(status)) return;
+  const sameLogin = before.connected && status.connected && before.login === status.login;
+  readAgain(queryClient, sameLogin ? serverKey(origin, status.login) : undefined);
+}
+
+/** The status in a server's answer (of `/api/github/status`, or of saving or removing a token). */
+function statusOf(answer: unknown): ServerStatus {
+  const status =
+    typeof answer === 'object' && answer !== null ? (answer as Record<string, unknown>) : {};
+  if (status.connected !== true) return NOT_CONNECTED;
+  const { login } = status;
+  return {
+    connected: true,
+    login: typeof login === 'string' && login !== '' ? login : undefined,
+    // A server from before the token was saved there knows the App alone.
+    via: status.via === 'token' ? 'token' : 'app',
+    appConnected: status.via === 'token' && status.app_connected === true,
+  };
 }
 
 async function readStatus(server: MindroomServer): Promise<ServerStatus> {
-  const answer: unknown = await server.request('/api/github/status');
-  const status = typeof answer === 'object' && answer !== null ? (answer as ServerStatus) : null;
-  const login = status?.login;
-  return {
-    connected: status?.connected === true,
-    login: typeof login === 'string' && login !== '' ? login : undefined,
-  };
+  return statusOf(await server.request('/api/github/status'));
 }
 
 /**
@@ -175,8 +202,7 @@ function viaServer(
   return {
     server,
     account,
-    disconnected: () =>
-      setStatus(queryClient, server.origin, { connected: false, login: undefined }),
+    disconnected: () => setStatus(queryClient, server.origin, NOT_CONNECTED),
   };
 }
 
@@ -189,6 +215,10 @@ export type GitHubAccess = {
   via: 'token' | 'server' | undefined;
   /** The GitHub login connected in MindRoom, when the server named it. */
   login: string | undefined;
+  /** Through MindRoom: whether it goes with the token saved there or with the GitHub App. */
+  connection: 'token' | 'app' | undefined;
+  /** With the token saved in MindRoom: whether the GitHub App is used once it is removed. */
+  appConnected: boolean;
   /**
    * What the query keys carry of it, never a token: false without either, true with the token,
    * `server:<origin>:<login>` through MindRoom (`unknown` for a login the server did not name),
@@ -223,9 +253,101 @@ export type GitHubAccess = {
 /** Whose GitHub account the requests through MindRoom use, while they go that way. */
 export function GitHubConnectedNote() {
   const t = usePluginTranslation('pull-requests');
-  const { via, login } = useGitHubAccess();
+  const { via, login, connection } = useGitHubAccess();
   if (via !== 'server') return null;
-  return <>{login ? t('token.connected', { login }) : t('token.connectedNoLogin')}</>;
+  const how = t(`token.how.${connection ?? 'app'}`);
+  return <>{login ? t('token.connected', { login, how }) : t('token.connectedNoLogin', { how })}</>;
+}
+
+/** Why saving a token in MindRoom failed: GitHub refused it, it is no token, or anything else. */
+type SaveProblem = 'rejected' | 'invalid' | 'failed';
+
+/**
+ * The token the person saves in the room's MindRoom server, which MindRoom uses before the GitHub
+ * App, on every device; undefined in a room without one. Each answer is the status, set as the
+ * status query's own is, so the parts switch to it as they would.
+ */
+function useServerToken() {
+  const { server } = useContext(GitHubServerContext);
+  const queryClient = useQueryClient();
+  const storedToken = useStoredToken();
+  const { forget } = useGitHubToken();
+  return useMemo(() => {
+    if (!server) return undefined;
+    const answered = (answer: unknown) => {
+      const before = queryClient.getQueryData<ServerStatus>(statusKey(server.origin));
+      const now = statusOf(answer);
+      // Saving answers with the token's account alone; the App connection there stays.
+      const app = now.via === 'token' && (before?.via === 'app' || before?.appConnected === true);
+      setStatus(queryClient, server.origin, app ? { ...now, appConnected: true } : now);
+    };
+    return {
+      /** Saves `token` there; resolves to what went wrong, or undefined once it is saved. */
+      save: async (token: string): Promise<SaveProblem | undefined> => {
+        try {
+          answered(
+            await server.request('/api/github/token', {
+              method: 'PUT',
+              body: JSON.stringify({ token }),
+              headers: { 'Content-Type': 'application/json' },
+            })
+          );
+        } catch (error) {
+          const status = error instanceof MindroomServerError ? error.status : 0;
+          const body = error instanceof MindroomServerError ? error.body : undefined;
+          const code =
+            typeof body === 'object' && body !== null
+              ? (body as { error?: unknown }).error
+              : undefined;
+          if (status === 400 && code === 'github_token_rejected') return 'rejected';
+          return status === 422 ? 'invalid' : 'failed';
+        }
+        // The token of this browser comes first, and would hide the one just saved.
+        if (storedToken() !== undefined) forget();
+        return undefined;
+      },
+      /** Removes it there; resolves to whether it did. */
+      remove: async (): Promise<boolean> => {
+        try {
+          answered(await server.request('/api/github/token', { method: 'DELETE' }));
+          return true;
+        } catch {
+          return false;
+        }
+      },
+    };
+  }, [forget, queryClient, server, storedToken]);
+}
+
+/** Removes the token saved in MindRoom, while the requests through MindRoom go with it. */
+export function RemoveServerToken() {
+  const t = usePluginTranslation('pull-requests');
+  const { via, connection, appConnected } = useGitHubAccess();
+  const serverToken = useServerToken();
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+  if (via !== 'server' || connection !== 'token' || !serverToken) return null;
+  const remove = async () => {
+    setBusy(true);
+    setFailed(false);
+    const removed = await serverToken.remove();
+    setBusy(false);
+    setFailed(!removed);
+  };
+  return (
+    <>
+      <button
+        type="button"
+        className="mrpr-link-button"
+        disabled={busy}
+        title={appConnected ? t('token.removeFallsBack') : undefined}
+        onClick={() => void remove()}
+      >
+        {t('token.remove')}
+      </button>
+      {failed ? <span role="alert"> {t('token.removeFailed')}</span> : null}
+    </>
+  );
 }
 
 /**
@@ -254,6 +376,8 @@ export function useGitHubAccess(): GitHubAccess {
   });
   const connected = server !== undefined && token === undefined && status.data?.connected === true;
   const login = connected ? status.data?.login : undefined;
+  const connection = connected ? status.data?.via : undefined;
+  const appConnected = connected && status.data?.appConnected === true;
   const current = useCallback((): { key: AccessKey; auth: GitHubAuth | undefined } => {
     const stored = storedToken();
     if (stored !== undefined) return { key: true, auth: stored };
@@ -289,6 +413,8 @@ export function useGitHubAccess(): GitHubAccess {
     () => ({
       via: token !== undefined ? 'token' : connected ? 'server' : undefined,
       login,
+      connection,
+      appConnected,
       key: token !== undefined ? true : connected ? serverKey(origin, login) : false,
       pending: token === undefined && (serverPending || (server !== undefined && status.isPending)),
       current,
@@ -296,8 +422,10 @@ export function useGitHubAccess(): GitHubAccess {
       recheck,
     }),
     [
+      appConnected,
       authFor,
       connected,
+      connection,
       current,
       login,
       origin,
@@ -314,26 +442,46 @@ export function TokenForm({
   reason,
   inputRef,
   onCancel,
+  onSaved,
 }: {
   /** Why it shows; `override`, to use a token instead of MindRoom's connection, has no hint. */
   reason: 'notFound' | 'rateLimited' | 'badToken' | 'override';
   inputRef?: Ref<HTMLInputElement>;
   /** Closes the form without saving, for one the person opened; without it, none shows. */
   onCancel?: () => void;
+  /** Once a token is saved, in the browser or in MindRoom. */
+  onSaved?: () => void;
 }) {
   const t = usePluginTranslation('pull-requests');
   const { setToken } = useGitHubToken();
   const { via } = useGitHubAccess();
+  const serverToken = useServerToken();
   const [value, setValue] = useState('');
-  const submit = (event: FormEvent) => {
+  // In a room with a MindRoom server, the token is saved there unless the person keeps it here.
+  const [browserOnly, setBrowserOnly] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [problem, setProblem] = useState<SaveProblem>();
+  const inMindroom = serverToken !== undefined && !browserOnly;
+  const submit = async (event: FormEvent) => {
     event.preventDefault();
     const trimmed = value.trim();
-    if (trimmed === '') return;
-    setToken(trimmed);
+    if (trimmed === '' || saving) return;
+    // The token leaves the page at once: it is kept in the field no longer than until it is sent.
     setValue('');
+    setProblem(undefined);
+    if (!inMindroom) {
+      setToken(trimmed);
+      onSaved?.();
+      return;
+    }
+    setSaving(true);
+    const failure = await serverToken.save(trimmed);
+    setSaving(false);
+    setProblem(failure);
+    if (failure === undefined) onSaved?.();
   };
   return (
-    <form className="mrpr-token" onSubmit={submit}>
+    <form className="mrpr-token" onSubmit={(event) => void submit(event)}>
       {via === 'server' ? (
         <p className="mrpr-status">
           <GitHubConnectedNote /> {t('token.overrides')}
@@ -350,7 +498,7 @@ export function TokenForm({
           value={value}
           onChange={(event) => setValue(event.target.value)}
         />
-        <button className="mrpr-button" type="submit">
+        <button className="mrpr-button" type="submit" disabled={saving}>
           {t('token.save')}
         </button>
         {onCancel ? (
@@ -359,7 +507,27 @@ export function TokenForm({
           </button>
         ) : null}
       </div>
-      <p className="mrpr-status">{t('token.note')}</p>
+      {serverToken ? (
+        <div className="mrpr-token-where" role="radiogroup" aria-label={t('token.where')}>
+          {[false, true].map((only) => (
+            <label key={String(only)}>
+              <input
+                type="radio"
+                name="mrpr-token-where"
+                checked={browserOnly === only}
+                onChange={() => setBrowserOnly(only)}
+              />{' '}
+              {t(only ? 'token.inBrowser' : 'token.inMindroom')}
+            </label>
+          ))}
+        </div>
+      ) : null}
+      {problem ? (
+        <p className="mrpr-status" role="alert">
+          {t(`token.problem.${problem}`)}
+        </p>
+      ) : null}
+      <p className="mrpr-status">{t(inMindroom ? 'token.noteMindroom' : 'token.note')}</p>
     </form>
   );
 }

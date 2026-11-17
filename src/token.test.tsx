@@ -14,7 +14,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GitHubViaServer } from './github';
 import plugin from './index';
 import { usePullRequest } from './queries';
-import { GitHubServerContext, RoomGitHub, useGitHubAccess, type GitHubAccess } from './token';
+import { githubServer } from './testing/mindroomServer';
+import {
+  GitHubServerContext,
+  RemoveServerToken,
+  RoomGitHub,
+  TokenForm,
+  useGitHubAccess,
+  type GitHubAccess,
+} from './token';
 
 // Where `usePluginStorage` keeps the GitHub token of the test's account.
 const TOKEN_KEY = 'mindroom.plugin:%40plugin-tester%3Aexample.org/pull-requests/githubToken';
@@ -384,5 +392,146 @@ describe('RoomGitHub', () => {
     );
     await waitUntil(() => expect(accesses.a).toMatchObject({ via: undefined, pending: false }));
     expect(fetchMock.mock.calls.some(([url]) => url.includes('/api/github'))).toBe(false);
+  });
+});
+
+describe('the token saved in MindRoom', () => {
+  const respond = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+  /**
+   * GitHub knows `ghp_good` as `octo`, the App's login too, and `ghp_other` as `other`; it
+   * refuses any other token. The pull request's title says how it was read.
+   */
+  const github = async (url: string, init?: RequestInit) => {
+    const auth = new Headers(init?.headers).get('authorization');
+    if (url === 'https://api.github.com/user') {
+      if (auth === 'Bearer ghp_good') return respond({ login: 'octo' });
+      if (auth === 'Bearer ghp_other') return respond({ login: 'other' });
+      return respond({ message: 'Bad credentials' }, 401);
+    }
+    return respond({ ...apiPull, title: auth ? 'with the token' : 'with the App' });
+  };
+  const type = (field: HTMLElement, value: string) =>
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(field, value);
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  const click = (element: HTMLElement) => act(async () => element.click());
+  /** The form and a reader of the pull request, in a room with `server`, or none. */
+  const form = (server: MindroomServer | undefined) =>
+    show(
+      server,
+      <>
+        <TokenForm reason="override" />
+        <NamedReader name="reader" />
+      </>
+    );
+  const save = async (view: Awaited<ReturnType<typeof show>>, token: string) => {
+    await type(view.getByLabelText('GitHub token'), token);
+    await click(view.getByRole('button', { name: 'Save' }));
+  };
+  /** Whether `token` is anywhere it must never be once saved: the page, the cache, the storage. */
+  const leaked = (token: string) =>
+    document.body.innerHTML.includes(token) ||
+    JSON.stringify(
+      client
+        .getQueryCache()
+        .getAll()
+        .map(({ queryKey, state }) => [queryKey, state.data])
+    ).includes(token) ||
+    localStorage.getItem(TOKEN_KEY) !== null;
+
+  it('names the way MindRoom reaches GitHub, an older server that does not say it being the App', async () => {
+    await show(serverWith(() => Promise.resolve({ connected: true, login: 'octo' })));
+    await waitUntil(() => expect(accesses.a?.connection).toBe('app'));
+    expect(accesses.a).toMatchObject({ via: 'server', appConnected: false });
+  });
+
+  it('saves in MindRoom by default, keeps the key of the same login, and reads again with it', async () => {
+    const mindroom = githubServer(github);
+    const view = await form(mindroom.server);
+    await waitUntil(() => expect(view.getByTestId('reader').textContent).toBe('with the App'));
+    expect(accesses.reader).toMatchObject({ connection: 'app', key: `server:${ORIGIN}:octo` });
+    expect((view.getByLabelText('Save in MindRoom') as HTMLInputElement).checked).toBe(true);
+    expect((view.getByLabelText('Only this browser') as HTMLInputElement).checked).toBe(false);
+    await save(view, ' ghp_good ');
+    expect(mindroom.storedToken()).toBe('ghp_good');
+    await waitUntil(() => expect(view.getByTestId('reader').textContent).toBe('with the token'));
+    expect(accesses.reader).toMatchObject({
+      via: 'server',
+      connection: 'token',
+      appConnected: true,
+      key: `server:${ORIGIN}:octo`,
+    });
+    expect((view.getByLabelText('GitHub token') as HTMLInputElement).value).toBe('');
+    expect(leaked('ghp_good')).toBe(false);
+  });
+
+  it('says GitHub refused a token, and keeps it nowhere', async () => {
+    const mindroom = githubServer(github);
+    const view = await form(mindroom.server);
+    await waitUntil(() => expect(accesses.reader?.connection).toBe('app'));
+    await save(view, 'ghp_refused');
+    await waitUntil(() =>
+      expect(view.getByRole('alert').textContent).toBe('GitHub refused this token.')
+    );
+    expect(mindroom.storedToken()).toBeUndefined();
+    expect(accesses.reader?.connection).toBe('app');
+    expect(leaked('ghp_refused')).toBe(false);
+  });
+
+  it('keeps the token in the browser alone when asked to, and asks MindRoom nothing of it', async () => {
+    const mindroom = githubServer(github);
+    const view = await form(mindroom.server);
+    await click(view.getByLabelText('Only this browser'));
+    await save(view, 'ghp_mine');
+    await waitUntil(() => expect(accesses.reader?.via).toBe('token'));
+    expect(localStorage.getItem(TOKEN_KEY)).toBe('ghp_mine');
+    expect(mindroom.tokenRequests()).toEqual([]);
+  });
+
+  it('offers no choice in a room without a MindRoom server, and keeps the token in the browser', async () => {
+    vi.stubGlobal('fetch', vi.fn(github));
+    const view = await form(undefined);
+    expect(view.queryByLabelText('Save in MindRoom')).toBeNull();
+    await save(view, 'ghp_mine');
+    expect(localStorage.getItem(TOKEN_KEY)).toBe('ghp_mine');
+  });
+
+  it('forgets the token of this browser once one is saved in MindRoom, which it would hide', async () => {
+    localStorage.setItem(TOKEN_KEY, 'ghp_old');
+    vi.stubGlobal('fetch', vi.fn(github));
+    const mindroom = githubServer(github);
+    const view = await form(mindroom.server);
+    await waitUntil(() => expect(accesses.reader?.via).toBe('token'));
+    await save(view, 'ghp_other');
+    await waitUntil(() => expect(accesses.reader?.key).toBe(`server:${ORIGIN}:other`));
+    expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
+    await waitUntil(() => expect(mindroom.githubRequests()).toHaveLength(1));
+    await waitUntil(() => expect(view.getByTestId('reader').textContent).toBe('with the token'));
+  });
+
+  it('removes it from MindRoom, going back to the App, as the status it answers says', async () => {
+    const mindroom = githubServer(github);
+    await mindroom.server.request('/api/github/token', {
+      method: 'PUT',
+      body: JSON.stringify({ token: 'ghp_good' }),
+    });
+    const view = await show(
+      mindroom.server,
+      <>
+        <RemoveServerToken />
+        <NamedReader name="reader" />
+      </>
+    );
+    await waitUntil(() => expect(view.getByTestId('reader').textContent).toBe('with the token'));
+    const remove = view.getByRole('button', { name: 'Remove token from MindRoom' });
+    expect(remove.title).toBe('MindRoom then uses your GitHub App connection.');
+    await click(remove);
+    await waitUntil(() => expect(view.getByTestId('reader').textContent).toBe('with the App'));
+    expect(accesses.reader).toMatchObject({ connection: 'app', key: `server:${ORIGIN}:octo` });
+    expect(mindroom.tokenRequests()).toEqual(['PUT', 'DELETE']);
+    expect(mindroom.statusRequests()).toBe(1);
+    expect(view.queryByRole('button', { name: 'Remove token from MindRoom' })).toBeNull();
   });
 });

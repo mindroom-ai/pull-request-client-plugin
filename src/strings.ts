@@ -140,6 +140,9 @@ export const en = {
       badToken: 'GitHub refused the saved token.',
       badConnection:
         'GitHub refused your account connected in MindRoom. Connect GitHub again in MindRoom.',
+      noAccessServerToken:
+        'GitHub refused it. The token saved in MindRoom may not have write access to this repository (Pull requests and Contents: Read and write).',
+      badServerToken: 'GitHub refused the token saved in MindRoom.',
       rateLimited: "GitHub's rate limit is used up for now. Try again later.",
       server: 'GitHub answered with an error.',
       branchMoved: 'The branch has new commits since this pull request, so it was not deleted.',
@@ -354,6 +357,9 @@ export const en = {
       'GitHub did not find this pull request. The saved token may not be able to read this repository.',
     notFoundWithServer:
       'GitHub did not find this pull request. The GitHub App connected in MindRoom may not be installed on this repository.',
+    notFoundWithServerToken:
+      'GitHub did not find this pull request. The token saved in MindRoom may not be able to read this repository.',
+    badServerToken: 'GitHub refused the token saved in MindRoom.',
     failed: 'GitHub could not be reached.',
     failedStatus: 'GitHub answered with status {{status}}.',
     retry: 'Try again',
@@ -369,9 +375,25 @@ export const en = {
       badToken: 'Save another token to replace it.',
     },
     note: "The token stays in this browser, where the page's scripts can read it.",
-    // While no token is stored and the room's MindRoom server has the person's GitHub connected.
-    connected: 'Using your GitHub account connected in MindRoom (@{{login}}).',
-    connectedNoLogin: 'Using your GitHub account connected in MindRoom.',
+    noteMindroom: 'MindRoom keeps the token for your account and uses it on every device.',
+    // Where the form saves it, in a room with a MindRoom server.
+    where: 'Where to save the token',
+    inMindroom: 'Save in MindRoom',
+    inBrowser: 'Only this browser',
+    // Why saving it in MindRoom failed.
+    problem: {
+      rejected: 'GitHub refused this token.',
+      invalid: 'This is not a GitHub token.',
+      failed: 'MindRoom could not save the token. Try again.',
+    },
+    // While no token is stored and the room's MindRoom server has the person's GitHub connected,
+    // then how: with the token saved in MindRoom or the GitHub App.
+    connected: 'Signed in as {{login}} through MindRoom ({{how}}).',
+    connectedNoLogin: 'Signed in through MindRoom ({{how}}).',
+    how: { token: 'token', app: 'GitHub App' },
+    remove: 'Remove token from MindRoom',
+    removeFallsBack: 'MindRoom then uses your GitHub App connection.',
+    removeFailed: 'MindRoom could not remove the token.',
     overrides: 'A token saved here is used instead.',
     useToken: 'Use a token instead',
     // Closes the form opened by Use a token instead, keeping MindRoom's connection.

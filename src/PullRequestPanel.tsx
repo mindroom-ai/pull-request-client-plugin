@@ -48,6 +48,7 @@ import { pluginRootStyle } from './theme';
 import {
   PanelTokenFormContext,
   GitHubConnectedNote,
+  RemoveServerToken,
   RoomGitHub,
   TokenForm,
   useGitHubAccess,
@@ -449,7 +450,7 @@ function Panel({ roomId, request }: PanelProps) {
                 </button>
               ) : via === 'server' ? (
                 <span className="mrpr-status">
-                  <GitHubConnectedNote />{' '}
+                  <GitHubConnectedNote /> <RemoveServerToken />{' '}
                   {tokenForm.reason || overriding ? null : (
                     <button
                       type="button"
@@ -471,6 +472,9 @@ function Panel({ roomId, request }: PanelProps) {
                 inputRef={tokenForm.inputRef}
                 // Only the form opened to use a token instead closes: a failure keeps the other.
                 onCancel={tokenForm.reason ? undefined : () => setOverriding(false)}
+                // A token saved in MindRoom keeps the requests going through it, so the form
+                // opened for it closes once it is saved.
+                onSaved={() => setOverriding(false)}
               />
             </div>
           ) : null}

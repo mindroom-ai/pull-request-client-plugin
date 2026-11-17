@@ -1706,7 +1706,7 @@ test("without a token, the GitHub account connected in MindRoom reads and merges
     timeout: 30_000,
   });
   await expect(
-    panel(page).getByText(`Using your GitHub account connected in MindRoom (@${CONNECTED_LOGIN}).`)
+    panel(page).getByText(`Signed in as ${CONNECTED_LOGIN} through MindRoom (GitHub App).`)
   ).toBeVisible();
   await expect(panel(page).getByRole('button', { name: 'Forget token' })).toHaveCount(0);
   const merge = panel(page).getByRole('button', { name: 'Merge', exact: true });
