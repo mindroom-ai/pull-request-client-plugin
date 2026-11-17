@@ -18,6 +18,13 @@ const page = vi.hoisted(() => ({
   /** How many times a card asked for the side panel. */
   panelReads: 0,
 }));
+// The room has no MindRoom server unless a test gives one: the stand-in client knows no room.
+const roomServer = vi.hoisted(() => ({ current: undefined as unknown }));
+vi.mock('@mindroom/client-sdk/server', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@mindroom/client-sdk/server')>()),
+  useMindroomServer: () => roomServer.current,
+}));
+
 vi.mock('@mindroom/client-sdk/core', async (importOriginal) => {
   const core = await importOriginal<typeof import('@mindroom/client-sdk/core')>();
   return {

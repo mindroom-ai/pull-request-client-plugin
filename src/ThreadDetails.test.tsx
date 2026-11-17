@@ -11,6 +11,13 @@ import { ThreadDetails } from './ThreadDetails';
 import { threadHasDetails } from './threadPullRequests';
 
 // A card's chip opens its thread on a click, which needs the room's page; no test here clicks.
+// The room has no MindRoom server unless a test gives one: the stand-in client knows no room.
+const roomServer = vi.hoisted(() => ({ current: undefined as unknown }));
+vi.mock('@mindroom/client-sdk/server', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@mindroom/client-sdk/server')>()),
+  useMindroomServer: () => roomServer.current,
+}));
+
 vi.mock('@mindroom/client-sdk/room', async (importOriginal) => {
   const room = await importOriginal<typeof import('@mindroom/client-sdk/room')>();
   return {

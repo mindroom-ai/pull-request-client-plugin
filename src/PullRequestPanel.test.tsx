@@ -8,10 +8,18 @@ import plugin from './index';
 import PullRequestPanel from './PullRequestPanel';
 import { resetPullRequestActions } from './actions/usePullRequestActions';
 import { useShownPullRequest } from './shownPullRequest';
+import { githubServer } from './testing/mindroomServer';
 
 // The Code tab's diff libraries need a browser; the tab stands in as its file paths, what it was
 // given of the threads, the commits and the chosen commit, how many review comments loaded of a
 // list cut short, which mount of the tab it is, and a button that chooses All commits.
+// The room has no MindRoom server unless a test gives one: the stand-in client knows no room.
+const roomServer = vi.hoisted(() => ({ current: undefined as unknown }));
+vi.mock('@mindroom/client-sdk/server', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@mindroom/client-sdk/server')>()),
+  useMindroomServer: () => roomServer.current,
+}));
+
 vi.mock('./CodeTab', async () => {
   const { useState } = await import('react');
   type List = { status: string; items?: { id?: number; sha?: string }[] };
@@ -128,6 +136,7 @@ beforeEach(() => {
 afterEach(() => {
   resetPullRequestActions();
   vi.unstubAllGlobals();
+  roomServer.current = undefined;
 });
 
 const EMPTY = 'Click a pull request link in a message to show it here.';
@@ -896,5 +905,115 @@ describe('PullRequestPanel', () => {
         expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT')).toEqual([]);
       }
     );
+  });
+});
+
+describe('with the GitHub account connected in MindRoom', () => {
+  const GRAPHQL = 'https://api.github.com/graphql';
+  const TOKEN_KEY = 'mindroom.plugin:%40plugin-tester%3Aexample.org/pull-requests/githubToken';
+  const repository = {
+    viewerPermission: 'WRITE',
+    mergeCommitAllowed: true,
+    squashMergeAllowed: true,
+    rebaseMergeAllowed: true,
+    autoMergeAllowed: false,
+    defaultBranchRef: { name: 'main' },
+  };
+  const head = { ref: 'feature', sha: 'abc123', repo: { full_name: 'mindroom-ai/mindroom-chat' } };
+  // GitHub, as MindRoom reaches it; the browser's own requests go to `fetchMock`.
+  const github = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>();
+
+  beforeEach(() => {
+    github.mockReset();
+    github.mockImplementation(async (url, init) => {
+      if (url === GRAPHQL && String(init?.body).includes('viewerPermission'))
+        return respond({ data: { repository } });
+      if (url.includes('/merge')) return respond({ merged: true });
+      if (url.includes('/compare/')) return respond({ behind_by: 0 });
+      if (url.includes('/check-runs')) return respond({ check_runs: [] });
+      if (url.includes('/status?')) return respond({ statuses: [] });
+      if (url.includes('/files') || url.includes('/commits') || url.includes('/comments'))
+        return respond([]);
+      if (url.includes('/reviews')) return respond([]);
+      return respond(pull({ node_id: 'PR_kw200', head, mergeable: true }));
+    });
+  });
+
+  it('reads and merges through MindRoom, and says whose account it is', async () => {
+    const mindroom = githubServer(github);
+    roomServer.current = mindroom.server;
+    const view = await show();
+    expect(
+      await view.findByText('Using your GitHub account connected in MindRoom (@octo)')
+    ).toBeTruthy();
+    await click(await view.findByRole('button', { name: 'Merge' }));
+    await click(await view.findByRole('button', { name: 'Confirm merge?' }));
+    await waitUntil(() =>
+      expect(mindroom.githubRequests()).toContainEqual({
+        method: 'PUT',
+        path: '/repos/mindroom-ai/mindroom-chat/pulls/200/merge',
+        body: { merge_method: 'merge', sha: 'abc123' },
+        accept: 'application/vnd.github+json',
+      })
+    );
+    // Nothing went to GitHub from the browser, and the status was asked once.
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(mindroom.statusRequests()).toBe(1);
+    expect(view.queryByRole('button', { name: 'Forget token' })).toBeNull();
+  });
+
+  it("names MindRoom's GitHub App when GitHub refuses a write", async () => {
+    const mindroom = githubServer(async (url, init) =>
+      init?.method === 'PUT'
+        ? respond({ message: 'Resource not accessible by integration' }, 403)
+        : github(url, init)
+    );
+    roomServer.current = mindroom.server;
+    const view = await show();
+    await click(await view.findByRole('button', { name: 'Merge' }));
+    await click(await view.findByRole('button', { name: 'Confirm merge?' }));
+    await waitUntil(() =>
+      expect(view.getByRole('status').textContent).toContain(
+        'GitHub refused it. The GitHub App connected in MindRoom may not have write access to this repository (Pull requests and Contents: Read and write). Resource not accessible by integration'
+      )
+    );
+  });
+
+  it('reads with the token stored in the browser first, and asks MindRoom nothing', async () => {
+    localStorage.setItem(TOKEN_KEY, 'tok');
+    const mindroom = githubServer(github);
+    roomServer.current = mindroom.server;
+    fetchMock.mockImplementation(github);
+    const view = await show();
+    expect(await view.findByRole('button', { name: 'Merge' })).toBeTruthy();
+    expect(mindroom.server.request).not.toHaveBeenCalled();
+    expect(view.queryByText(/connected in MindRoom/)).toBeNull();
+    expect(view.getByRole('button', { name: 'Forget token' })).toBeTruthy();
+  });
+
+  it('reads without either and offers no writes while MindRoom has no GitHub connected', async () => {
+    const mindroom = githubServer(github, { connected: false });
+    roomServer.current = mindroom.server;
+    const view = await show();
+    await view.findByText('Add pull request cards');
+    expect(mindroom.githubRequests()).toEqual([]);
+    expect(fetchMock).toHaveBeenCalled();
+    expect(fetchMock.mock.calls.filter(([url]) => url === GRAPHQL)).toEqual([]);
+    expect(view.queryByRole('button', { name: 'Merge' })).toBeNull();
+    expect(view.queryByText(/connected in MindRoom/)).toBeNull();
+  });
+
+  it('reads without it once MindRoom says the connection went away', async () => {
+    const mindroom = githubServer(github);
+    roomServer.current = mindroom.server;
+    const view = await show();
+    expect(await view.findByRole('button', { name: 'Merge' })).toBeTruthy();
+    mindroom.connected(false);
+    await click(view.getByRole('button', { name: 'Merge' }));
+    await click(await view.findByRole('button', { name: 'Confirm merge?' }));
+    // The write failed, and the panel reads the pull request anonymously, with no writes.
+    await waitUntil(() => expect(view.queryByRole('button', { name: 'Merge' })).toBeNull());
+    await waitUntil(() => expect(fetchMock).toHaveBeenCalled());
+    expect(view.queryByText(/connected in MindRoom/)).toBeNull();
   });
 });

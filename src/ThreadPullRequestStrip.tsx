@@ -9,6 +9,7 @@ import { pullRequestUrl, type PullRequestRef } from './github';
 import { PullRequestChip } from './PullRequestChip';
 import { useShownPullRequest } from './shownPullRequest';
 import { useThreadPullRequests } from './threadPullRequests';
+import { RoomGitHub } from './token';
 
 /** Whether `a` and `b` name one pull request; GitHub's owner and repository names ignore case. */
 const samePullRequest = (a: PullRequestRef, b: PullRequestRef) =>
@@ -28,17 +29,21 @@ export function ThreadPullRequestStrip({ room }: { room: Room }) {
   if (pullRequests.length === 0 && worktree === undefined) return null;
   const selected = panel?.isOpen ? shown : undefined;
   return (
-    <div className="mrpr-thread-strip" role="group" aria-label={t('threadPullRequests.strip')}>
-      {worktree ? <BranchChip worktree={worktree} showRepository={showWorktreeRepository} /> : null}
-      {pullRequests.map((pullRequest) => (
-        <PullRequestChip
-          key={pullRequestUrl(pullRequest)}
-          pullRequest={pullRequest}
-          showRepository={repositories > 1}
-          selected={selected !== undefined && samePullRequest(selected, pullRequest)}
-          onSelect={panel ? () => panel.open(pullRequest) : undefined}
-        />
-      ))}
-    </div>
+    <RoomGitHub roomId={room.roomId}>
+      <div className="mrpr-thread-strip" role="group" aria-label={t('threadPullRequests.strip')}>
+        {worktree ? (
+          <BranchChip worktree={worktree} showRepository={showWorktreeRepository} />
+        ) : null}
+        {pullRequests.map((pullRequest) => (
+          <PullRequestChip
+            key={pullRequestUrl(pullRequest)}
+            pullRequest={pullRequest}
+            showRepository={repositories > 1}
+            selected={selected !== undefined && samePullRequest(selected, pullRequest)}
+            onSelect={panel ? () => panel.open(pullRequest) : undefined}
+          />
+        ))}
+      </div>
+    </RoomGitHub>
   );
 }

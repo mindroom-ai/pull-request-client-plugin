@@ -26,7 +26,7 @@ import {
 } from './presentation';
 import { useReviews } from './queries';
 import { pluginRootStyle } from './theme';
-import { useGitHubToken } from './token';
+import { useGitHubAccess } from './token';
 
 /** How long a mouse rests on a chip before its card opens. */
 export const HOVER_CARD_DELAY_MS = 150;
@@ -319,15 +319,15 @@ function ChecksRow({ items }: { items: PullRequestCheck[] | undefined }) {
 
 /**
  * Each reviewer's latest verdict and those still asked for a review, asked of GitHub only while
- * the card is open and only with a token, like the chip's checks: without one, GitHub's 60
- * requests an hour are kept for the pull requests and the panel. The row keeps its place while
- * they load, and goes without a token or when GitHub refuses.
+ * the card is open and only with a token or MindRoom's connection, like the chip's checks:
+ * without either, GitHub's 60 requests an hour are kept for the pull requests and the panel. The
+ * row keeps its place while they load, and goes without either or when GitHub refuses.
  */
 function ReviewsRow({ pullRequest, pr }: { pullRequest: PullRequestRef; pr: PullRequest }) {
   const t = usePluginTranslation('pull-requests');
-  const { token } = useGitHubToken();
-  const reviews = useReviews(pullRequest, token !== undefined);
-  if (token === undefined || reviews.isError) return null;
+  const { via } = useGitHubAccess();
+  const reviews = useReviews(pullRequest, via !== undefined);
+  if (via === undefined || reviews.isError) return null;
   if (!reviews.data) {
     return (
       <div className="mrpr-hover-reviews mrpr-hover-muted">{t('summary.loadingReviewers')}</div>

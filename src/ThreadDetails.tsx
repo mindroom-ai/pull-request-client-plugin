@@ -16,6 +16,7 @@ import { usePullRequestStatus } from './pullRequestStatus';
 import { NO_FOCUS_REFETCH } from './queries';
 import { pluginRootStyle } from './theme';
 import { useThreadPullRequests, type ThreadWorktree } from './threadPullRequests';
+import { RoomGitHub } from './token';
 
 /** The most code points each side of a pull request's branches shows. */
 const BRANCH_MAX = 24;
@@ -30,12 +31,14 @@ export function ThreadDetails({ room, threadId }: ThreadDetailProps) {
   // A thread can lose its last link or its worktree while a surface shows it: it then draws none.
   if (pullRequests.length === 0 && !worktree) return null;
   return (
-    <div className="mrpr-root mrpr-details" style={pluginRootStyle()}>
-      {pullRequests.map((pullRequest) => (
-        <PullRequestDetails key={pullRequestUrl(pullRequest)} pullRequest={pullRequest} />
-      ))}
-      {worktree ? <WorktreeDetails worktree={worktree} /> : null}
-    </div>
+    <RoomGitHub roomId={room.roomId}>
+      <div className="mrpr-root mrpr-details" style={pluginRootStyle()}>
+        {pullRequests.map((pullRequest) => (
+          <PullRequestDetails key={pullRequestUrl(pullRequest)} pullRequest={pullRequest} />
+        ))}
+        {worktree ? <WorktreeDetails worktree={worktree} /> : null}
+      </div>
+    </RoomGitHub>
   );
 }
 

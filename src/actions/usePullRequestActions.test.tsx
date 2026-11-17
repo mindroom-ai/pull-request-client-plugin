@@ -256,7 +256,7 @@ describe('usePullRequestActions', () => {
     );
     const first = await show(refA, pull);
     await waitUntil(() =>
-      expect(client.getQueryState(['pull-requests', 'repo', 'o', 'r'])?.status).toBe('error')
+      expect(client.getQueryState(['pull-requests', 'repo', 'o', 'r', true])?.status).toBe('error')
     );
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(actions.repo).toBeUndefined();
@@ -300,7 +300,9 @@ describe('usePullRequestActions', () => {
     const allow = () => fetchMock.mockImplementation(async () => respond({ data: { repository } }));
     const refused = () =>
       waitUntil(() =>
-        expect(client.getQueryState(['pull-requests', 'repo', 'o', 'r'])?.status).toBe('error')
+        expect(client.getQueryState(['pull-requests', 'repo', 'o', 'r', true])?.status).toBe(
+          'error'
+        )
       );
 
     it('is asked for again, with the new token, in a panel opened after the token changed', async () => {

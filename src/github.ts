@@ -167,7 +167,10 @@ async function githubFetch(
     if (token) headers.Authorization = `Bearer ${token}`;
     if (body !== undefined) headers['Content-Type'] = 'application/json';
     const sent = body === undefined ? undefined : JSON.stringify(body);
-    return fetch(`${API}${path}`, { method, headers, body: sent, signal, cache });
+    // A read is fetch's own default, a GET without a body.
+    const init: RequestInit =
+      method === 'GET' ? { headers, signal, cache } : { method, headers, body: sent, signal };
+    return fetch(`${API}${path}`, init);
   }
   const request = body === undefined ? { method, path, accept } : { method, path, body, accept };
   let answer: Json | null;

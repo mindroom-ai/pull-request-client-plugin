@@ -45,7 +45,15 @@ import {
 import { buildReviewThreads } from './reviewThreads';
 import { clearShownPullRequest, setShownPullRequest } from './shownPullRequest';
 import { pluginRootStyle } from './theme';
-import { PanelTokenFormContext, TokenForm, useGitHubToken, usePanelTokenForm } from './token';
+import {
+  PanelTokenFormContext,
+  GitHubConnectedNote,
+  RoomGitHub,
+  TokenForm,
+  useGitHubAccess,
+  useGitHubToken,
+  usePanelTokenForm,
+} from './token';
 
 const TABS = ['summary', 'timeline', 'code'] as const;
 type Tab = (typeof TABS)[number];
@@ -284,13 +292,17 @@ function Files({
   );
 }
 
-export default function PullRequestPanel({
-  roomId,
-  request,
-}: {
-  roomId: string;
-  request?: unknown;
-}) {
+type PanelProps = { roomId: string; request?: unknown };
+
+export default function PullRequestPanel(props: PanelProps) {
+  return (
+    <RoomGitHub roomId={props.roomId}>
+      <Panel {...props} />
+    </RoomGitHub>
+  );
+}
+
+function Panel({ roomId, request }: PanelProps) {
   const t = usePluginTranslation('pull-requests');
   const ref = useMemo(() => readRequest(request), [request]);
   // The strip under the room header marks the chip of the pull request the panel shows.
@@ -300,6 +312,7 @@ export default function PullRequestPanel({
   }, [roomId, ref]);
   const query = usePullRequest(ref);
   const { token, forget } = useGitHubToken();
+  const { via } = useGitHubAccess();
   const tokenForm = usePanelTokenForm();
   const [tab, setTab] = useState<Tab>('summary');
   // The Timeline tab's order, which the tab bar's toggle sets.
@@ -426,6 +439,10 @@ export default function PullRequestPanel({
                 <button className="mrpr-button" type="button" onClick={forget}>
                   {t('token.forget')}
                 </button>
+              ) : via === 'server' ? (
+                <span className="mrpr-status">
+                  <GitHubConnectedNote />
+                </span>
               ) : null}
             </div>
           </div>

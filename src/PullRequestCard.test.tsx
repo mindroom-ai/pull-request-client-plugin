@@ -6,6 +6,14 @@ import { renderPluginComponent } from '@mindroom/client-sdk/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import plugin from './index';
 import { PullRequestCard } from './PullRequestCard';
+import { githubServer } from './testing/mindroomServer';
+
+// The room has no MindRoom server unless a test gives one: the stand-in client knows no room.
+const roomServer = vi.hoisted(() => ({ current: undefined as unknown }));
+vi.mock('@mindroom/client-sdk/server', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@mindroom/client-sdk/server')>()),
+  useMindroomServer: () => roomServer.current,
+}));
 
 vi.mock('focus-trap-react', () => ({
   default: ({ children }: { children: ReactNode }) => children,
@@ -74,6 +82,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.unstubAllGlobals();
+  roomServer.current = undefined;
 });
 
 describe('PullRequestCard', () => {
@@ -110,6 +119,32 @@ describe('PullRequestCard', () => {
     expect(await view.findByText('Add pull request cards')).toBeTruthy();
     const init = fetchMock.mock.calls.at(-1)?.[1];
     expect((init?.headers as Record<string, string>).Authorization).toBe('Bearer ghp_secret');
+  });
+
+  it("says MindRoom's GitHub App may not reach a repository it does not find, and takes a token", async () => {
+    const mindroom = githubServer(async () => respond({ message: 'Not Found' }, 404));
+    roomServer.current = mindroom.server;
+    const view = await show();
+    expect(
+      await view.findByText(
+        'GitHub did not find this pull request. The GitHub App connected in MindRoom may not be installed on this repository.'
+      )
+    ).toBeTruthy();
+    expect(
+      view.getByText(
+        'Using your GitHub account connected in MindRoom (@octo) A token saved here is used instead.'
+      )
+    ).toBeTruthy();
+    expect(fetchMock).not.toHaveBeenCalled();
+    // A token saved here reads from the browser, and MindRoom is asked nothing more.
+    fetchMock.mockImplementation(async () => respond(pull()));
+    const asked = mindroom.server.request.mock.calls.length;
+    await type(view.getByLabelText('GitHub token'), 'ghp_secret');
+    await click(view.getByRole('button', { name: 'Save' }));
+    expect(await view.findByText('Add pull request cards')).toBeTruthy();
+    const init = fetchMock.mock.calls.at(-1)?.[1];
+    expect((init?.headers as Record<string, string>).Authorization).toBe('Bearer ghp_secret');
+    expect(mindroom.server.request.mock.calls.length).toBe(asked);
   });
 
   it('shows the bad token state', async () => {

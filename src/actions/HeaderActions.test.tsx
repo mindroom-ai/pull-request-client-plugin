@@ -197,7 +197,7 @@ describe('HeaderActions', () => {
     repository = { ...repository, viewerPermission: 'READ' };
     const view = await show();
     await waitUntil(() =>
-      expect(client.getQueryData(['pull-requests', 'repo', 'o', 'r'])).toMatchObject({
+      expect(client.getQueryData(['pull-requests', 'repo', 'o', 'r', true])).toMatchObject({
         canWrite: false,
       })
     );

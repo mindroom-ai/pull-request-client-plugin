@@ -15,6 +15,13 @@ const page = vi.hoisted(() => ({
   thread: undefined as string | undefined,
   panel: undefined as { isOpen: boolean; open: ReturnType<typeof vi.fn> } | undefined,
 }));
+// The room has no MindRoom server unless a test gives one: the stand-in client knows no room.
+const roomServer = vi.hoisted(() => ({ current: undefined as unknown }));
+vi.mock('@mindroom/client-sdk/server', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@mindroom/client-sdk/server')>()),
+  useMindroomServer: () => roomServer.current,
+}));
+
 vi.mock('@mindroom/client-sdk/core', async (importOriginal) => {
   const core = await importOriginal<typeof import('@mindroom/client-sdk/core')>();
   return { ...core, useRoomSidePanel: () => page.panel };

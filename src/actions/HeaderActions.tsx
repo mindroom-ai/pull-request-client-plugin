@@ -34,6 +34,7 @@ import {
 } from '../github';
 import { pullRequestKey, repositoryKey, useChecks, useHeadBranchSha } from '../queries';
 import { pluginRootStyle } from '../theme';
+import { useGitHubAccess } from '../token';
 import { mayDeleteBranch, menuActions, primaryControl, showsOutcome } from './actions.logic';
 import { useInlineConfirm } from './useInlineConfirm';
 import type { ActionResult, usePullRequestActions } from './usePullRequestActions';
@@ -401,6 +402,7 @@ function ResultLine({
   onDismiss: () => void;
 }) {
   const t = usePluginTranslation('pull-requests');
+  const { via } = useGitHubAccess();
   const announced = pending === null && resultAnnounced;
   const shown = pending === null && !announced ? result : null;
   let content: ReactNode = null;
@@ -422,7 +424,13 @@ function ResultLine({
       const hint =
         kind === 'refused'
           ? null
-          : t(kind === 'failed' && status !== 0 ? 'actions.hint.server' : `actions.hint.${kind}`);
+          : t(
+              kind === 'failed' && status !== 0
+                ? 'actions.hint.server'
+                : kind === 'noAccess' && via === 'server'
+                ? 'actions.hint.noAccessServer'
+                : `actions.hint.${kind}`
+            );
       const why = [hint, kind === 'badToken' ? null : detail].filter(Boolean).join(' ');
       text = (
         <span>

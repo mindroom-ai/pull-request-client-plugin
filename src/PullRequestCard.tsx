@@ -19,6 +19,7 @@ import {
 } from './presentation';
 import { usePullRequest } from './queries';
 import { pluginRootStyle } from './theme';
+import { RoomGitHub } from './token';
 
 const parse = (href: string) => {
   try {
@@ -28,7 +29,15 @@ const parse = (href: string) => {
   }
 };
 
-export function PullRequestCard({ href, close }: MessageLinkCardProps) {
+export function PullRequestCard(props: MessageLinkCardProps) {
+  return (
+    <RoomGitHub roomId={props.roomId}>
+      <Card {...props} />
+    </RoomGitHub>
+  );
+}
+
+function Card({ href, close }: MessageLinkCardProps) {
   const t = usePluginTranslation('pull-requests');
   const ref = useMemo(() => parse(href), [href]);
   const query = usePullRequest(ref);

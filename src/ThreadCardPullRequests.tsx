@@ -16,6 +16,7 @@ import { pullRequestUrl, type PullRequestRef } from './github';
 import { PullRequestChip } from './PullRequestChip';
 import { pluginRootStyle } from './theme';
 import { useThreadPullRequests } from './threadPullRequests';
+import { RoomGitHub } from './token';
 
 // Every thread of the Compact view has a card, most without links: those read only their links
 // and worktree. The branch takes no click of its own: a click on it opens the thread.
@@ -30,12 +31,14 @@ export function ThreadCardPullRequests({ room, threadId }: ThreadCardBadgeProps)
     ) : null;
   }
   return (
-    <CardChips
-      room={room}
-      threadId={threadId}
-      pullRequests={pullRequests}
-      showRepository={repositories > 1}
-    />
+    <RoomGitHub roomId={room.roomId}>
+      <CardChips
+        room={room}
+        threadId={threadId}
+        pullRequests={pullRequests}
+        showRepository={repositories > 1}
+      />
+    </RoomGitHub>
   );
 }
 

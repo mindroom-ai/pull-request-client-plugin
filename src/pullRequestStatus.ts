@@ -4,7 +4,7 @@ import { checksState, type ChecksState } from './detail/detail.logic';
 import type { PullRequest, PullRequestCheck, PullRequestRef } from './github';
 import { resolvePullRequestState, type PullRequestStatePresentation } from './presentation';
 import { NO_FOCUS_REFETCH, useChecks, usePullRequest, type RefetchOptions } from './queries';
-import { useGitHubToken } from './token';
+import { useGitHubAccess } from './token';
 
 /** A pull request, its state and its checks; each undefined until known, or when not asked for. */
 export type PullRequestStatus = {
@@ -26,10 +26,11 @@ export function usePullRequestStatus(
 ): PullRequestStatus {
   const query = usePullRequest(ref, options);
   const pr = query.data;
-  const { token } = useGitHubToken();
-  // Only an open pull request, draft or not, has checks worth asking for, and only with a token:
-  // without one, GitHub allows 60 requests an hour, kept for the pull requests and the panel.
-  const withChecks = pr?.state === 'open' && token !== undefined;
+  const { via } = useGitHubAccess();
+  // Only an open pull request, draft or not, has checks worth asking for, and only with a token or
+  // MindRoom's connection: without either, GitHub allows 60 requests an hour, kept for the pull
+  // requests and the panel.
+  const withChecks = pr?.state === 'open' && via !== undefined;
   const checks = useChecks(ref, pr?.headSha ?? '', withChecks, options);
   const checksMark = withChecks && checks.data ? checksState(checks.data.items) : 'none';
   return {

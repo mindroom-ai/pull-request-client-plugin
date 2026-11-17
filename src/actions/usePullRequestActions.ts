@@ -14,7 +14,7 @@ import {
   type Repository,
 } from '../github';
 import { refreshPullRequest, useRepository } from '../queries';
-import { useGitHubToken, useStoredToken } from '../token';
+import { useGitHubAccess } from '../token';
 import { resolveMergeMethod } from './actions.logic';
 
 // `requested`: GitHub took an update of the branch, but answered before it had made it.
@@ -85,12 +85,12 @@ export function usePullRequestActions(
   perform(action: PullRequestAction): void;
   dismissResult(): void;
 } {
-  const { token } = useGitHubToken();
-  // A repository loaded with a token that is gone since would still offer the writes.
+  const access = useGitHubAccess();
+  // A repository loaded with a token, or a connection, that is gone since would still offer the
+  // writes.
   const repo = useRepository(ref).data;
-  const shownRepo = token === undefined ? undefined : repo;
+  const shownRepo = access.via === undefined ? undefined : repo;
   const storage = usePluginStorage('pull-requests');
-  const storedToken = useStoredToken();
   const queryClient = useQueryClient();
   const key = ref ? actionKey(ref) : undefined;
   // Another pull request's entry is never read here, so its action and outcome never show.
@@ -119,8 +119,8 @@ export function usePullRequestActions(
   const perform = (action: PullRequestAction) => {
     // The store, not what this render read: a second click in the same event finds it locked.
     if (!ref || !pr || key === undefined || entryOf(key).pending !== null) return;
-    const stored = storedToken();
-    if (stored === undefined) return;
+    const auth = access.current();
+    if (auth === undefined) return;
     if (MERGES.has(action) && method === null) return;
     setEntry(key, { pending: action, result: null });
     const finish = async (result: ActionResult) => {
@@ -139,7 +139,7 @@ export function usePullRequestActions(
       }
     };
     // Only the merges read the method, and they do not start without one.
-    void runPullRequestAction(ref, pr, action, method ?? 'merge', stored).then(
+    void runPullRequestAction(ref, pr, action, method ?? 'merge', auth).then(
       (outcome) => finish({ action, outcome }),
       (caught: unknown) => {
         const error =

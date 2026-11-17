@@ -1,10 +1,13 @@
 // @vitest-environment jsdom
 import type { ComponentProps } from 'react';
 import { focusManager, QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type { MindroomServer } from '@mindroom/client-sdk/server';
 import { renderPluginComponent } from '@mindroom/client-sdk/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import plugin from './index';
 import { PullRequestChip } from './PullRequestChip';
+import { githubServer } from './testing/mindroomServer';
+import { GitHubServerContext } from './token';
 
 const REF = { owner: 'mindroom-ai', repo: 'mindroom-chat', number: 412 };
 const SHA = 'abc123';
@@ -86,13 +89,18 @@ const serve = (pr: unknown, runs: unknown[] = [], reviews: unknown[] = []) =>
     return respond({ message: 'Not Found' }, 404);
   });
 
-const show = async (props: Partial<ComponentProps<typeof PullRequestChip>> = {}) => {
+const show = async (
+  props: Partial<ComponentProps<typeof PullRequestChip>> = {},
+  server?: MindroomServer
+) => {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, retryDelay: 0 } },
   });
   const view = await renderPluginComponent(
     <QueryClientProvider client={client}>
-      <PullRequestChip pullRequest={REF} showRepository={false} {...props} />
+      <GitHubServerContext.Provider value={server}>
+        <PullRequestChip pullRequest={REF} showRepository={false} {...props} />
+      </GitHubServerContext.Provider>
     </QueryClientProvider>,
     { id: 'pull-requests', plugin }
   );
@@ -181,6 +189,44 @@ describe('PullRequestChip', () => {
     const { view } = await show();
     const mark = () => view.container.querySelector('.mrpr-chip-checks');
     await vi.waitFor(() => expect(mark()?.getAttribute('class')).toContain(tone));
+  });
+
+  it('marks the checks with the GitHub account connected in MindRoom, asked through it', async () => {
+    serve(pull(), [run('failure')]);
+    const github = fetchMock.getMockImplementation()!;
+    const browser = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>();
+    vi.stubGlobal('fetch', browser);
+    const mindroom = githubServer(github);
+    const { view, client } = await show({}, mindroom.server);
+    const mark = () => view.container.querySelector('.mrpr-chip-checks');
+    await vi.waitFor(() => expect(mark()?.getAttribute('class')).toContain('mrpr-tone-failure'));
+    expect(browser).not.toHaveBeenCalled();
+    expect(mindroom.githubRequests().map(({ path }) => path.split('?')[0])).toEqual(
+      expect.arrayContaining([
+        '/repos/mindroom-ai/mindroom-chat/pulls/412',
+        `/repos/mindroom-ai/mindroom-chat/commits/${SHA}/check-runs`,
+      ])
+    );
+    // What was read through MindRoom is its own, under no token; nothing was read without it.
+    const keys = client
+      .getQueryCache()
+      .findAll({ queryKey: ['pull-requests'], predicate: ({ state }) => state.dataUpdatedAt > 0 });
+    expect(keys.length).toBeGreaterThan(0);
+    expect(keys.map(({ queryKey }) => queryKey[5])).toEqual(
+      keys.map(() => 'server:https://mindroom.example.org')
+    );
+    expect(JSON.stringify(keys.map(({ queryKey }) => queryKey))).not.toContain('ghp_');
+  });
+
+  it('marks no checks while MindRoom has no GitHub connected, and reads without it', async () => {
+    serve(pull(), [run('failure')]);
+    const mindroom = githubServer(fetchMock.getMockImplementation()!, { connected: false });
+    const { view, client } = await show({}, mindroom.server);
+    await view.findByRole('img', { name: /: Open/ });
+    await answered(client, '/pulls/412');
+    expect(requested('/check-runs')).toBe(false);
+    expect(mindroom.githubRequests()).toEqual([]);
+    expect(view.container.querySelector('.mrpr-chip-checks')).toBeNull();
   });
 
   it('marks nothing for a pull request without checks', async () => {
