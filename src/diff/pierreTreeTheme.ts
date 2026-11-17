@@ -21,10 +21,35 @@ export const PIERRE_TREE_UNSAFE_CSS = `
   [data-item-section='decoration'] { flex: none; margin-inline-start: auto; }
   /* Equal digit widths, right-aligned. */
   [data-item-section='decoration'] > span { gap: 0.35em; font-variant-numeric: tabular-nums; }
-  /* In a flattened chain of folders, the earlier ones give way first, down to nothing, and the
-     last one only then, so it stays readable. The " / " between them keep their width. */
-  [data-item-flattened-subitem] { flex: 0 1000 auto; min-width: 0; }
-  [data-item-flattened-subitem]:last-child { flex-shrink: 1; }
+  /* A flattened chain of folders shows as many of its last folders as fit, each whole, and cuts
+     only its last folder when that alone does not fit. Pierre's " / " text is hidden, and each
+     folder but the last draws its own slash with Pierre's 2px gaps, so a folder and its slash
+     go together. Placed from the last folder back (the order, in a reversed row), the folders
+     that do not fit wrap onto a second line, which the row's one line hides. */
+  [data-item-flattened-subitems] {
+    font-size: 0; gap: 0; flex-flow: row-reverse wrap; justify-content: flex-end;
+    height: 1lh; overflow: hidden; vertical-align: top;
+  }
+  [data-item-flattened-subitem] {
+    display: flex; flex: none; align-items: center; height: 1lh; font-size: var(--trees-font-size);
+    order: -1;
+  }
+  [data-item-flattened-subitem]:not(:last-child)::after { content: '/'; flex: none; margin-inline: 2px; }
+  [data-item-flattened-subitem]:last-child { order: -12; flex-shrink: 1; min-width: 0; overflow: hidden; }
+  [data-item-flattened-subitem]:nth-last-child(2) { order: -11; }
+  [data-item-flattened-subitem]:nth-last-child(3) { order: -10; }
+  [data-item-flattened-subitem]:nth-last-child(4) { order: -9; }
+  [data-item-flattened-subitem]:nth-last-child(5) { order: -8; }
+  [data-item-flattened-subitem]:nth-last-child(6) { order: -7; }
+  [data-item-flattened-subitem]:nth-last-child(7) { order: -6; }
+  [data-item-flattened-subitem]:nth-last-child(8) { order: -5; }
+  [data-item-flattened-subitem]:nth-last-child(9) { order: -4; }
+  [data-item-flattened-subitem]:nth-last-child(10) { order: -3; }
+  [data-item-flattened-subitem]:nth-last-child(11) { order: -2; }
+  [data-item-flattened-subitem]:nth-last-child(12) { order: -1; }
+  /* Pierre's hover underline, on the folder's name and not its slash. */
+  [data-item-flattened-subitem]:hover, [data-item-flattened-subitem-drag-target='true'] { text-decoration: none; }
+  [data-item-flattened-subitem]:hover > *, [data-item-flattened-subitem-drag-target='true'] > * { text-decoration: underline; }
 `;
 
 export function pierreTreeStyle(colorScheme: 'light' | 'dark'): CSSProperties {
