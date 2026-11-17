@@ -4,6 +4,7 @@ import { act } from 'react-dom/test-utils';
 import { renderPluginComponent } from '@mindroom/client-sdk/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PullRequest, PullRequestRef } from '../github';
+import { imageSources } from '../images';
 import plugin from '../index';
 import { trapOptions } from '../testing/focusTrapStandIn';
 import { SummaryTab } from './SummaryTab';
@@ -12,25 +13,42 @@ vi.mock('focus-trap-react', async () => ({
   default: (await import('../testing/focusTrapStandIn')).FocusTrapStandIn,
 }));
 
-// The app's Markdown renderer loads on demand and cannot load here; this one renders bold text.
+// The app's Markdown renderer loads on demand and cannot load here; this one renders bold text,
+// and an image where `imageSource` gives it an address, as the app's sanitizer keeps it.
 vi.mock('@mindroom/client-sdk/ui', async (importOriginal) => {
   const ui = await importOriginal<typeof import('@mindroom/client-sdk/ui')>();
   return {
     ...ui,
-    useMarkdownHtml: (markdown: string) =>
-      markdown.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>'),
+    useMarkdownHtml: (
+      markdown: string,
+      options?: { imageSource?: (src: string) => string | undefined }
+    ) =>
+      markdown
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt: string, src: string) => {
+          const mapped = options?.imageSource?.(src);
+          return mapped ? `<img alt="${alt}" src="${mapped}">` : '';
+        }),
   };
 });
 
 const REF: PullRequestRef = { owner: 'mindroom-ai', repo: 'mindroom-chat', number: 200 };
 const HEAD = 'headsha';
 const PR_URL = 'https://github.com/mindroom-ai/mindroom-chat/pull/200';
+const UUID = '11111111-2222-3333-4444-555555555555';
+const ATTACHMENT = `https://github.com/user-attachments/assets/${UUID}`;
+const SIGNED = `https://private-user-images.githubusercontent.com/1/2-${UUID}.png?jwt=x&v=1`;
+const CAMO = 'https://camo.githubusercontent.com/abc/def';
+const RAW = 'https://raw.githubusercontent.com/a/b/main/x.png';
+// The signed address as GitHub's HTML writes it, with its `&` escaped.
+const SIGNED_HTML = SIGNED.replace('&', '&amp;');
 
 const pull = (over: Partial<PullRequest> = {}): PullRequest => ({
   title: 'Add pull request cards',
   state: 'open',
   draft: false,
   body: 'Shows a **bold** claim.',
+  images: { byUrl: {}, byAttachment: {} },
   author: null,
   labels: [],
   requestedReviewers: [],
@@ -131,6 +149,8 @@ const show = async (pullRequest: PullRequest = pull()) => {
 
 const click = (element: HTMLElement) => act(async () => element.click());
 
+const fail = (image: Element) => act(async () => void image.dispatchEvent(new Event('error')));
+
 beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   localStorage.clear();
@@ -230,6 +250,73 @@ describe('SummaryTab', () => {
     expect((view.getByText('bold').closest('[hidden]') as HTMLElement | null)?.hidden).toBe(true);
     await click(heading);
     expect(view.getByText('bold').closest('[hidden]')).toBeNull();
+  });
+
+  it("shows the description's attachment from its stable address, another image via camo", async () => {
+    const view = await show(
+      pull({
+        body: `## Screenshots\n\n![Before](${ATTACHMENT}) ![Badge](https://img.example/b.svg) ![Gone](https://img.example/x.png)`,
+        images: imageSources(
+          `<p><img src="${SIGNED_HTML}" alt="Before"> <img src="${CAMO}" data-canonical-src="https://img.example/b.svg"></p>`
+        ),
+      })
+    );
+    const images = [...view.container.querySelectorAll('.mrpr-description img')];
+    expect(images.map((image) => [image.getAttribute('alt'), image.getAttribute('src')])).toEqual([
+      ['Before', ATTACHMENT],
+      ['Badge', CAMO],
+    ]);
+  });
+
+  it("shows a comment's attachment from its stable address", async () => {
+    serve({
+      comments: [
+        issueComment(1, 'ann', `See ![shot](${ATTACHMENT})`, {
+          body_html: `<p>See <img src="${SIGNED_HTML}" alt="shot"></p>`,
+        }),
+      ],
+    });
+    const view = await show();
+    expect((await view.findByAltText('shot')).getAttribute('src')).toBe(ATTACHMENT);
+  });
+
+  it("loads a failed attachment from the signed address in GitHub's HTML, once", async () => {
+    const view = await show(
+      pull({
+        body: `![Before](${ATTACHMENT}) ![Badge](https://img.example/b.svg) ![Raw](${RAW})`,
+        images: imageSources(
+          `<p><img src="${SIGNED_HTML}" alt="Before"> <img src="${CAMO}" data-canonical-src="https://img.example/b.svg"></p>`
+        ),
+      })
+    );
+    const before = view.getByAltText('Before');
+    const fetches = fetchMock.mock.calls.length;
+    await fail(before);
+    expect(before.getAttribute('src')).toBe(SIGNED);
+    // The signed address failing too, and any other image failing, changes nothing.
+    await fail(before);
+    expect(before.getAttribute('src')).toBe(SIGNED);
+    await fail(view.getByAltText('Badge'));
+    await fail(view.getByAltText('Raw'));
+    expect(view.getByAltText('Badge').getAttribute('src')).toBe(CAMO);
+    expect(view.getByAltText('Raw').getAttribute('src')).toBe(RAW);
+    expect(fetchMock.mock.calls.length).toBe(fetches);
+  });
+
+  it("loads a comment's failed attachment from its body_html, without fetching", async () => {
+    serve({
+      comments: [
+        issueComment(1, 'ann', `See ![shot](${ATTACHMENT})`, {
+          body_html: `<p>See <img src="${SIGNED_HTML}" alt="shot"></p>`,
+        }),
+      ],
+    });
+    const view = await show();
+    const shot = await view.findByAltText('shot');
+    const fetches = fetchMock.mock.calls.length;
+    await fail(shot);
+    expect(shot.getAttribute('src')).toBe(SIGNED);
+    expect(fetchMock.mock.calls.length).toBe(fetches);
   });
 
   it('says so when there is no description', async () => {

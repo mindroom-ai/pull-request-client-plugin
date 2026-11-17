@@ -1,6 +1,7 @@
 // GitHub's REST API for one pull request and its files, the only network this plugin uses.
 // It must stay free of the diff libraries: this module loads with the plugin's entry, and
 // those load only with the side panel.
+import { imageSources, type ImageSources } from './images';
 
 export type PullRequestRef = { owner: string; repo: string; number: number };
 
@@ -17,6 +18,8 @@ export type PullRequest = {
   state: 'open' | 'closed' | 'merged';
   draft: boolean;
   body: string;
+  /** Where the description's images load from, out of GitHub's HTML of it. */
+  images: ImageSources;
   author: Actor | null;
   labels: { name: string; color: string }[];
   requestedReviewers: Actor[];
@@ -60,6 +63,10 @@ const LIST_PAGES = 10;
 const OWNER = /^[A-Za-z0-9-]{1,39}$/;
 const REPO = /^[A-Za-z0-9._-]{1,100}$/;
 const NUMBER = /^[1-9][0-9]*$/;
+const JSON_MEDIA = 'application/vnd.github+json';
+// The same JSON with each body also as GitHub's HTML (`body_html`), whose images have addresses
+// that load: a private repository's attachments are signed there.
+const FULL_MEDIA = 'application/vnd.github.full+json';
 
 /** The pull request a github.com link points at, or undefined for any other link. */
 export function parsePullRequestUrl(url: URL): PullRequestRef | undefined {
@@ -114,7 +121,8 @@ function resetTime(response: Response): number {
 async function getJson(
   path: string,
   token: string | undefined,
-  signal: AbortSignal | undefined
+  signal: AbortSignal | undefined,
+  accept: string = JSON_MEDIA
 ): Promise<unknown> {
   const withToken = Boolean(token);
   const limit = rateLimits.get(withToken);
@@ -123,7 +131,7 @@ async function getJson(
   }
   rateLimits.delete(withToken);
   const headers: Record<string, string> = {
-    Accept: 'application/vnd.github+json',
+    Accept: accept,
     'X-GitHub-Api-Version': '2022-11-28',
   };
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -202,7 +210,7 @@ export async function fetchPullRequest(
   signal?: AbortSignal
 ): Promise<PullRequest> {
   const raw = record(
-    await getJson(`/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}`, token, signal)
+    await getJson(`/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}`, token, signal, FULL_MEDIA)
   );
   if (!raw) throw new GitHubError('failed', 200);
   const user = record(raw.user);
@@ -214,6 +222,7 @@ export async function fetchPullRequest(
     state: merged ? 'merged' : raw.state === 'closed' ? 'closed' : 'open',
     draft: raw.draft === true,
     body: text(raw.body),
+    images: imageSources(raw.body_html),
     author: actor(user),
     labels: list(raw.labels).flatMap((label) =>
       typeof label.name === 'string' ? [{ name: label.name, color: text(label.color) }] : []
@@ -314,16 +323,20 @@ const repoPath = (ref: PullRequestRef) => `/repos/${ref.owner}/${ref.repo}`;
 
 export type Paged<T> = { items: T[]; truncated: boolean };
 
-/** A list read page by page (100 at most per page, 10 pages at most), mapped item by item. */
+/**
+ * A list read page by page (100 at most per page, 10 pages at most), mapped item by item; with
+ * `accept`, in another of GitHub's media types.
+ */
 async function fetchPaged<T>(
   path: string,
   token: string | undefined,
   signal: AbortSignal | undefined,
-  map: (item: Json) => T | null
+  map: (item: Json) => T | null,
+  accept?: string
 ): Promise<Paged<T>> {
   const items: T[] = [];
   for (let page = 1; page <= LIST_PAGES; page += 1) {
-    const raw = await getJson(`${path}?per_page=${PAGE_SIZE}&page=${page}`, token, signal);
+    const raw = await getJson(`${path}?per_page=${PAGE_SIZE}&page=${page}`, token, signal, accept);
     if (!Array.isArray(raw)) throw new GitHubError('failed', 200);
     for (const item of list(raw)) {
       const mapped = map(item);
@@ -489,6 +502,8 @@ export type Review = {
   state: ReviewState;
   author: Actor | null;
   body: string;
+  /** Where the body's images load from, out of GitHub's HTML of it. */
+  images: ImageSources;
   commitId: string;
   submittedAt: string;
   url: string;
@@ -506,20 +521,27 @@ export function fetchReviews(
   token: string | undefined,
   signal?: AbortSignal
 ): Promise<Paged<Review>> {
-  return fetchPaged(`${repoPath(ref)}/pulls/${ref.number}/reviews`, token, signal, (item) => {
-    const state = text(item.state);
-    // A pending review is the viewer's own draft, not yet part of the conversation.
-    if (!REVIEW_STATES.has(state)) return null;
-    return {
-      id: count(item.id),
-      state: state as ReviewState,
-      author: actor(record(item.user)),
-      body: text(item.body),
-      commitId: text(item.commit_id),
-      submittedAt: text(item.submitted_at),
-      url: text(item.html_url),
-    };
-  });
+  return fetchPaged(
+    `${repoPath(ref)}/pulls/${ref.number}/reviews`,
+    token,
+    signal,
+    (item) => {
+      const state = text(item.state);
+      // A pending review is the viewer's own draft, not yet part of the conversation.
+      if (!REVIEW_STATES.has(state)) return null;
+      return {
+        id: count(item.id),
+        state: state as ReviewState,
+        author: actor(record(item.user)),
+        body: text(item.body),
+        images: imageSources(item.body_html),
+        commitId: text(item.commit_id),
+        submittedAt: text(item.submitted_at),
+        url: text(item.html_url),
+      };
+    },
+    FULL_MEDIA
+  );
 }
 
 export type ReactionContent =
@@ -549,6 +571,8 @@ export type Comment = {
   id: number;
   author: Actor | null;
   body: string;
+  /** Where the body's images load from, out of GitHub's HTML of it. */
+  images: ImageSources;
   createdAt: string;
   url: string;
   reactions: Reaction[];
@@ -560,6 +584,7 @@ function comment(item: Json): Comment {
     id: count(item.id),
     author: actor(record(item.user)),
     body: text(item.body),
+    images: imageSources(item.body_html),
     createdAt: text(item.created_at),
     url: text(item.html_url),
     reactions: REACTIONS.map((content) => ({ content, count: count(summary?.[content]) })).filter(
@@ -573,7 +598,13 @@ export function fetchConversationComments(
   token: string | undefined,
   signal?: AbortSignal
 ): Promise<Paged<Comment>> {
-  return fetchPaged(`${repoPath(ref)}/issues/${ref.number}/comments`, token, signal, comment);
+  return fetchPaged(
+    `${repoPath(ref)}/issues/${ref.number}/comments`,
+    token,
+    signal,
+    comment,
+    FULL_MEDIA
+  );
 }
 
 export type ReviewComment = Comment & {
@@ -594,18 +625,24 @@ export function fetchReviewComments(
   token: string | undefined,
   signal?: AbortSignal
 ): Promise<Paged<ReviewComment>> {
-  return fetchPaged(`${repoPath(ref)}/pulls/${ref.number}/comments`, token, signal, (item) => ({
-    ...comment(item),
-    path: text(item.path),
-    line: numberOrNull(item.line),
-    originalLine: numberOrNull(item.original_line),
-    side: item.side === 'LEFT' ? 'LEFT' : 'RIGHT',
-    inReplyToId: numberOrNull(item.in_reply_to_id),
-    reviewId: numberOrNull(item.pull_request_review_id),
-    // GitHub clears `position` once the comment's lines are no longer in the diff.
-    outdated: item.position === null || item.position === undefined,
-    commitId: text(item.commit_id),
-  }));
+  return fetchPaged(
+    `${repoPath(ref)}/pulls/${ref.number}/comments`,
+    token,
+    signal,
+    (item) => ({
+      ...comment(item),
+      path: text(item.path),
+      line: numberOrNull(item.line),
+      originalLine: numberOrNull(item.original_line),
+      side: item.side === 'LEFT' ? 'LEFT' : 'RIGHT',
+      inReplyToId: numberOrNull(item.in_reply_to_id),
+      reviewId: numberOrNull(item.pull_request_review_id),
+      // GitHub clears `position` once the comment's lines are no longer in the diff.
+      outdated: item.position === null || item.position === undefined,
+      commitId: text(item.commit_id),
+    }),
+    FULL_MEDIA
+  );
 }
 
 export type Commit = {

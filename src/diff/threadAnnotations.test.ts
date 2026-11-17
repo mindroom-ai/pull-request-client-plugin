@@ -41,6 +41,7 @@ const comment = (id: number, over: Partial<ReviewComment> = {}): ReviewComment =
   id,
   author: { login: 'ann', name: null, avatarUrl: null, url: null, isBot: false },
   body: `Comment ${id}`,
+  images: { byUrl: {}, byAttachment: {} },
   createdAt: `2026-11-01T00:0${id}:00Z`,
   url: `https://github.com/c/${id}`,
   reactions: [],

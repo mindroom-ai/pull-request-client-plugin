@@ -34,6 +34,7 @@ const pull = (over: Partial<PullRequest> = {}): PullRequest => ({
   state: 'open',
   draft: false,
   body: 'Shows a **bold** claim.',
+  images: { byUrl: {}, byAttachment: {} },
   author: null,
   labels: [],
   requestedReviewers: [],

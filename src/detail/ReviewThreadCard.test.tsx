@@ -27,6 +27,7 @@ const comment = (id: number, login: string, over: Partial<ReviewComment> = {}): 
     isBot: false,
   },
   body: `Comment ${id}`,
+  images: { byUrl: {}, byAttachment: {} },
   createdAt: new Date(Date.now() - id * 3_600_000).toISOString(),
   url: `https://github.com/mindroom-ai/mindroom-chat/pull/200#discussion_r${id}`,
   reactions: [],
