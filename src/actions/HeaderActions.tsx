@@ -7,6 +7,7 @@
 import { useEffect, useId, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import FocusTrap from 'focus-trap-react';
 import {
+  IconButton as PlainIconButton,
   Icons,
   Line,
   Overlay,
@@ -306,13 +307,17 @@ export function HeaderActions({
       {primaryControlElement}
       <IconTooltip label={more} align="End">
         {(triggerRef) => (
-          <IconButton
+          // Without a fill, as the room's and the thread banner's menu buttons: beside the plain
+          // Open on GitHub link it weighs no more than the link.
+          <PlainIconButton
             ref={(node: HTMLButtonElement | null) => {
               triggerRef(node);
               moreRef.current = node;
             }}
             size="300"
             radii="300"
+            variant="SurfaceVariant"
+            fill="None"
             className="mrpr-header-more"
             aria-label={more}
             aria-haspopup="menu"
@@ -324,7 +329,7 @@ export function HeaderActions({
             }}
           >
             <MoreHorizontal aria-hidden className="mrpr-button-icon" />
-          </IconButton>
+          </PlainIconButton>
         )}
       </IconTooltip>
       <PopOut
