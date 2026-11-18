@@ -154,7 +154,12 @@ describe('orderPullRequests', () => {
       [3, 1, 0, 2],
     ],
   ] as const)('%s', (_name, answers, order) =>
-    expect(orderPullRequests(answers.map((_answer, index) => index), answers)).toEqual(order)
+    expect(
+      orderPullRequests(
+        answers.map((_answer, index) => index),
+        answers
+      )
+    ).toEqual(order)
   );
 });
 
@@ -293,7 +298,10 @@ describe('ThreadDetails', () => {
       5: pull({ title: 'New open', updated_at: at(2) }),
     });
     const { view, client } = await show(
-      roomWith([1, 2, 3, 4, 5, 6].map((number) => ({ number })), [{ path: 'worktrees/x' }])
+      roomWith(
+        [1, 2, 3, 4, 5, 6].map((number) => ({ number })),
+        [{ path: 'worktrees/x' }]
+      )
     );
     await answered(client, '/pulls/5');
     await view.findByText('New open');

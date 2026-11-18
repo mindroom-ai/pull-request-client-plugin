@@ -402,11 +402,15 @@ describe('ThreadPullRequestsButton', () => {
     await openMenu(view);
     const number = (row: HTMLElement) => row.querySelector('.mrpr-truncate')?.textContent;
     // Number 1 is not answered yet: it comes after the merged one.
-    await vi.waitFor(() => expect(rows(view).map(number)).toEqual(['mindroom-chat #2', 'mindroom-chat #1']));
+    await vi.waitFor(() =>
+      expect(rows(view).map(number)).toEqual(['mindroom-chat #2', 'mindroom-chat #1'])
+    );
     const merged = rows(view)[0]!;
     merged.focus();
     await act(async () => held.release());
-    await vi.waitFor(() => expect(rows(view).map(number)).toEqual(['mindroom-chat #1', 'mindroom-chat #2']));
+    await vi.waitFor(() =>
+      expect(rows(view).map(number)).toEqual(['mindroom-chat #1', 'mindroom-chat #2'])
+    );
     expect(rows(view)[1]).toBe(merged);
     expect(document.activeElement).toBe(merged);
   });

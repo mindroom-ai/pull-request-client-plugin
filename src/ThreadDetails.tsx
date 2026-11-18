@@ -1,5 +1,6 @@
 // A thread's details, in the hover card of its card in the Compact view and as the first group of
-// its menu: each of its pull requests, also those past the two its card shows, then its worktree.
+// its menu: each of its pull requests, also those past the two its card shows, open ones first, then
+// drafts, closed and merged ones, each newest activity first (as GitHub answers), then its worktree.
 // The app draws them as read-only rows, so nothing here is a control or takes the focus. A pull
 // request asks GitHub through the chips' own queries, so its chip's answer is already there. A pull
 // request on the worktree's branch says so, and the worktree then leaves its branch out. The open
@@ -14,6 +15,8 @@ import {
   PullRequestMetaLine,
   pullRequestChecksStatePresentation,
   RelativeTime,
+  resolvePullRequestState,
+  type PullRequestStateKey,
 } from './presentation';
 import { usePullRequestStatus } from './pullRequestStatus';
 import { NO_FOCUS_REFETCH, usePullRequests } from './queries';
@@ -28,6 +31,27 @@ const PATH_MAX = 40;
 // yet is asked for, so moving the pointer over cards spends none of the hourly limit. A refusal is an
 // answer too: without `retryOnMount` every hover would ask again for a pull request GitHub refused.
 export const ANSWERED_ONLY = { ...NO_FOCUS_REFETCH, refetchOnMount: false, retryOnMount: false };
+
+const STATE_RANK: Record<PullRequestStateKey, number> = { open: 0, draft: 1, closed: 2, merged: 3 };
+
+/**
+ * `refs` open first, then drafts, closed and merged ones, each newest activity first; those without
+ * an answer in `answers` (alongside) come last. Ties keep their order.
+ */
+export function orderPullRequests<T>(
+  refs: readonly T[],
+  answers: readonly (Pick<PullRequest, 'state' | 'draft' | 'updatedAt'> | undefined)[]
+): T[] {
+  const rank = (index: number) => {
+    const answer = answers[index];
+    return answer ? STATE_RANK[resolvePullRequestState(answer).key] : 4;
+  };
+  const time = (index: number) => Date.parse(answers[index]?.updatedAt ?? '') || 0;
+  return refs
+    .map((_ref, index) => index)
+    .sort((a, b) => rank(a) - rank(b) || time(b) - time(a))
+    .map((index) => refs[index] as T);
+}
 
 export function ThreadDetails({ room, threadId }: ThreadDetailProps) {
   const { pullRequests, worktree } = useThreadPullRequests(room, threadId);
@@ -57,13 +81,14 @@ export function Details({
   className?: string;
 }) {
   // The same queries as each pull request's below, so they ask GitHub nothing more.
-  const heads = usePullRequests(pullRequests, ANSWERED_ONLY).map((query) => query.data?.headRef);
+  const answers = usePullRequests(pullRequests, ANSWERED_ONLY).map((query) => query.data);
+  const heads = answers.map((pr) => pr?.headRef);
   return (
     <div
       className={className ? `mrpr-root mrpr-details ${className}` : 'mrpr-root mrpr-details'}
       style={pluginRootStyle()}
     >
-      {pullRequests.map((pullRequest) => (
+      {orderPullRequests(pullRequests, answers).map((pullRequest) => (
         <Fragment key={pullRequestUrl(pullRequest)}>
           {item(
             pullRequest,
