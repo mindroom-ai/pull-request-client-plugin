@@ -584,7 +584,6 @@ export function RemovedTokenNote({
   );
 }
 
-/** Removes the token saved in MindRoom, while the requests through MindRoom go with it. */
 /**
  * Removes the token saved in MindRoom, while the requests through MindRoom go with it. With
  * `onRemoved`, its owner is told how the removal ended and says a failure itself.
