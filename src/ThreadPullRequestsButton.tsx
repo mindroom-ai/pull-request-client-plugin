@@ -67,7 +67,8 @@ type MenuProps = {
 function useCombinedState(pullRequests: readonly PullRequestRef[]) {
   // Without a token or MindRoom, GitHub allows 60 requests an hour: the button then asks for
   // nothing and goes by what the chips and the menu's rows read.
-  const anonymous = useGitHubAccess().via === undefined;
+  const access = useGitHubAccess();
+  const anonymous = access.via === undefined;
   const queries = usePullRequests(pullRequests, {
     ...ANSWERED_ONLY,
     ...(anonymous && { enabled: false }),
@@ -78,6 +79,9 @@ function useCombinedState(pullRequests: readonly PullRequestRef[]) {
   );
   const combined = combinedPullRequestState(answered);
   const loading = queries.some((query) => query.status === 'pending');
+  // Until the room's MindRoom server says whether GitHub is connected there, what was read
+  // anonymously may be what the connection sees no more (a private pull request).
+  if (access.pending) return undefined;
   return loading && combined !== 'open' ? undefined : combined;
 }
 

@@ -212,6 +212,33 @@ describe('ThreadPullRequestsButton', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('stays neutral until it knows how it reaches GitHub, then goes by that answer', async () => {
+    // Anonymously a chip read it merged; the GitHub account connected in MindRoom sees it open.
+    readAnonymously(1, 'merged');
+    serve({ 1: pull('open') });
+    const mindroom = githubServer(fetchMock);
+    let answerStatus = () => {};
+    const request = mindroom.server.request;
+    roomServer.current = {
+      origin: mindroom.server.origin,
+      request: vi.fn((path: string, init?: RequestInit) =>
+        path === '/api/github/status'
+          ? new Promise((resolve) => {
+              answerStatus = () => resolve(request(path, init));
+            })
+          : request(path, init)
+      ),
+    };
+    const { view } = await show([{ number: 1 }]);
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 10)));
+    expect(tone(view)).toBeUndefined();
+    await act(async () => answerStatus());
+    await vi.waitFor(() => expect(tone(view)).toBe('mrpr-tone-open'));
+    expect(mindroom.githubRequests().map(({ path }) => path)).toEqual([
+      '/repos/mindroom-ai/mindroom-chat/pulls/1',
+    ]);
+  });
+
   it('leaves out a pull request whose refetch GitHub refused, also one that showed before', async () => {
     localStorage.setItem(TOKEN_KEY, 'ghp_test');
     serve({ 1: pull('open'), 2: pull('merged') });
