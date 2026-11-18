@@ -39,7 +39,8 @@ import { touch } from '@mindroom/e2e/touch';
 // requested when GitHub has not made it yet), with the header's controls on a phone; and without
 // a token, with the GitHub account connected in the room's MindRoom server (which the page also
 // answers), the chips, the panel and a merge go through that server, and the page asks GitHub
-// nothing itself.
+// nothing itself; and at a page zoom of 150 % the panel's text, its diffs and its file tree are
+// half again as large as at 100 %, where they keep their sizes.
 // Set MRPR_SHOTS=<directory> to save the screenshots of the pull request.
 
 const LINK_EVENT = 'com.mindroom.thread.pull_request';
@@ -931,6 +932,9 @@ const ZOOM_FILE = {
 /** The font size of `locator`'s element, in px. */
 const fontSize = (locator: Locator) =>
   locator.evaluate((element) => parseFloat(getComputedStyle(element).fontSize));
+/** The line height of `locator`'s element, in px. */
+const lineHeight = (locator: Locator) =>
+  locator.evaluate((element) => parseFloat(getComputedStyle(element).lineHeight));
 /** The height of `locator`'s element, in px to a hundredth. */
 const height = (locator: Locator) =>
   locator.evaluate((element) => Math.round(element.getBoundingClientRect().height * 100) / 100);
@@ -969,14 +973,14 @@ test("Page Zoom scales the panel's text, its diffs and its file tree", async ({ 
     await panel(page).getByRole('tab', { name: 'Code' }).click();
     // Pierre draws the diff and the tree in open shadow roots, which locators enter.
     const line = panel(page).locator('[data-line]').filter({ hasText: 'ttl = 3600' }).first();
-    const row = panel(page).locator('button[data-type="item"]').filter({ hasText: 'store.ts' });
+    const row = panel(page).getByRole('treeitem', { name: 'store.ts' });
     await expect(line).toBeVisible({ timeout: 30_000 });
     await expect(row).toBeVisible();
     await shot(page, `zoom-${pageZoom}-code`);
     return {
       ...text,
       line: await fontSize(line),
-      lineHeight: await height(line),
+      lineHeight: await lineHeight(line),
       row: await fontSize(row),
       rowHeight: await height(row),
     };

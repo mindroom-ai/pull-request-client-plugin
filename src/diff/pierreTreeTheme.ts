@@ -35,8 +35,9 @@ export const PIERRE_TREE_UNSAFE_CSS = `
   [data-truncate-content='visible'] { overflow: hidden; text-overflow: ellipsis; }
   [data-truncate-marker] { display: none; }
   button[data-type='item'], button[data-type='item']::before { border-radius: 0.375rem; }
-  /* Its icons are 16px by their attributes. */
+  /* Its icons are 16px by their attributes, the dot of a folder with changes 6px. */
   svg[data-icon-name] { width: 1rem; height: 1rem; }
+  svg[data-icon-name='file-tree-icon-dot'] { width: 0.375rem; height: 0.375rem; }
   /* A folder's changed lines keep their width at the row's end; its name shrinks to its ellipsis. */
   [data-item-section='decoration'] { flex: none; margin-inline-start: auto; }
   /* Equal digit widths, right-aligned. */
