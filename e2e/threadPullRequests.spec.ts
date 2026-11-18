@@ -23,12 +23,13 @@ import { touch } from '@mindroom/e2e/touch';
 // the room state events MindRoom's backend plugin writes; here the room's creator writes them. A
 // thread's card in the Compact view shows a chip per pull request, two at most (one on a phone) and
 // the count of the rest; a click on a chip opens the thread and the pull request in the side
-// panel; the strip under the room header has the thread's chips as buttons, the panel's pressed;
-// a mouse that rests on a chip, on a card or in the strip, opens its hover card beside it;
+// panel; the open thread's banner has one button for its pull requests, whose menu lists them and
+// opens each in the panel, the panel's marked current; a mouse that rests on a chip on a card
+// opens its hover card beside it;
 // a link written or cleared while the room is open shows on its card at once, also after a gap in
-// the room's sync; the room's six threads leave the SDK's emitters within their listener limit; and
+// the room's sync; the room's seven threads leave the SDK's emitters within their listener limit; and
 // a thread's worktree, which MindRoom's `thread-worktree` backend plugin writes, shows as its
-// branch on its card and in the strip until it is cleared; a thread's pull requests show as its
+// branch on its card and in the open thread's pull requests menu until it is cleared; a thread's pull requests show as its
 // details in the card's hover card and, on a phone, in the menu a long press opens; and a viewer
 // who can write merges a pull request from the panel's header with two clicks (and is asked before
 // its branch goes), sees GitHub's reason for a refused merge, chooses the merge method that the
@@ -189,6 +190,40 @@ const PULLS = {
     author: 'acme-builder',
     body: 'Retries a failed delivery five times with exponential backoff and logs each attempt.',
     labels: ['backend'],
+  },
+  // Three more, so that a thread can link eleven, as a long program does.
+  auditLog: {
+    repo: 'api',
+    number: 91,
+    title: 'Write an audit log entry for each admin action',
+    state: 'open',
+    checks: 'passing',
+    branch: 'admin-audit-log',
+    size: [204, 12, 8],
+    author: 'acme-builder',
+    body: 'Each admin action writes who, what and when to the audit log table.',
+  },
+  avatarCache: {
+    repo: 'webapp',
+    number: 425,
+    title: 'Cache avatars in the service worker',
+    state: 'open',
+    checks: 'running',
+    branch: 'avatar-cache',
+    size: [58, 6, 2],
+    author: 'acme-builder',
+    body: 'Avatars load from the cache first and refresh in the background.',
+  },
+  exportCsv: {
+    repo: 'api',
+    number: 94,
+    title: 'Export a workspace as CSV',
+    state: 'draft',
+    checks: 'none',
+    branch: 'export-csv',
+    size: [133, 0, 4],
+    author: 'acme-builder',
+    body: 'A first export of the messages as CSV, behind a flag.',
   },
 } satisfies Record<string, Pull>;
 const ALL_PULLS: Pull[] = Object.values(PULLS);
@@ -560,6 +595,16 @@ type Thread = {
 };
 
 const THREADS = {
+  // First, so its card is the oldest and leaves the others where they were: a long program with
+  // every pull request linked, for the open thread's pull requests menu.
+  program: {
+    topic: 'Platform hardening program',
+    replies: [
+      ['agent', 'Eleven pull requests so far, across the webapp and the API.'],
+      ['lead', 'Keep them in one thread so I can review them in order.'],
+    ],
+    pulls: ALL_PULLS,
+  },
   search: {
     topic: 'Search is slow in large workspaces',
     replies: [
@@ -714,9 +759,26 @@ const card = (page: Page, root: string) =>
   page.locator(`[data-compact-room-view] [data-thread-root-id="${root}"]`);
 const cardChips = (page: Page, root: string) => card(page, root).locator('.mrpr-chip');
 const cardMore = (page: Page, root: string) => card(page, root).locator('.mrpr-chip-more');
-const strip = (page: Page) => page.getByRole('group', { name: 'Pull requests of this thread' });
 const panel = (page: Page) => page.getByRole('region', { name: 'Pull request', exact: true });
 const banner = (page: Page) => page.locator('[data-thread-context-banner]');
+/** The open thread's pull requests button, in its banner, and the menu it opens. */
+const prButton = (page: Page) => banner(page).locator('.mrpr-thread-button');
+const prMenu = (page: Page) => page.getByRole('menu', { name: /^(Pull requests?|Worktree)\b/ });
+const prItems = (page: Page) => prMenu(page).getByRole('menuitem');
+/** Opens the menu of the open thread's pull requests and gives its items. */
+const openPrMenu = async (page: Page) => {
+  await prButton(page).click();
+  await expect(prMenu(page)).toBeVisible();
+  return prItems(page);
+};
+/** Expects `items` to name `pulls` in order, by their repository and number, as the details do. */
+const expectItems = async (items: Locator, pulls: Pull[]) => {
+  for (const [index, pull] of pulls.entries()) {
+    await expect(items.nth(index).locator('.mrpr-truncate').first()).toHaveText(
+      `${pull.repo} #${pull.number}`
+    );
+  }
+};
 
 /**
  * Expects `chips` to be the chips of `pulls`, in order, each with its repository's name, its
@@ -789,7 +851,7 @@ test("each thread's card shows the chips of its pull requests", async ({ page })
   expect(warnings).toEqual([]);
 });
 
-test('a chip on a card opens the thread and its pull request; the strip switches between them', async ({
+test("a chip on a card opens the thread and its pull request; the banner's menu switches between them", async ({
   page,
 }) => {
   test.setTimeout(4 * 60_000);
@@ -800,21 +862,29 @@ test('a chip on a card opens the thread and its pull request; the strip switches
   await expectChips(cardChips(page, roots.sessions), [sessionStore, tokenEndpoint]);
 
   await cardChips(page, roots.sessions).first().click();
-  await expect(banner(page)).toContainText(THREADS.sessions.topic, { timeout: 30_000 });
+  // The banner's title gives the pull requests button room, so it may show only its start.
+  await expect(banner(page)).toContainText('Move session storage', { timeout: 30_000 });
   await expect(panel(page).locator('.mrpr-panel-title')).toHaveText(sessionStore.title, {
     timeout: 30_000,
   });
 
-  // Under the room header, the thread's pull requests as buttons, the panel's pressed.
-  const buttons = strip(page).getByRole('button');
-  await expectChips(buttons, [sessionStore, tokenEndpoint]);
-  await expect(buttons.nth(0)).toHaveAttribute('aria-pressed', 'true');
-  await expect(buttons.nth(1)).toHaveAttribute('aria-pressed', 'false');
+  // In the thread's banner, one button whose menu lists its pull requests, the panel's current.
+  await expect(prButton(page)).toHaveAttribute('aria-label', 'Pull requests (2)');
+  await expect(prButton(page)).toHaveText('2');
+  let items = await openPrMenu(page);
+  await expect(items).toHaveCount(2);
+  await expectItems(items, [sessionStore, tokenEndpoint]);
+  await expect(items.nth(0)).toHaveAttribute('aria-current', 'true');
+  await expect(items.nth(1)).not.toHaveAttribute('aria-current', 'true');
 
-  await buttons.nth(1).click();
+  await items.nth(1).click();
+  await expect(prMenu(page)).toHaveCount(0);
   await expect(panel(page).locator('.mrpr-panel-title')).toHaveText(tokenEndpoint.title);
-  await expect(buttons.nth(0)).toHaveAttribute('aria-pressed', 'false');
-  await expect(buttons.nth(1)).toHaveAttribute('aria-pressed', 'true');
+  items = await openPrMenu(page);
+  await expect(items.nth(0)).not.toHaveAttribute('aria-current', 'true');
+  await expect(items.nth(1)).toHaveAttribute('aria-current', 'true');
+  await page.keyboard.press('Escape');
+  await expect(prMenu(page)).toHaveCount(0);
   await expect(
     panel(page).getByRole('button', { name: 'Open checks: All checks have passed' })
   ).toBeVisible();
@@ -826,6 +896,187 @@ test('a chip on a card opens the thread and its pull request; the strip switches
 });
 
 const hoverCard = (page: Page) => page.getByRole('tooltip');
+
+/** Opens the program thread, with all eleven pull requests, from its card. */
+const openProgram = async (page: Page) => {
+  const programCard = card(page, roots.program);
+  await programCard.scrollIntoViewIfNeeded();
+  await programCard.getByText(THREADS.program.topic).click();
+  // The banner's title gives the button room, so on a phone it shows only its start.
+  await expect(banner(page)).toContainText('Platform', { timeout: 30_000 });
+  await expect(page.getByText(THREADS.program.replies[1][1], { exact: true })).toBeVisible();
+  await expect(prButton(page)).toBeVisible({ timeout: 30_000 });
+};
+
+/** The box and look of a banner button and of its icon, to compare the menu's with More's. */
+const buttonLook = (button: Locator) =>
+  button.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    const icon = element.querySelector('svg')?.getBoundingClientRect();
+    return {
+      width: box.width,
+      height: box.height,
+      middle: box.top + box.height / 2,
+      radius: style.borderRadius,
+      background: style.backgroundColor,
+      color: style.color,
+      icon: icon ? [icon.width, icon.height] : undefined,
+    };
+  });
+
+/** Expects the open menu inside the window, its items scrolling inside it. */
+const expectMenuInWindow = async (page: Page) => {
+  const box = await prMenu(page).boundingBox();
+  const window = page.viewportSize();
+  if (!box || !window) throw new Error('No box for the menu');
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.y).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(window.width);
+  expect(box.y + box.height).toBeLessThanOrEqual(window.height);
+  const rows = prMenu(page).locator('.mrpr-thread-menu-rows');
+  const { scrolls, before } = await rows.evaluate((element) => ({
+    scrolls: element.scrollHeight > element.clientHeight,
+    before: element.scrollTop,
+  }));
+  expect(scrolls).toBe(true);
+  await rows.evaluate((element) => element.scrollBy(0, 400));
+  expect(await rows.evaluate((element) => element.scrollTop)).toBeGreaterThan(before);
+  await rows.evaluate((element) => element.scrollTo(0, 0));
+};
+
+test("the open thread's pull requests are one button in its banner, whose menu lists and opens them", async ({
+  page,
+}) => {
+  test.setTimeout(4 * 60_000);
+  const unanswered = await stubGitHub(page);
+  const warnings = listenerWarnings(page);
+  await openRoom(page);
+  await writeWorktree(roots.program, {
+    path: 'worktrees/platform-hardening',
+    branch: 'platform-hardening',
+    set_by: agent.userId,
+    set_at: new Date().toISOString(),
+  });
+  await openProgram(page);
+  const button = prButton(page);
+  const more = banner(page).getByRole('button', { name: 'Thread options' });
+  await expect(button).toHaveAttribute('aria-label', 'Pull requests (11)');
+  await expect(button).toHaveText('11');
+  // No strip under the room header any more.
+  await expect(page.locator('.mrpr-thread-strip')).toHaveCount(0);
+
+  // As tall, as round and as tinted as More beside it, on its line, with an icon as large.
+  const ours = await buttonLook(button);
+  const theirs = await buttonLook(more);
+  console.log(`[prmenu] button ${JSON.stringify(ours)} more ${JSON.stringify(theirs)}`);
+  expect(ours.height).toBeCloseTo(theirs.height, 1);
+  expect(ours.middle).toBeCloseTo(theirs.middle, 1);
+  expect(ours.radius).toBe(theirs.radius);
+  expect(ours.background).toBe(theirs.background);
+  expect(ours.color).toBe(theirs.color);
+  expect(ours.icon).toEqual(theirs.icon);
+  expect(ours.width).toBeGreaterThanOrEqual(theirs.width);
+  await shot(page, 'menu-button');
+
+  // Its tooltip on hover and on keyboard focus.
+  const tooltip = page.getByRole('tooltip').filter({ hasText: 'Pull requests (11)' });
+  await button.hover();
+  await expect(tooltip).toBeVisible();
+  await shotBothThemes(page, 'menu-tooltip');
+  await page.mouse.move(0, 0);
+  await expect(tooltip).toHaveCount(0);
+  await more.focus();
+  await page.keyboard.press('Shift+Tab');
+  await expect(button).toBeFocused();
+  await expect(tooltip).toBeVisible();
+  await page.keyboard.press('Tab');
+  await expect(tooltip).toHaveCount(0);
+
+  // The menu: every pull request in the order linked, then the worktree; inside the window, its
+  // items scrolling inside it.
+  const items = await openPrMenu(page);
+  await expect(button).toHaveAttribute('aria-expanded', 'true');
+  await expect(tooltip).toHaveCount(0);
+  await expect(items).toHaveCount(ALL_PULLS.length + 1);
+  await expectItems(items, ALL_PULLS);
+  await expect(items.last()).toHaveAttribute('aria-disabled', 'true');
+  await expect(items.last()).toContainText('worktrees/platform-hardening');
+  await expect(items.nth(0)).toContainText(PULLS.sessionStore.title, { timeout: 30_000 });
+  await expectMenuInWindow(page);
+  await shotBothThemes(page, 'menu-open');
+
+  // The arrow keys move between its items; Escape closes it and gives the button the focus.
+  await page.keyboard.press('ArrowDown');
+  await expect(items.nth(0)).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(items.nth(1)).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(prMenu(page)).toHaveCount(0);
+  await expect(button).toBeFocused();
+  // A click outside closes it too.
+  await openPrMenu(page);
+  await page.mouse.click(DESKTOP.width / 2, DESKTOP.height - 120);
+  await expect(prMenu(page)).toHaveCount(0);
+
+  // An item opens its pull request in the panel and closes the menu; opened again, the menu marks
+  // that item current.
+  const { checkoutClock } = PULLS;
+  const index = ALL_PULLS.indexOf(checkoutClock);
+  await (await openPrMenu(page)).nth(index).click();
+  await expect(prMenu(page)).toHaveCount(0);
+  await expect(panel(page).locator('.mrpr-panel-title')).toHaveText(checkoutClock.title, {
+    timeout: 30_000,
+  });
+  await expect(panel(page).getByText(/^Loading/)).toHaveCount(0);
+  await shotBothThemes(page, 'menu-panel');
+  await openPrMenu(page);
+  await expect(items.nth(index)).toHaveAttribute('aria-current', 'true');
+  await expect(prMenu(page).locator('[aria-current="true"]')).toHaveCount(1);
+  await shot(page, 'menu-current', { keepPointer: true });
+  await page.keyboard.press('Escape');
+  await writeWorktree(roots.program, {});
+  expect(unanswered).toEqual([]);
+  expect(warnings).toEqual([]);
+});
+
+test("on a phone the open thread's pull requests menu fits the window and opens the panel", async ({
+  browser,
+  baseURL,
+}) => {
+  test.setTimeout(4 * 60_000);
+  const context = await browser.newContext({ baseURL, ...PHONE_CONTEXT });
+  const page = await context.newPage();
+  try {
+    const unanswered = await stubGitHub(page);
+    const warnings = listenerWarnings(page);
+    await openRoom(page);
+    await openProgram(page);
+    await expect(prButton(page)).toHaveText('11');
+    const ours = await buttonLook(prButton(page));
+    const theirs = await buttonLook(banner(page).getByRole('button', { name: 'Thread options' }));
+    console.log(`[prmenu] phone button ${JSON.stringify(ours)} more ${JSON.stringify(theirs)}`);
+    expect(ours.height).toBeCloseTo(theirs.height, 1);
+    expect(ours.middle).toBeCloseTo(theirs.middle, 1);
+    await shot(page, 'phone-menu-button');
+    const items = await openPrMenu(page);
+    await expect(items).toHaveCount(ALL_PULLS.length);
+    await expect(items.nth(0)).toContainText(PULLS.sessionStore.title, { timeout: 30_000 });
+    await expectMenuInWindow(page);
+    await shot(page, 'phone-menu-open');
+    await items.nth(1).tap();
+    await expect(prMenu(page)).toHaveCount(0);
+    await expect(panel(page).locator('.mrpr-panel-title')).toHaveText(PULLS.tokenEndpoint.title, {
+      timeout: 30_000,
+    });
+    await expect(panel(page).getByText(/^Loading/)).toHaveCount(0);
+    await shot(page, 'phone-menu-panel');
+    expect(unanswered).toEqual([]);
+    expect(warnings).toEqual([]);
+  } finally {
+    await context.close();
+  }
+});
 
 /**
  * Expects the hover card inside the window and beside `chip`: below a chip in the upper half of
@@ -868,7 +1119,7 @@ const shotBothThemes = async (page: Page, name: string) => {
   await expect(page.locator('html')).toHaveAttribute('data-theme-kind', 'light');
 };
 
-test("a chip's hover card shows its pull request, on a card and in the strip", async ({ page }) => {
+test("a chip's hover card shows its pull request on a card", async ({ page }) => {
   test.setTimeout(4 * 60_000);
   const unanswered = await stubGitHub(page);
   const warnings = listenerWarnings(page);
@@ -903,22 +1154,6 @@ test("a chip's hover card shows its pull request, on a card and in the strip", a
   await expectBeside(page, release);
   await shot(page, 'hover-card-closed', { keepPointer: true });
   await page.mouse.move(0, 0);
-
-  // In the strip of the open thread, with the reviewer still asked.
-  await chips.first().click();
-  await expect(banner(page)).toContainText(THREADS.sessions.topic, { timeout: 30_000 });
-  const buttons = strip(page).getByRole('button');
-  await expectChips(buttons, [sessionStore, tokenEndpoint]);
-  await buttons.first().hover();
-  await expect(hoverCard(page)).toContainText(sessionStore.title);
-  await expect(hoverCard(page).locator('.mrpr-hover-reviews')).toContainText(
-    PULLS.sessionStore.reviewers[0]
-  );
-  // The panel already shows this chip's pull request, so its card offers no click.
-  await expect(buttons.first()).toHaveAttribute('aria-pressed', 'true');
-  await expect(hoverCard(page).locator('.mrpr-hover-hint')).toHaveCount(0);
-  await expectBeside(page, buttons.first());
-  await shotBothThemes(page, 'hover-strip');
   expect(unanswered).toEqual([]);
   expect(warnings).toEqual([]);
 });
@@ -1285,7 +1520,7 @@ test("a link written after a gap in the room's sync still shows on its card", as
   expect(warnings).toEqual([]);
 });
 
-test("a thread's worktree shows as its branch on its card and in the strip until it is cleared", async ({
+test("a thread's worktree shows as its branch on its card and in the banner's menu until it is cleared", async ({
   page,
 }) => {
   test.setTimeout(4 * 60_000);
@@ -1326,20 +1561,23 @@ test("a thread's worktree shows as its branch on its card and in the strip until
   await writeWorktree(roots.webhooks, {});
   await expect(branch).toHaveCount(0);
 
-  // A click on the branch opens the thread, as anywhere else on the card; the strip under the room
-  // header shows the branch alone, as text.
+  // A click on the branch opens the thread, as anywhere else on the card; its banner's button,
+  // named by the worktree, lists the worktree alone, as an item that does nothing.
   await writeWorktree(roots.webhooks, { ...worktree, set_at: new Date().toISOString() });
   await branch.click();
   await expect(banner(page)).toContainText(THREADS.webhooks.topic, { timeout: 30_000 });
-  const stripBranch = strip(page).locator('.mrpr-branch-chip');
-  await expect(stripBranch).toHaveText(worktree.branch);
-  await expect(stripBranch).toHaveAttribute('aria-label', label);
-  await expect(strip(page).getByRole('button')).toHaveCount(0);
+  await expect(prButton(page)).toHaveAttribute('aria-label', 'Worktree');
+  await expect(prButton(page)).toHaveText('');
+  const items = await openPrMenu(page);
+  await expect(items).toHaveCount(1);
+  await expect(items.first()).toHaveAttribute('aria-disabled', 'true');
+  await expect(items.first()).toContainText(worktree.path);
   await expect(page.getByText(THREADS.webhooks.replies[1][1], { exact: true })).toBeVisible();
-  await shot(page, 'branch-strip');
+  await shot(page, 'branch-menu', { keepPointer: true });
+  await page.keyboard.press('Escape');
 
   await writeWorktree(roots.webhooks, {});
-  await expect(strip(page)).toHaveCount(0);
+  await expect(prButton(page)).toHaveCount(0);
   expect(await page.evaluate(() => 'mrprSamePage' in window)).toBe(true);
   expect(unanswered).toEqual([]);
   expect(warnings).toEqual([]);
@@ -1519,7 +1757,7 @@ test('the merge method chosen in the menu names Merge, and holds for the next pu
   await expect(menu).toHaveCount(0);
 
   // The thread's other pull request, whose checks still run, auto-merges with it.
-  await strip(page).getByRole('button').nth(0).click();
+  await (await openPrMenu(page)).nth(0).click();
   await expect(panel(page).locator('.mrpr-panel-title')).toHaveText(PULLS.sessionStore.title);
   await expect(panel(page).getByRole('button', { name: 'Auto-merge (squash)' })).toBeVisible({
     timeout: 30_000,

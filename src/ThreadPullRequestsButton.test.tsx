@@ -97,9 +97,15 @@ describe('ThreadPullRequestsButton', () => {
     expect(shown.getAttribute('aria-expanded')).toBe('false');
   });
 
-  it('names a thread with only a worktree by it', async () => {
+  it('names a thread with only a worktree by it, and lists the worktree alone', async () => {
     const { view } = await show([], [WORKTREE]);
     expect(trigger(view).getAttribute('aria-label')).toBe('Worktree');
+    expect(trigger(view).textContent).toBe('');
+    await openMenu(view);
+    expect(rows(view)).toHaveLength(1);
+    expect(rows(view)[0]?.textContent).toContain('worktrees/redis-sessions');
+    // Something the menu's focus trap can hold, or the trap throws and the button goes.
+    expect(rows(view)[0]?.tabIndex).toBe(0);
   });
 
   it('asks GitHub nothing while the menu is closed', async () => {

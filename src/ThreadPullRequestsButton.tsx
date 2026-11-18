@@ -55,13 +55,14 @@ export const ThreadPullRequestsButton: ThreadHeaderSlotComponent = ({ room, thre
     setAnchor(undefined);
   };
   const item = (pullRequest: PullRequestRef | undefined, rows: ReactNode) => {
-    // The worktree: an item a reader hears among the others, which does nothing.
+    // The worktree: an item a reader hears among the others, which does nothing. It takes the
+    // focus as the others do, so a menu of it alone still has something its focus trap can hold.
     if (pullRequest === undefined) {
       return (
         <div
           role="menuitem"
           aria-disabled="true"
-          tabIndex={-1}
+          tabIndex={0}
           className="mrpr-thread-menu-item mrpr-thread-menu-worktree"
         >
           {rows}
@@ -100,7 +101,7 @@ export const ThreadPullRequestsButton: ThreadHeaderSlotComponent = ({ room, thre
 
   return (
     <>
-      <IconTooltip label={label}>
+      <IconTooltip label={label} hidden={anchor !== undefined}>
         {(triggerRef) => (
           // As the banner draws its own buttons: folds' button without a fill (styles.css sizes it).
           <IconButton
