@@ -1,6 +1,6 @@
 // A pull request in one line: its state's icon, its number and the mark of its checks, with a card
 // of its details while a mouse rests on it. A thread's card draws it as a span inside the card's
-// button; the strip under the room header as a button.
+// button.
 import { useEffect, useId, useState } from 'react';
 import { usePluginTranslation } from '@mindroom/client-sdk/core';
 import { GitPullRequestArrow } from 'lucide-react';
@@ -27,16 +27,11 @@ function useOnScreenOnce(element: Element | null): boolean {
 export function PullRequestChip({
   pullRequest,
   showRepository,
-  selected,
-  onSelect,
   opensPanel = false,
 }: {
   pullRequest: PullRequestRef;
   /** Whether the repository's name shows before the number. */
   showRepository: boolean;
-  selected?: boolean;
-  /** Given, the chip is a button that calls it; absent, the chip is a span for a thread card. */
-  onSelect?: () => void;
   /** Whether a click on a thread card's chip opens the pull request in the side panel. */
   opensPanel?: boolean;
 }) {
@@ -58,43 +53,25 @@ export function PullRequestChip({
     : t('chip.labelWithoutState', values);
   const name = pr?.title ? `${label}\n${pr.title}` : label;
   // The hover card stands in for a title, which would show a second tooltip, a slow one.
-  const hoverCardOpen = useHoverCard(element, onSelect !== undefined);
+  const hoverCardOpen = useHoverCard(element);
   const hoverCardId = useId();
   // The chip is drawn outside the card and the panel, so it sets the variables it draws with.
-  const root = {
-    ref: setElement,
-    className: selected ? 'mrpr-chip mrpr-chip-selected' : 'mrpr-chip',
-    style: pluginRootStyle(),
-    'aria-label': name,
-  };
-  const content = (
-    <>
-      <StateIcon aria-hidden className={`mrpr-icon ${tone}`} />
-      {showRepository ? <span className="mrpr-chip-repo">{pullRequest.repo}</span> : null}
-      <span>#{pullRequest.number}</span>
-      {mark ? (
-        <mark.Icon aria-hidden className={`mrpr-icon mrpr-chip-checks ${mark.toneClassName}`} />
-      ) : null}
-    </>
-  );
   return (
     <>
-      {onSelect ? (
-        <button
-          {...root}
-          type="button"
-          aria-pressed={selected}
-          // The card chip's span, inside the thread card's button, is described by nothing.
-          aria-describedby={hoverCardOpen ? hoverCardId : undefined}
-          onClick={onSelect}
-        >
-          {content}
-        </button>
-      ) : (
-        <span {...root} role="img">
-          {content}
-        </span>
-      )}
+      <span
+        ref={setElement}
+        className="mrpr-chip"
+        style={pluginRootStyle()}
+        aria-label={name}
+        role="img"
+      >
+        <StateIcon aria-hidden className={`mrpr-icon ${tone}`} />
+        {showRepository ? <span className="mrpr-chip-repo">{pullRequest.repo}</span> : null}
+        <span>#{pullRequest.number}</span>
+        {mark ? (
+          <mark.Icon aria-hidden className={`mrpr-icon mrpr-chip-checks ${mark.toneClassName}`} />
+        ) : null}
+      </span>
       {hoverCardOpen && element ? (
         <PullRequestHoverCard
           id={hoverCardId}
@@ -103,8 +80,7 @@ export function PullRequestChip({
           pr={pr}
           error={error}
           checks={checkList}
-          // The panel already shows a pressed chip's pull request.
-          opensPanel={(onSelect !== undefined && !selected) || opensPanel}
+          opensPanel={opensPanel}
         />
       ) : null}
     </>

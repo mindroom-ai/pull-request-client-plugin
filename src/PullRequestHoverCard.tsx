@@ -39,11 +39,10 @@ const SHOWN_REVIEWERS = 6;
 
 /**
  * Whether the card of the chip `trigger` is open: from `HOVER_CARD_DELAY_MS` after a mouse came to
- * rest on it, or after the keyboard focused it (a `focusable` chip, a button), until the pointer
- * leaves, a click, a touch, Escape or the focus leaving. A mouse opens it only on a screen that
+ * rest on it, until the pointer leaves, a click, a touch or Escape. A mouse opens it only on a screen that
  * hovers with a fine pointer, and a tap never does: browsers send a mouseenter with each tap.
  */
-export function useHoverCard(trigger: HTMLElement | null, focusable: boolean): boolean {
+export function useHoverCard(trigger: HTMLElement | null): boolean {
   const [open, setOpen] = useState(false);
   useEffect(() => {
     if (!trigger) return undefined;
@@ -72,22 +71,12 @@ export function useHoverCard(trigger: HTMLElement | null, focusable: boolean): b
     const onMouseEnter = () => {
       if (byMouse()) show(byMouse);
     };
-    // A click or a tap focuses a button without the focus ring; the keyboard's focus shows it.
-    const onFocus = () => {
-      if (trigger.matches(':focus-visible')) show(() => true);
-    };
     const listeners: [string, EventListener][] = [
       ['pointerenter', onPointer as EventListener],
       ['pointerdown', onPointer as EventListener],
       ['mouseenter', onMouseEnter],
       ['mouseleave', hide],
       ['click', hide],
-      ...(focusable
-        ? ([
-            ['focus', onFocus],
-            ['blur', hide],
-          ] as [string, EventListener][])
-        : []),
     ];
     for (const [type, listener] of listeners) trigger.addEventListener(type, listener);
     return () => {
@@ -95,7 +84,7 @@ export function useHoverCard(trigger: HTMLElement | null, focusable: boolean): b
       document.removeEventListener('keydown', onKeyDown);
       for (const [type, listener] of listeners) trigger.removeEventListener(type, listener);
     };
-  }, [trigger, focusable]);
+  }, [trigger]);
   return open;
 }
 

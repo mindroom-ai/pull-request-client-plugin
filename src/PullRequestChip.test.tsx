@@ -299,25 +299,6 @@ describe('PullRequestChip', () => {
     expect(chip.hasAttribute('tabindex')).toBe(false);
     expect(view.container.querySelector('button, a, [tabindex]')).toBeNull();
   });
-
-  it('is a button that calls onSelect', async () => {
-    serve(pull({ state: 'closed' }));
-    const onSelect = vi.fn();
-    const { view } = await show({ onSelect });
-    const chip = await view.findByRole('button', { name: /: Closed/ });
-    chip.click();
-    expect(onSelect).toHaveBeenCalledTimes(1);
-    expect(chip.hasAttribute('aria-pressed')).toBe(false);
-    expect(chip.classList.contains('mrpr-chip-selected')).toBe(false);
-  });
-
-  it('is pressed and ringed when selected', async () => {
-    serve(pull({ state: 'closed' }));
-    const { view } = await show({ onSelect: vi.fn(), selected: true });
-    const chip = await view.findByRole('button', { name: /: Closed/ });
-    expect(chip.getAttribute('aria-pressed')).toBe('true');
-    expect(chip.classList.contains('mrpr-chip-selected')).toBe(true);
-  });
 });
 
 const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
@@ -387,7 +368,7 @@ const card = () => document.querySelector<HTMLElement>('[role="tooltip"]');
 const openCard = async (props: Partial<ComponentProps<typeof PullRequestChip>> = {}) => {
   pointer(true);
   const shown = await show(props);
-  const chip = await shown.view.findByRole(props.onSelect ? 'button' : 'img', { name: /: / });
+  const chip = await shown.view.findByRole('img', { name: /: / });
   hover(chip);
   const tooltip = await shown.view.findByRole('tooltip');
   return { ...shown, chip, tooltip };
@@ -457,39 +438,6 @@ describe('PullRequestChip hover card', () => {
     await vi.waitFor(() => expect(card()).toBeNull());
   });
 
-  it('opens on a strip chip that the keyboard focused, and closes when it loses the focus', async () => {
-    serve(pull());
-    pointer(true);
-    const { view } = await show({ onSelect: () => {} });
-    const chip = await view.findByRole('button', { name: /: Open/ });
-    chip.focus();
-    await vi.waitFor(() => expect(card()).not.toBeNull());
-    chip.blur();
-    await vi.waitFor(() => expect(card()).toBeNull());
-  });
-
-  it('opens for no focus without the focus ring, as a click or a tap gives', async () => {
-    serve(pull());
-    pointer(true);
-    const { view } = await show({ onSelect: () => {} });
-    const chip = await view.findByRole('button', { name: /: Open/ });
-    // jsdom matches :focus-visible on any focus; a browser does not on a click's or a tap's.
-    const matches = chip.matches.bind(chip);
-    chip.matches = (selector: string) => selector !== ':focus-visible' && matches(selector);
-    chip.focus();
-    await settle();
-    expect(card()).toBeNull();
-  });
-
-  it('stays closed after Escape that came just after the keyboard focused the chip', async () => {
-    serve(pull());
-    const { chip } = await openCard({ onSelect: () => {} });
-    chip.focus();
-    escape();
-    await settle();
-    expect(card()).toBeNull();
-  });
-
   it('opens for no Escape pressed while it waits to open', async () => {
     serve(pull());
     pointer(true);
@@ -526,19 +474,6 @@ describe('PullRequestChip hover card', () => {
     pointer(false);
     await settle();
     expect(card()).toBeNull();
-  });
-
-  it.each([
-    ['after a touch on it', true, true],
-    ['where the pointer cannot hover', false, false],
-  ])('opens on a strip chip that the keyboard focused %s', async (_, fine, touched) => {
-    serve(pull());
-    pointer(fine);
-    const { view } = await show({ onSelect: () => {} });
-    const chip = await view.findByRole('button', { name: /: Open/ });
-    if (touched) touch(chip);
-    chip.focus();
-    await vi.waitFor(() => expect(card()).not.toBeNull());
   });
 
   it('opens above a chip in the lower half of the window, held there by its bottom edge', async () => {
@@ -701,29 +636,10 @@ describe('PullRequestChip hover card', () => {
     );
   });
 
-  it.each([
-    ['a strip chip', { onSelect: () => {} }],
-    ['a card chip with a side panel', { opensPanel: true }],
-  ])('tells that a click on %s opens the side panel', async (_, props) => {
+  it('tells that a click on a card chip with a side panel opens the side panel', async () => {
     serve(full());
-    const { tooltip } = await openCard(props);
+    const { tooltip } = await openCard({ opensPanel: true });
     expect(text(tooltip.querySelector('.mrpr-hover-hint'))).toBe('Click to open in the side panel');
-  });
-
-  it('says nothing of the side panel on a pressed strip chip, whose pull request it shows', async () => {
-    serve(full());
-    const { tooltip } = await openCard({ onSelect: () => {}, selected: true });
-    expect(tooltip.querySelector('.mrpr-hover-hint')).toBeNull();
-  });
-
-  it('describes a strip chip by its card while the card is open', async () => {
-    serve(full());
-    const { chip, tooltip } = await openCard({ onSelect: () => {} });
-    expect(tooltip.id).not.toBe('');
-    expect(chip.getAttribute('aria-describedby')).toBe(tooltip.id);
-    chip.dispatchEvent(new MouseEvent('mouseleave'));
-    await vi.waitFor(() => expect(card()).toBeNull());
-    expect(chip.hasAttribute('aria-describedby')).toBe(false);
   });
 
   it('describes no card chip by its card, which is inside the thread card button', async () => {

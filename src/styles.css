@@ -1659,20 +1659,6 @@ button.mrpr-timeline-row:hover .mrpr-timeline-title {
   color: var(--pr-muted);
   text-overflow: ellipsis;
 }
-.mrpr-chip-selected {
-  border-color: var(--pr-primary);
-  box-shadow: 0 0 0 1px var(--pr-primary);
-}
-button.mrpr-chip {
-  cursor: pointer;
-}
-button.mrpr-chip:hover {
-  background: var(--pr-hover);
-}
-button.mrpr-chip:focus-visible {
-  outline: 2px solid var(--pr-primary);
-  outline-offset: 2px;
-}
 
 /* A thread's pull requests on its card, in the card's metadata row: a row that keeps its size and
    never wraps. Each chip sits in an element of its own that takes its click and draws no box. */
@@ -1819,7 +1805,7 @@ a.mrpr-thread-menu-item:is(:hover, :focus-visible, :active) .mrpr-details-title 
   border-block-start-color: var(--pr-border);
   border-radius: 0;
 }
-/* The pull request the open panel shows, marked as the strip marked its chip. */
+/* The pull request the open panel shows, ringed in the primary. */
 /* After the highlight and as specific, so its rim stays a ring of the primary under the pointer. */
 button.mrpr-thread-menu-item[aria-current='true'] {
   border-color: var(--pr-primary);
