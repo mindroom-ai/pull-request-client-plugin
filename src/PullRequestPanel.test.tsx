@@ -1331,10 +1331,13 @@ describe('with the GitHub account connected in MindRoom', () => {
     // Meanwhile the panel reads without it, as nothing goes through MindRoom.
     expect(await view.findByText('Add pull request cards')).toBeTruthy();
     expect(mindroom.githubRequests()).toEqual([]);
+    // The person picks the server by its name: the answer that asks for a token is the server's.
     const inMindroom = view.getByLabelText('Save in MindRoom at mindroom.example.org');
-    expect((inMindroom as HTMLInputElement).checked).toBe(true);
+    expect((inMindroom as HTMLInputElement).checked).toBe(false);
+    expect((view.getByLabelText('Only this browser') as HTMLInputElement).checked).toBe(true);
     expect(view.getByRole('button', { name: 'Remove token from MindRoom' })).toBeTruthy();
     await type(view.getByLabelText('GitHub token'), 'ghp_good');
+    await click(inMindroom);
     await click(view.getByRole('button', { name: 'Save' }));
     expect(await view.findByText('Signed in as pat-login through MindRoom (token).')).toBeTruthy();
     expect(view.queryByText(UNREADABLE)).toBeNull();

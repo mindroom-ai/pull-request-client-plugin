@@ -727,11 +727,8 @@ export function TokenForm({
   const [value, setValue] = useState('');
   // In a room with a MindRoom server, the token is saved there only once the person chose that
   // server, by its name: the room's server may be any that an agent's account published. Another
-  // server, once the room has one, is not chosen until the person chooses it. A token that server
-  // cannot read is mended there, which names it already.
-  const [chosen, setChosen] = useState(() =>
-    reason === 'unreadable' ? serverToken?.origin : undefined
-  );
+  // server, once the room has one, is not chosen until the person chooses it.
+  const [chosen, setChosen] = useState<string>();
   if (chosen !== undefined && chosen !== serverToken?.origin) setChosen(undefined);
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState<SaveProblem>();
