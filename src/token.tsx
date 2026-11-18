@@ -164,10 +164,12 @@ function readAgain(queryClient: QueryClient, refetch?: AccessKey) {
  * The credential a server uses for the person: `generation` counts each one it may have changed
  * to, and goes in the keys, so that no two credentials share what was read, also of one login;
  * `writing` while a token is being saved in or removed from it, when nobody knows which one a
- * request would go with, so none starts.
+ * request would go with, so none starts. `fence` counts those changes and never goes back, as
+ * the generation does once the server refused one: what the server answers to a status or a
+ * request sent before a change says nothing of now, whatever came of the change.
  */
-type Credential = { generation: number; writing: boolean };
-const FIRST: Credential = { generation: 0, writing: false };
+type Credential = { generation: number; fence: number; writing: boolean };
+const FIRST: Credential = { generation: 0, fence: 0, writing: false };
 const credentials = new WeakMap<QueryClient, Map<string, Credential>>();
 const credentialOf = (queryClient: QueryClient, origin: string) =>
   credentials.get(queryClient)?.get(origin) ?? FIRST;
@@ -216,9 +218,9 @@ const statusQuery = (queryClient: QueryClient, server: MindroomServer | undefine
   queryKey: statusKey(server?.origin ?? ''),
   queryFn: async () => {
     const { origin } = server as MindroomServer;
-    const { generation } = credentialOf(queryClient, origin);
+    const { fence } = credentialOf(queryClient, origin);
     const now = statusOf(await (server as MindroomServer).request('/api/github/status'));
-    if (generation !== credentialOf(queryClient, origin).generation) {
+    if (fence !== credentialOf(queryClient, origin).fence) {
       return queryClient.getQueryData<ServerStatus>(statusKey(origin)) ?? now;
     }
     setStatus(queryClient, origin, now);
@@ -241,13 +243,13 @@ function viaServer(
   server: MindroomServer,
   account: string
 ): GitHubViaServer {
-  const { generation } = credentialOf(queryClient, server.origin);
+  const { fence } = credentialOf(queryClient, server.origin);
   return {
     server,
     account,
-    // Not for a request sent with a credential before this one: that says nothing of now.
+    // Not for a request sent before a token was saved or removed there: that says nothing of now.
     disconnected: () => {
-      if (generation === credentialOf(queryClient, server.origin).generation) {
+      if (fence === credentialOf(queryClient, server.origin).fence) {
         setStatus(queryClient, server.origin, NOT_CONNECTED);
       }
     },
@@ -347,8 +349,10 @@ function useServerToken() {
      * again, from `send`'s answer or, once that failed, asked anew.
      */
     const change = async (send: () => Promise<ServerStatus>): Promise<unknown> => {
-      let generation = credentialOf(queryClient, origin).generation + 1;
-      setCredential(queryClient, origin, { generation, writing: true });
+      const before = credentialOf(queryClient, origin);
+      const fence = before.fence + 1;
+      let generation = before.generation + 1;
+      setCredential(queryClient, origin, { generation, fence, writing: true });
       void queryClient.cancelQueries({ queryKey: statusKey(origin) });
       void queryClient.cancelQueries({
         queryKey: ['pull-requests'],
@@ -372,7 +376,7 @@ function useServerToken() {
         }
         return error ?? new Error('failed');
       } finally {
-        setCredential(queryClient, origin, { generation, writing: false });
+        setCredential(queryClient, origin, { generation, fence, writing: false });
       }
     };
     return {

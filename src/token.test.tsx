@@ -894,6 +894,43 @@ describe('the token saved in MindRoom', () => {
     }
   );
 
+  it('keeps the status asked after a save MindRoom refused, not one asked before that save', async () => {
+    const mindroom = githubServer(github, { connected: true, via: 'app', login: 'alice' });
+    const view = await form(mindroom.server);
+    await waitUntil(() => expect(view.getByTestId('reader').textContent).toBe('with the App'));
+    // A status asked before the save, which answers last, and with another account.
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const routes = mindroom.server.request.getMockImplementation()!;
+    let first = true;
+    mindroom.server.request.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path !== '/api/github/status' || !first) return routes(path, init);
+      first = false;
+      await held;
+      return { connected: true, via: 'app', login: 'bob' };
+    });
+    void accesses.reader?.recheck();
+    await waitUntil(() => expect(mindroom.statusRequests()).toBe(2));
+    await chooseMindroom(view);
+    await save(view, 'ghp_refused');
+    await waitUntil(() =>
+      expect(view.getByRole('alert').textContent).toBe('GitHub refused this token.')
+    );
+    // The refusal keeps the key; what was asked before the save still says nothing of now.
+    expect(accesses.reader?.key).toBe(keyAs('alice'));
+    await act(() => accesses.reader?.recheck());
+    expect(mindroom.statusRequests()).toBeGreaterThan(2);
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(accesses.reader).toMatchObject({ login: 'alice', key: keyAs('alice') });
+    expect(client.getQueryData(['pull-requests-github-status', ORIGIN])).toMatchObject({
+      login: 'alice',
+    });
+    expect(client.getQueryData([...PULL, keyAs('bob', 1)])).toBeUndefined();
+  });
+
   it('keeps the token saved once a request sent before it says the App is no longer connected', async () => {
     const mindroom = githubServer(github);
     let release = () => {};
