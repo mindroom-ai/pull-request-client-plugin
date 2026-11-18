@@ -325,18 +325,11 @@ function SizedDiffFileTree({
         requestAnimationFrame(() => {
           const scroller = scrollElementOf(treeRef.current);
           if (scroller) scroller.scrollTop = before.scrolledRows * itemHeight;
-          const { focusedPath } = before;
-          if (before.focused !== 'row' || focusedPath === null) return;
-          // Pierre draws the rows of that scroll on its scroll event, a frame or a few later.
-          const focusRow = (frames: number) => {
-            const row = scroller?.querySelector<HTMLElement>(
-              `[data-item-path="${CSS.escape(focusedPath)}"]`
-            );
-            // Where it was scrolled, also away from the focused row.
-            if (row) row.focus({ preventScroll: true });
-            else if (frames > 0) requestAnimationFrame(() => focusRow(frames - 1));
-          };
-          focusRow(10);
+          if (before.focused !== 'row' || before.focusedPath === null) return;
+          // Pierre's first layout scrolls to the focused row and the restore then sets the scroll back.
+          scroller
+            ?.querySelector<HTMLElement>(`[data-item-path="${CSS.escape(before.focusedPath)}"]`)
+            ?.focus({ preventScroll: true });
         });
       }
     } else if (mounted.paths.every((path, index) => modelPaths[index] === path)) {
