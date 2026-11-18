@@ -333,7 +333,9 @@ function Panel({ roomId, request }: PanelProps) {
   const { via, unreadable, key: accessKey } = useGitHubAccess();
   const { server } = useContext(GitHubServerContext);
   const serverOrigin = server?.origin ?? '';
-  const tokenForm = usePanelTokenForm();
+  const pullRequestKey = ref ? pullRequestUrl(ref) : '';
+  const formScope = `${serverOrigin} ${pullRequestKey}`;
+  const tokenForm = usePanelTokenForm(formScope);
   // The token form a person opened to use a token instead of MindRoom's connection, which goes
   // once a token is saved.
   const [overriding, setOverriding] = useState(false);
@@ -357,10 +359,9 @@ function Panel({ roomId, request }: PanelProps) {
   const [order, setOrder] = useState<Order>('newest');
   // The commit the Code tab shows, chosen there or from the Timeline. It belongs to the pull
   // request it was chosen in: another one opens on All commits.
-  const pullRequestKey = ref ? pullRequestUrl(ref) : '';
   // What GitHub answered last, shown while the pull request is read again with the same access:
   // a read again from an error forgets it. Read with another, it says nothing of now.
-  const readAs = `${accessKey} ${pullRequestKey}`;
+  const readAs = `${accessKey} ${formScope}`;
   const lastError = useRef<{ key: string; error: unknown }>();
   if (query.isError) lastError.current = { key: readAs, error: query.error };
   const error = query.isError
@@ -395,7 +396,6 @@ function Panel({ roomId, request }: PanelProps) {
   // Latched for the scope from the render it first shows in; a reason gone since leaves it
   // without a hint (`override`). Each latch is its own value: one of another scope is released,
   // and only the form shown for this latch may close it.
-  const formScope = `${serverOrigin} ${pullRequestKey}`;
   const [latch, setLatch] = useState<{ scope: string }>();
   // Forgetting the browser's token is the person's act too, from whichever view it is.
   const [knownToken, setKnownToken] = useState(token);

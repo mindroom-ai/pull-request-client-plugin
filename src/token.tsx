@@ -931,26 +931,27 @@ export const PanelTokenFormContext = createContext<PanelTokenFormState | undefin
  * The panel's token form: shown while one of its parts shows a failure that a token fixes, GitHub's
  * rate limit before not finding the repository, and focused from those parts.
  */
-export function usePanelTokenForm() {
-  const [needs, setNeeds] = useState<readonly TokenReason[]>([]);
+export function usePanelTokenForm(scope: string) {
+  // Each ask holds the scope (server and pull request) it was made for, and counts only there.
+  const [needs, setNeeds] = useState<readonly { reason: TokenReason; scope: string }[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
+  const scopeRef = useRef(scope);
+  scopeRef.current = scope;
   const context = useMemo(
     (): PanelTokenFormState => ({
       need: (reason) => {
-        setNeeds((current) => [...current, reason]);
-        return () =>
-          setNeeds((current) => {
-            const index = current.indexOf(reason);
-            return index < 0 ? current : [...current.slice(0, index), ...current.slice(index + 1)];
-          });
+        const ask = { reason, scope: scopeRef.current };
+        setNeeds((current) => [...current, ask]);
+        return () => setNeeds((current) => current.filter((need) => need !== ask));
       },
       focus: () => inputRef.current?.focus(),
     }),
     []
   );
-  const reason: TokenReason | undefined = needs.includes('rateLimited')
+  const asked = needs.filter((need) => need.scope === scope).map((need) => need.reason);
+  const reason: TokenReason | undefined = asked.includes('rateLimited')
     ? 'rateLimited'
-    : needs.includes('notFound')
+    : asked.includes('notFound')
     ? 'notFound'
     : undefined;
   return { context, reason, inputRef };

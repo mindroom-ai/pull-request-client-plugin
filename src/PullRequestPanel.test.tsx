@@ -1659,6 +1659,32 @@ describe('with the GitHub account connected in MindRoom', () => {
       }
     });
 
+    it('leaves no form on a pull request shown again for a part failure of the one before', async () => {
+      fetchMock.mockImplementation(async (url) => {
+        if (/\/pulls\/\d+$/.test(url)) {
+          return respond(pull({ title: url.endsWith('/pulls/200') ? 'PR A' : 'PR B' }));
+        }
+        if (new URL(url).pathname.endsWith('/pulls/200/reviews')) {
+          return new Response('{}', {
+            status: 403,
+            headers: { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': '0' },
+          });
+        }
+        return respond([]);
+      });
+      const view = await show({ ...REQUEST, number: 201 });
+      await view.findByText('PR B');
+      await view.findByText('No comments yet.');
+      expect(view.queryByLabelText('GitHub token')).toBeNull();
+      view.rerender(panelFor(200));
+      await view.findByText('PR A');
+      await view.findByLabelText('GitHub token');
+      view.rerender(panelFor(201));
+      await view.findByText('PR B');
+      await view.findByText('No comments yet.');
+      await waitUntil(() => expect(view.queryByLabelText('GitHub token')).toBeNull());
+    });
+
     it('releases the form when the pull request changes, even to one without a reason', async () => {
       roomServer.current = githubServer(withUser, { connected: false }).server;
       fetchMock.mockImplementation(async () => respond({}, 404));
