@@ -214,12 +214,16 @@ function statusOf(answer: unknown): ServerStatus {
  * The query of a server's status. Its answer is kept as the server's (`setStatus`), unless a token
  * was saved in or removed from the server since it was asked: that says nothing of now.
  */
-const statusQuery = (queryClient: QueryClient, server: MindroomServer | undefined) => ({
+const statusQuery = (
+  queryClient: QueryClient,
+  server: MindroomServer | undefined,
+  init?: RequestInit
+) => ({
   queryKey: statusKey(server?.origin ?? ''),
   queryFn: async () => {
     const { origin } = server as MindroomServer;
     const { fence } = credentialOf(queryClient, origin);
-    const now = statusOf(await (server as MindroomServer).request('/api/github/status'));
+    const now = statusOf(await (server as MindroomServer).request('/api/github/status', init));
     if (fence !== credentialOf(queryClient, origin).fence) {
       return queryClient.getQueryData<ServerStatus>(statusKey(origin)) ?? now;
     }
@@ -229,9 +233,16 @@ const statusQuery = (queryClient: QueryClient, server: MindroomServer | undefine
   retry: false,
 });
 
-/** Asks `server` for its status now, whoever shows it. */
+// A token saved or removed holds every read through its server until its outcome is known, so
+// MindRoom gets this long to answer each request of it, three times its own limit with GitHub.
+const changeLimit = () => AbortSignal.timeout(30_000);
+
+/** Asks `server` for its status now, whoever shows it, as part of saving or removing a token. */
 const askStatus = (queryClient: QueryClient, server: MindroomServer) =>
-  queryClient.fetchQuery({ ...statusQuery(queryClient, server), staleTime: 0 });
+  queryClient.fetchQuery({
+    ...statusQuery(queryClient, server, { signal: changeLimit() }),
+    staleTime: 0,
+  });
 
 /**
  * Requests through `server` as the person's connected GitHub account, `account` the signed-in
@@ -395,6 +406,7 @@ function useServerToken() {
               body: JSON.stringify({ token }),
               headers: { 'Content-Type': 'application/json' },
               redirect: NO_REDIRECT,
+              signal: changeLimit(),
             })
           );
           // Saved only once MindRoom says it uses the token now; an answer that does not leaves
@@ -418,7 +430,11 @@ function useServerToken() {
       remove: async (): Promise<boolean> =>
         (await change(async () =>
           statusOf(
-            await server.request('/api/github/token', { method: 'DELETE', redirect: NO_REDIRECT })
+            await server.request('/api/github/token', {
+              method: 'DELETE',
+              redirect: NO_REDIRECT,
+              signal: changeLimit(),
+            })
           )
         )) === undefined,
     };

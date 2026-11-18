@@ -931,6 +931,44 @@ describe('the token saved in MindRoom', () => {
     expect(client.getQueryData([...PULL, keyAs('bob', 1)])).toBeUndefined();
   });
 
+  it('gives a save that MindRoom never answers half a minute, then asks the status, as long at most', async () => {
+    const mindroom = githubServer(github);
+    const view = await form(mindroom.server);
+    await waitUntil(() => expect(view.getByTestId('reader').textContent).toBe('with the App'));
+    const limit = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(limit.signal);
+    try {
+      // The token's route answers only by giving up.
+      answerToken(
+        mindroom,
+        (init) =>
+          new Promise((_, reject) => {
+            init?.signal?.addEventListener('abort', () => reject(init.signal?.reason));
+          })
+      );
+      await chooseMindroom(view);
+      await save(view, 'ghp_good');
+      expect(accesses.reader?.pending).toBe(true);
+      expect(timeout).toHaveBeenCalledWith(30_000);
+      await act(async () => limit.abort());
+      await waitUntil(() =>
+        expect(view.getByRole('alert').textContent).toBe(
+          'MindRoom could not save the token. Try again.'
+        )
+      );
+      expect(timeout.mock.calls).toEqual([[30_000], [30_000]]);
+    } finally {
+      timeout.mockRestore();
+    }
+    // Whether it was saved is not known: the status was asked, with a limit of its own, and the
+    // parts read under new keys.
+    const [, asked] = mindroom.server.request.mock.calls.at(-2)!;
+    expect(mindroom.server.request.mock.calls.at(-2)![0]).toBe('/api/github/status');
+    expect(asked?.signal).toBe(limit.signal);
+    await waitUntil(() => expect(view.getByTestId('reader').textContent).toBe('with the App'));
+    expect(accesses.reader).toMatchObject({ pending: false, key: keyAs('octo', 1) });
+  });
+
   it('keeps the token saved once a request sent before it says the App is no longer connected', async () => {
     const mindroom = githubServer(github);
     let release = () => {};
@@ -975,10 +1013,11 @@ describe('the token saved in MindRoom', () => {
     await waitUntil(() => expect(accesses.reader?.connection).toBe('app'));
     const sent = mindroom.server.request.mock.calls
       .filter(([path]) => path === '/api/github/token')
-      .map(([, init]) => [init?.method, init?.redirect]);
+      // Each with a limit to its time, as the reads wait for it.
+      .map(([, init]) => [init?.method, init?.redirect, init?.signal instanceof AbortSignal]);
     expect(sent).toEqual([
-      ['PUT', 'error'],
-      ['DELETE', 'error'],
+      ['PUT', 'error', true],
+      ['DELETE', 'error', true],
     ]);
   });
 
