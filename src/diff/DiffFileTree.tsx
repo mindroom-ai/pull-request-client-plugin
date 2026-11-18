@@ -321,7 +321,8 @@ function SizedDiffFileTree({
           if (!before.focused || before.focusedPath === null) return;
           scroller
             ?.querySelector<HTMLElement>(`[data-item-path="${CSS.escape(before.focusedPath)}"]`)
-            ?.focus();
+            // Where it was scrolled, also away from the focused row.
+            ?.focus({ preventScroll: true });
         });
       }
     } else if (mounted.paths.every((path, index) => modelPaths[index] === path)) {

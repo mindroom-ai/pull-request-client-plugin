@@ -1026,6 +1026,8 @@ test('a pinch zoom keeps the file tree as it was: folded folders, selection, foc
   page,
 }) => {
   test.setTimeout(5 * 60_000);
+  // Tall enough that at 150 % the panel leaves the tree above the diffs its whole height.
+  await page.setViewportSize({ width: DESKTOP.width, height: 1300 });
   const unanswered = await stubGitHub(page);
   const [pull] = THREADS.sessions.pulls;
   await page.route(
@@ -1057,8 +1059,8 @@ test('a pinch zoom keeps the file tree as it was: folded folders, selection, foc
   await docs.click();
   await expect(docs).toHaveAttribute('aria-expanded', 'false');
   // Scrolled down to a file the tree draws only there, which a click selects and focuses.
-  await scrollTree(12 * 24);
-  const file = tree.getByRole('treeitem', { name: 'part-20.ts' });
+  await scrollTree(14 * 24);
+  const file = tree.getByRole('treeitem', { name: 'part-15.ts' });
   // With the focus on a row scrolled away, Pierre's first click only moves the focus.
   await expect(async () => {
     await file.click();
@@ -1081,23 +1083,29 @@ test('a pinch zoom keeps the file tree as it was: folded folders, selection, foc
       }
     }).observe(document.body, { childList: true, subtree: true });
   });
-  // A pinch on a trackpad: Ctrl with the wheel, one event a frame, from 100 % to 150 %.
-  await page.evaluate(async () => {
-    for (let step = 0; step < 25; step += 1) {
-      document.body.dispatchEvent(
-        new WheelEvent('wheel', { deltaY: -100, ctrlKey: true, bubbles: true, cancelable: true })
-      );
-      await new Promise((resolve) => requestAnimationFrame(resolve));
-    }
-  });
+  /** A pinch on a trackpad: Ctrl with the wheel, one event a frame, 50 points of zoom. */
+  const pinch = (deltaY: number) =>
+    page.evaluate(async (delta) => {
+      for (let step = 0; step < 25; step += 1) {
+        document.body.dispatchEvent(
+          new WheelEvent('wheel', { deltaY: delta, ctrlKey: true, bubbles: true, cancelable: true })
+        );
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+      }
+    }, deltaY);
+  const treesMade = () =>
+    page.evaluate(() => (window as unknown as { treesMade: { count: number } }).treesMade.count);
+  /** How far the tree is scrolled, in rows of `rowHeight`. */
+  const scrolledRows = (rowHeight: number) =>
+    tree.evaluate((element, height) => {
+      const root = element.getRootNode() as ShadowRoot;
+      return root.querySelector('[data-file-tree-virtualized-scroll="true"]')!.scrollTop / height;
+    }, rowHeight);
+  await pinch(-100);
   await expect(page.locator('html')).toHaveCSS('font-size', '24px');
   await expect(file).toHaveCSS('height', '36px');
   // Made once, after the zoom rested, not on each of its frames.
-  expect(
-    await page.evaluate(
-      () => (window as unknown as { treesMade: { count: number } }).treesMade.count
-    )
-  ).toBe(1);
+  expect(await treesMade()).toBe(1);
   // Still scrolled to the file, which keeps the selection and the focus.
   await expect(file).toBeInViewport();
   await expect(file).toHaveAttribute('aria-selected', 'true');
@@ -1106,6 +1114,17 @@ test('a pinch zoom keeps the file tree as it was: folded folders, selection, foc
   await scrollTree(0);
   await expect(docs).toHaveAttribute('aria-expanded', 'false');
   await expect(tree.getByRole('treeitem', { name: 'sessions.md' })).toHaveCount(0);
+
+  // Scrolled away from the focused file, a pinch back to 100 % keeps the tree where it was
+  // scrolled, and the focus on the file.
+  await scrollTree(3 * 36);
+  await expect(file).toBeFocused();
+  await pinch(100);
+  await expect(page.locator('html')).toHaveCSS('font-size', '16px');
+  await expect.poll(treesMade).toBe(2);
+  await expect(tree.getByRole('treeitem', { name: 'part-02.ts' })).toHaveCSS('height', '24px');
+  await expect.poll(() => scrolledRows(24)).toBe(3);
+  await expect(file).toBeFocused();
   expect(unanswered).toEqual([]);
 });
 
