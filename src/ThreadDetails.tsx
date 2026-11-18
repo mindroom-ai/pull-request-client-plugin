@@ -81,8 +81,11 @@ export function Details({
   className?: string;
 }) {
   // The same queries as each pull request's below, so they ask GitHub nothing more.
-  const answers = usePullRequests(pullRequests, ANSWERED_ONLY).map((query) => query.data);
-  const heads = answers.map((pr) => pr?.headRef);
+  const queries = usePullRequests(pullRequests, ANSWERED_ONLY);
+  const heads = queries.map((query) => query.data?.headRef);
+  // A refetch GitHub refused keeps the answer before beside the error: as the banner's button, the
+  // order takes it for no answer.
+  const answers = queries.map((query) => (query.status === 'success' ? query.data : undefined));
   return (
     <div
       className={className ? `mrpr-root mrpr-details ${className}` : 'mrpr-root mrpr-details'}

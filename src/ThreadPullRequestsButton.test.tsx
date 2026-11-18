@@ -249,6 +249,12 @@ describe('ThreadPullRequestsButton', () => {
     await act(async () => client.invalidateQueries());
     await vi.waitFor(() => expect(tone(view)).toBe('mrpr-tone-merged'));
     expect(trigger(view).getAttribute('aria-label')).toBe('Pull requests (2): Merged');
+    // Its menu lists the refused one last too, after the merged one, as one with no answer.
+    await openMenu(view);
+    expect(rows(view).map((row) => row.querySelector('.mrpr-truncate')?.textContent)).toEqual([
+      'mindroom-chat #2',
+      'mindroom-chat #1',
+    ]);
     serve({});
     await act(async () => client.invalidateQueries());
     await vi.waitFor(() => expect(tone(view)).toBeUndefined());
