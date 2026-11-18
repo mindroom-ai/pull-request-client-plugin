@@ -59,7 +59,10 @@ describe('the checks summary in English', () => {
       ],
       [[...times(3, 'pending'), ...times(6, 'success')], '3 of 9 running'],
       [times(9, 'success'), 'All checks have passed'],
-      [[check('success'), check('skipped'), check('neutral')], '1 of 3 passing'],
+      [[check('success'), check('skipped'), check('skipped')], '1 passed, 2 skipped'],
+      [[check('success'), check('neutral')], '1 passed, 1 neutral'],
+      [[check('success'), check('skipped'), check('neutral')], '1 passed, 1 skipped, 1 neutral'],
+      [times(2, 'skipped'), '0 passed, 2 skipped'],
     ];
     const view = await renderPluginComponent(
       <Summaries lists={cases.map(([checks]) => checks)} />,

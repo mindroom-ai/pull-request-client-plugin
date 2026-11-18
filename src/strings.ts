@@ -207,7 +207,10 @@ export const en = {
     checksAwaitingAction_other: '{{count}} checks awaiting action',
     running: '{{count}} of {{total}} running',
     allPassed: 'All checks have passed',
-    passing: '{{count}} of {{total}} passing',
+    // None failed or runs, but some were skipped or ended neutral, which GitHub counts as passing.
+    passedSkipped: '{{count}} passed, {{skipped}} skipped',
+    passedNeutral: '{{count}} passed, {{neutral}} neutral',
+    passedSkippedNeutral: '{{count}} passed, {{skipped}} skipped, {{neutral}} neutral',
   },
   checkStatus: {
     pending: 'Running',
