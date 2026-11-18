@@ -917,6 +917,89 @@ test("a chip on a card opens the thread and its pull request; the banner's menu 
   expect(warnings).toEqual([]);
 });
 
+// One changed file, so that the Code tab has a diff and a file tree.
+const ZOOM_FILE = {
+  filename: 'src/session/store.ts',
+  status: 'modified',
+  additions: 2,
+  deletions: 1,
+  sha: 'f'.repeat(40),
+  patch:
+    "@@ -1,2 +1,3 @@\n import { Redis } from 'ioredis';\n-export const store = new Map();\n+export const store = new Redis();\n+export const ttl = 3600;",
+};
+
+/** The font size of `locator`'s element, in px. */
+const fontSize = (locator: Locator) =>
+  locator.evaluate((element) => parseFloat(getComputedStyle(element).fontSize));
+/** The height of `locator`'s element, in px to a hundredth. */
+const height = (locator: Locator) =>
+  locator.evaluate((element) => Math.round(element.getBoundingClientRect().height * 100) / 100);
+
+test("Page Zoom scales the panel's text, its diffs and its file tree", async ({ page }) => {
+  test.setTimeout(5 * 60_000);
+  const unanswered = await stubGitHub(page);
+  const [pull] = THREADS.sessions.pulls;
+  await page.route(
+    (url) => url.hostname === 'api.github.com' && url.pathname === `${pullPath(pull!)}/files`,
+    (route) => route.fulfill({ headers: CORS, json: [ZOOM_FILE] })
+  );
+  await openRoom(page);
+  /** The sizes at `pageZoom` percent, which the app sets as the root's font size. */
+  const sizes = async (pageZoom: number) => {
+    await page.evaluate((zoom) => {
+      const settings = JSON.parse(localStorage.getItem('settings') ?? '{}') as object;
+      localStorage.setItem('settings', JSON.stringify({ ...settings, pageZoom: zoom }));
+    }, pageZoom);
+    await page.goto(`/home/${encodeURIComponent(roomId)}`);
+    await expect(page.locator('html')).toHaveCSS('font-size', `${(16 * pageZoom) / 100}px`);
+    const cardChip = cardChips(page, roots.sessions).first();
+    await expect(cardChip).toBeVisible({ timeout: 120_000 });
+    const chip = await fontSize(cardChip);
+    await cardChip.click();
+    const title = panel(page).locator('.mrpr-panel-title');
+    await expect(title).toHaveText(pull!.title, { timeout: 30_000 });
+    const label = panel(page).locator('.mrpr-label').filter({ hasText: 'backend' });
+    await expect(label).toBeVisible({ timeout: 30_000 });
+    await shot(page, `zoom-${pageZoom}-summary`);
+    const text = {
+      cardChip: chip,
+      title: await fontSize(title),
+      label: await fontSize(label),
+    };
+    await panel(page).getByRole('tab', { name: 'Code' }).click();
+    // Pierre draws the diff and the tree in open shadow roots, which locators enter.
+    const line = panel(page).locator('[data-line]').filter({ hasText: 'ttl = 3600' }).first();
+    const row = panel(page).locator('button[data-type="item"]').filter({ hasText: 'store.ts' });
+    await expect(line).toBeVisible({ timeout: 30_000 });
+    await expect(row).toBeVisible();
+    await shot(page, `zoom-${pageZoom}-code`);
+    return {
+      ...text,
+      line: await fontSize(line),
+      lineHeight: await height(line),
+      row: await fontSize(row),
+      rowHeight: await height(row),
+    };
+  };
+  const normal = await sizes(100);
+  // At 100 % the sizes are those the plugin had in px.
+  expect(normal).toEqual({
+    cardChip: 10.4,
+    title: 16,
+    label: 11,
+    line: 13,
+    lineHeight: 20,
+    row: 12,
+    rowHeight: 24,
+  });
+  const zoomed = await sizes(150);
+  const scaled = Object.fromEntries(
+    Object.entries(normal).map(([name, value]) => [name, Math.round(value * 150) / 100])
+  );
+  expect(zoomed).toEqual(scaled);
+  expect(unanswered).toEqual([]);
+});
+
 const hoverCard = (page: Page) => page.getByRole('tooltip');
 
 /** Opens the program thread, with all eleven pull requests, from its card. */

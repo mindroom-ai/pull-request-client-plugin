@@ -28,6 +28,7 @@ import {
   type DiffFileTreeEntry,
 } from './diffFileTree.logic';
 import { useLanguage } from '../presentation';
+import { useRootFontSize } from '../rootFontSize';
 import { PIERRE_TREE_UNSAFE_CSS, pierreTreeStyle } from './pierreTreeTheme';
 
 export type { DiffFileTreeEntry } from './diffFileTree.logic';
@@ -106,7 +107,21 @@ interface DiffFileTreeProps {
   readonly ariaLabel: string;
 }
 
-export function DiffFileTree({ entries, onSelectFile, ariaLabel }: DiffFileTreeProps) {
+/**
+ * Pierre's tree places its rows by a height in px that it takes once, when it is made, so a page
+ * zoom makes it again with the rows' 1.5rem in the new size, its folders open as at the start.
+ */
+export function DiffFileTree(props: DiffFileTreeProps) {
+  const rem = useRootFontSize();
+  return <SizedDiffFileTree key={rem} {...props} itemHeight={1.5 * rem} />;
+}
+
+function SizedDiffFileTree({
+  entries,
+  onSelectFile,
+  ariaLabel,
+  itemHeight,
+}: DiffFileTreeProps & { readonly itemHeight: number }) {
   const t = usePluginTranslation('pull-requests');
   const language = useLanguage();
   const themeKind = useThemeKind();
@@ -176,6 +191,7 @@ export function DiffFileTree({ entries, onSelectFile, ariaLabel }: DiffFileTreeP
 
   const { model } = useFileTree({
     density: 'compact',
+    itemHeight,
     flattenEmptyDirectories: true,
     initialExpansion: 'open',
     icons,

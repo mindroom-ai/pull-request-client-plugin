@@ -25,6 +25,7 @@ import {
   resolvePullRequestState,
 } from './presentation';
 import { useReviews } from './queries';
+import { rootFontSize } from './rootFontSize';
 import { pluginRootStyle } from './theme';
 import { useGitHubAccess } from './token';
 
@@ -98,7 +99,7 @@ function usePlacement(anchor: HTMLElement, card: HTMLElement | null) {
     if (!card) return undefined;
     const place = () => {
       // Sized in rem, so the gap and the margin follow the page's zoom.
-      const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+      const rem = rootFontSize();
       const { width, height } = card.getBoundingClientRect();
       const placement = hoverCardPlacement({
         anchor: anchor.getBoundingClientRect(),

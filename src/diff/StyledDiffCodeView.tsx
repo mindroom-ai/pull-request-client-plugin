@@ -9,12 +9,23 @@ import {
 } from '@pierre/diffs/react';
 import type { Ref } from 'react';
 
+import { useRootFontSize } from '../rootFontSize';
 import { DIFF_SURFACE_THEME_UNSAFE_CSS } from './diffRendering';
 
 export const DIFF_VIEW_UNSAFE_CSS = `${DIFF_SURFACE_THEME_UNSAFE_CSS}
-/* Code reads left to right in every app language, as the app's code blocks do. */
+/* Code reads left to right in every app language, as the app's code blocks do. Sizes are in rem,
+   so the diffs follow the page zoom; the row heights the view is given in px go with them. */
 :host {
   direction: ltr;
+  --diffs-font-size: 0.8125rem;
+  --diffs-line-height: 1.25rem;
+  --diffs-gap-fallback: 0.5rem;
+}
+
+/* Pierre's icons are 16px by their attributes. */
+svg:is([data-change-icon], [data-rename-icon], [data-icon]) {
+  width: 1rem;
+  height: 1rem;
 }
 
 /* A 1fr track's automatic minimum grows with the currently mounted lines. In split
@@ -95,14 +106,14 @@ export const DIFF_VIEW_UNSAFE_CSS = `${DIFF_SURFACE_THEME_UNSAFE_CSS}
   border-bottom-color: transparent !important;
   align-items: center !important;
   font-family: var(--font-sans) !important;
-  font-size: 12px !important;
+  font-size: 0.75rem !important;
   line-height: 1 !important;
   /* Collapsed items are never remeasured: the painted header must match diffHeaderHeight.
      Center controls in that height instead of adding padding to their intrinsic height. */
-  height: 32px !important;
-  min-height: 32px !important;
+  height: 2rem !important;
+  min-height: 2rem !important;
   padding-block: 0 !important;
-  padding-inline: 8px 12px !important;
+  padding-inline: 0.5rem 0.75rem !important;
 }
 
 [data-diffs-header]:hover {
@@ -117,7 +128,7 @@ export const DIFF_VIEW_UNSAFE_CSS = `${DIFF_SURFACE_THEME_UNSAFE_CSS}
    read as quiet controls; hover brings them forward. */
 :is([data-separator="line-info"], [data-separator="line-info-basic"]) {
   /* Exact and margin-free: the virtualizer places rows from hunkSeparatorHeight below. */
-  height: 24px !important;
+  height: 1.5rem !important;
   margin-block: 0 !important;
   --diffs-bg-separator: color-mix(in srgb, var(--code-background) 97%, var(--code-foreground));
 }
@@ -125,7 +136,7 @@ export const DIFF_VIEW_UNSAFE_CSS = `${DIFF_SURFACE_THEME_UNSAFE_CSS}
 :is([data-separator="line-info"], [data-separator="line-info-basic"]) [data-separator-content] {
   color: color-mix(in srgb, var(--code-foreground) 50%, var(--code-background)) !important;
   font-family: var(--font-sans) !important;
-  font-size: 11px !important;
+  font-size: 0.6875rem !important;
   text-decoration: none !important;
 }
 
@@ -151,7 +162,7 @@ export const DIFF_VIEW_UNSAFE_CSS = `${DIFF_SURFACE_THEME_UNSAFE_CSS}
 /* Pierre clips file names with overflow: hidden for its start ellipsis. A 1em line box cuts off
    descenders; give the clipped names room inside the fixed-height header. */
 [data-diffs-header] :is([data-title], [data-prev-name]) {
-  line-height: 16px !important;
+  line-height: 1rem !important;
 }
 
 [data-diffs-header] [data-metadata] {
@@ -163,7 +174,7 @@ export const DIFF_VIEW_UNSAFE_CSS = `${DIFF_SURFACE_THEME_UNSAFE_CSS}
 [data-diffs-header] [data-additions-count],
 [data-diffs-header] [data-deletions-count] {
   font-family: var(--font-mono) !important;
-  font-size: 11px !important;
+  font-size: 0.6875rem !important;
   font-variant-numeric: tabular-nums;
   line-height: 1 !important;
 }
@@ -222,6 +233,7 @@ export function StyledDiffCodeView<LAnnotation = undefined>({
   unsafeCSSExtra,
   ...props
 }: StyledDiffCodeViewProps<LAnnotation>) {
+  const rem = useRootFontSize();
   return (
     <CodeView<LAnnotation>
       {...props}
@@ -233,16 +245,17 @@ export function StyledDiffCodeView<LAnnotation = undefined>({
         unsafeCSS: unsafeCSSExtra
           ? `${DIFF_VIEW_UNSAFE_CSS}\n${unsafeCSSExtra}`
           : DIFF_VIEW_UNSAFE_CSS,
+        // In px, from the rem sizes of the styles above.
         itemMetrics: {
-          diffHeaderHeight: 32,
-          hunkSeparatorHeight: 24,
-          // Zero both spacing and paddingTop; Pierre's expanded-file fallback otherwise adds an 8px header
+          lineHeight: 1.25 * rem,
+          diffHeaderHeight: 2 * rem,
+          hunkSeparatorHeight: 1.5 * rem,
+          // Zero both spacing and paddingTop; Pierre's expanded-file fallback otherwise adds a header
           // gap.
           spacing: 0,
           paddingTop: 0,
-          // Include Pierre's 8px --diffs-gap-fallback in metrics or each expanded file loses a scrollable
-          // row.
-          paddingBottom: 8,
+          // Include --diffs-gap-fallback in metrics or each expanded file loses a scrollable row.
+          paddingBottom: 0.5 * rem,
         },
         layout: { paddingTop: 0, paddingBottom: 0, gap: 0 },
       }}

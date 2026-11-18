@@ -1,4 +1,7 @@
-/* Every class starts with mrpr-; colors come from the --pr-* variables of pluginRootStyle(). */
+/* Every class starts with mrpr-; colors come from the --pr-* variables of pluginRootStyle().
+   Sizes are in rem (1rem is 16px at 100 %), so that everything grows and shrinks with the
+   client's page zoom, which scales the root font size; borders, focus rings, shadows and the
+   Files column, whose width the person drags, keep their px. */
 .mrpr-root {
   color: var(--pr-fg);
   min-width: 0;
@@ -6,18 +9,18 @@
 
 .mrpr-card {
   box-sizing: border-box;
-  inline-size: 320px;
+  inline-size: 20rem;
   max-inline-size: calc(100vw - 2rem);
-  padding: 12px;
+  padding: 0.75rem;
 }
 
 .mrpr-meta {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  line-height: 16px;
+  gap: 0.375rem;
+  font-size: 0.6875rem;
+  line-height: 1rem;
   color: var(--pr-muted);
 }
 
@@ -41,12 +44,12 @@
   display: inline-flex;
   flex-shrink: 0;
   align-items: center;
-  gap: 4px;
+  gap: 0.25rem;
 }
 
 .mrpr-icon {
-  inline-size: 12px;
-  block-size: 12px;
+  inline-size: 0.75rem;
+  block-size: 0.75rem;
 }
 
 .mrpr-tone-open {
@@ -63,8 +66,8 @@
 }
 
 .mrpr-title {
-  margin: 4px 0 0;
-  font-size: 14px;
+  margin: 0.25rem 0 0;
+  font-size: 0.875rem;
   font-weight: 500;
   line-height: 1.375;
   text-wrap: pretty;
@@ -72,22 +75,22 @@
 }
 
 .mrpr-author {
-  margin-block-start: 8px;
-  font-size: 12px;
-  line-height: 16px;
+  margin-block-start: 0.5rem;
+  font-size: 0.75rem;
+  line-height: 1rem;
 }
 
 .mrpr-avatar {
   display: flex;
-  inline-size: 16px;
-  block-size: 16px;
+  inline-size: 1rem;
+  block-size: 1rem;
   flex-shrink: 0;
   align-items: center;
   justify-content: center;
   border-radius: 9999px;
   background: var(--pr-hover);
   color: var(--pr-muted);
-  font-size: 10px;
+  font-size: 0.625rem;
   font-weight: 500;
   object-fit: cover;
 }
@@ -95,7 +98,7 @@
 .mrpr-diffstat {
   display: inline-flex;
   align-items: baseline;
-  gap: 4px;
+  gap: 0.25rem;
   font-variant-numeric: tabular-nums;
 }
 .mrpr-added {
@@ -106,34 +109,34 @@
 }
 
 .mrpr-status {
-  margin: 8px 0 0;
-  font-size: 12px;
-  line-height: 16px;
+  margin: 0.5rem 0 0;
+  font-size: 0.75rem;
+  line-height: 1rem;
   color: var(--pr-muted);
 }
 
 .mrpr-token {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin-block-start: 8px;
+  gap: 0.375rem;
+  margin-block-start: 0.5rem;
 }
 .mrpr-token-row {
   display: flex;
-  gap: 6px;
+  gap: 0.375rem;
 }
 /* Where the token is saved, in a room with a MindRoom server: there or in this browser alone. */
 .mrpr-token-where {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
-  font-size: 12px;
+  gap: 0.75rem;
+  font-size: 0.75rem;
 }
 /* The panel's one token form, between the header and the tabs. */
 .mrpr-panel-token {
   flex-shrink: 0;
-  padding-block: 0 12px;
-  padding-inline: 16px;
+  padding-block: 0 0.75rem;
+  padding-inline: 1rem;
 }
 .mrpr-panel-token .mrpr-token {
   margin-block-start: 0;
@@ -144,34 +147,34 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 8px;
-  margin-block-start: 8px;
+  gap: 0.25rem 0.5rem;
+  margin-block-start: 0.5rem;
 }
 .mrpr-error-compact .mrpr-status {
   margin: 0;
 }
 .mrpr-error-compact .mrpr-link-button {
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 .mrpr-input {
   min-width: 0;
   flex: 1;
-  padding: 4px 8px;
+  padding: 0.25rem 0.5rem;
   border: 1px solid var(--pr-border);
-  border-radius: 6px;
+  border-radius: 0.375rem;
   background: transparent;
   color: var(--pr-fg);
   font: inherit;
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 .mrpr-button {
-  padding: 4px 10px;
+  padding: 0.25rem 0.625rem;
   border: 1px solid var(--pr-border);
-  border-radius: 6px;
+  border-radius: 0.375rem;
   background: transparent;
   color: var(--pr-fg);
   font: inherit;
-  font-size: 12px;
+  font-size: 0.75rem;
   cursor: pointer;
 }
 .mrpr-button:hover:not([aria-disabled='true']) {
@@ -179,12 +182,12 @@
 }
 
 .mrpr-actions {
-  margin-block-start: 8px;
+  margin-block-start: 0.5rem;
 }
 
 .mrpr-button-icon {
-  inline-size: 14px;
-  block-size: 14px;
+  inline-size: 0.875rem;
+  block-size: 0.875rem;
 }
 
 .mrpr-link {
@@ -220,9 +223,9 @@
   flex-shrink: 0;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  block-size: 40px;
-  padding-inline: 12px 6px;
+  gap: 0.5rem;
+  block-size: 2.5rem;
+  padding-inline: 0.75rem 0.375rem;
   border-block-end: 1px solid var(--pr-border);
 }
 
@@ -327,10 +330,10 @@
   display: flex;
   flex-shrink: 0;
   align-items: center;
-  gap: 4px;
-  block-size: 36px;
-  padding-inline: 12px 6px;
-  font-size: 12px;
+  gap: 0.25rem;
+  block-size: 2.25rem;
+  padding-inline: 0.75rem 0.375rem;
+  font-size: 0.75rem;
   color: var(--pr-muted);
 }
 
@@ -346,7 +349,7 @@
 
 /* React 18 gives a custom element `classname`, not `class`, so the tree's element goes by its tag. */
 .mrpr-tree > file-tree-container {
-  flex: 1 1 calc(var(--mrpr-tree-rows-height, 0px) + 4px);
+  flex: 1 1 calc(var(--mrpr-tree-rows-height, 0px) + 0.25rem);
   min-block-size: 0;
   overflow: hidden;
 }
@@ -367,11 +370,11 @@
 .mrpr-no-diff {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding-block: 8px;
-  padding-inline: 12px;
+  gap: 0.125rem;
+  padding-block: 0.5rem;
+  padding-inline: 0.75rem;
   border-block-start: 1px solid var(--pr-border);
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .mrpr-no-diff-path {
@@ -385,23 +388,23 @@
   flex: 1;
   min-inline-size: 0;
   align-items: center;
-  gap: 12px;
+  gap: 0.75rem;
 }
 
 .mrpr-commit-trigger {
   display: inline-flex;
   min-inline-size: 0;
-  max-inline-size: 256px;
+  max-inline-size: 16rem;
   align-items: center;
-  gap: 4px;
-  padding-block: 3px;
-  padding-inline: 8px;
+  gap: 0.25rem;
+  padding-block: 0.1875rem;
+  padding-inline: 0.5rem;
   border: 0;
-  border-radius: 6px;
+  border-radius: 0.375rem;
   background: var(--pr-hover);
   color: var(--pr-fg);
   font: inherit;
-  font-size: 12px;
+  font-size: 0.75rem;
   cursor: pointer;
 }
 .mrpr-commit-trigger .mrpr-icon {
@@ -411,25 +414,25 @@
 .mrpr-commit-menu {
   box-sizing: border-box;
   display: flex;
-  min-inline-size: 240px;
+  min-inline-size: 15rem;
   max-inline-size: min(28rem, calc(100vw - 2rem));
   flex-direction: column;
-  gap: 2px;
-  padding: 4px;
+  gap: 0.125rem;
+  padding: 0.25rem;
 }
 .mrpr-commit-option {
   display: flex;
   min-inline-size: 0;
   align-items: center;
-  gap: 8px;
-  padding-block: 6px;
-  padding-inline: 8px;
+  gap: 0.5rem;
+  padding-block: 0.375rem;
+  padding-inline: 0.5rem;
   border: 0;
-  border-radius: 6px;
+  border-radius: 0.375rem;
   background: transparent;
   color: var(--pr-fg);
   font: inherit;
-  font-size: 12px;
+  font-size: 0.75rem;
   text-align: start;
   cursor: pointer;
 }
@@ -442,11 +445,11 @@
   margin-inline-start: auto;
   color: var(--pr-muted);
   font-family: var(--pr-font-mono);
-  font-size: 11px;
+  font-size: 0.6875rem;
 }
 .mrpr-commit-more {
   /* Its text lines up with the commits', past the check mark's place. */
-  padding-inline-start: 28px;
+  padding-inline-start: 1.75rem;
   color: var(--pr-muted);
 }
 .mrpr-invisible {
@@ -454,19 +457,19 @@
 }
 
 /* The toolbar's end: the display controls, then the file tree's toggle. The diff options are
-   buttons of their own in a toolbar at least 512 px wide, else they sit in a menu. */
+   buttons of their own in a toolbar at least 32rem wide, else they sit in a menu. */
 .mrpr-code-toolbar-end {
   display: flex;
   flex-shrink: 0;
   align-items: center;
-  gap: 2px;
+  gap: 0.125rem;
 }
 .mrpr-code-options {
   display: none;
   align-items: center;
-  gap: 2px;
+  gap: 0.125rem;
 }
-@container (min-inline-size: 512px) {
+@container (min-inline-size: 32rem) {
   .mrpr-code-options {
     display: flex;
   }
@@ -479,14 +482,14 @@
   align-items: center;
   padding: 1px;
   border: 1px solid var(--pr-border);
-  border-radius: 8px;
+  border-radius: 0.5rem;
 }
 .mrpr-options-menu {
-  min-inline-size: 200px;
+  min-inline-size: 12.5rem;
 }
 .mrpr-menu-separator {
   block-size: 1px;
-  margin-block: 4px;
+  margin-block: 0.25rem;
   background: var(--pr-border);
 }
 .mrpr-link-button {
@@ -510,12 +513,12 @@
   flex-shrink: 0;
   align-items: center;
   justify-content: center;
-  inline-size: 20px;
-  block-size: 20px;
-  margin-inline-end: 4px;
+  inline-size: 1.25rem;
+  block-size: 1.25rem;
+  margin-inline-end: 0.25rem;
   padding: 0;
   border: 0;
-  border-radius: 4px;
+  border-radius: 0.25rem;
   background: transparent;
   color: var(--pr-muted);
   cursor: pointer;
@@ -528,8 +531,8 @@
   display: inline-flex;
   flex-shrink: 0;
   align-items: center;
-  gap: 12px;
-  font-size: 11px;
+  gap: 0.75rem;
+  font-size: 0.6875rem;
 }
 .mrpr-file-meta .mrpr-diffstat {
   font-family: var(--pr-font-mono);
@@ -540,12 +543,12 @@
   display: inline-flex;
   flex-shrink: 0;
   align-items: center;
-  gap: 6px;
+  gap: 0.375rem;
   min-inline-size: 4.5rem;
-  block-size: 32px;
+  block-size: 2rem;
   color: var(--pr-muted);
   font-family: var(--pr-font-sans);
-  font-size: 11px;
+  font-size: 0.6875rem;
   cursor: pointer;
   user-select: none;
 }
@@ -558,7 +561,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 0.5rem;
 }
 /* A file without a diff has no header to fold, so its mark keeps the height of its text. */
 .mrpr-no-diff-head .mrpr-viewed {
@@ -568,8 +571,8 @@
 /* What did not load of the threads or the commits, above the diffs. */
 .mrpr-code-notices {
   flex-shrink: 0;
-  padding-block: 0 12px;
-  padding-inline: 16px;
+  padding-block: 0 0.75rem;
+  padding-inline: 1rem;
   border-block-end: 1px solid var(--pr-border);
 }
 
@@ -582,14 +585,14 @@
   display: flex;
   inline-size: 100%;
   align-items: center;
-  gap: 6px;
-  padding-block: 8px;
-  padding-inline: 16px;
+  gap: 0.375rem;
+  padding-block: 0.5rem;
+  padding-inline: 1rem;
   border: 0;
   background: transparent;
   color: var(--pr-muted);
   font: inherit;
-  font-size: 12px;
+  font-size: 0.75rem;
   text-align: start;
   cursor: pointer;
 }
@@ -598,57 +601,57 @@
 }
 .mrpr-off-diff-body {
   display: flex;
-  max-block-size: 256px;
+  max-block-size: 16rem;
   flex-direction: column;
-  gap: 12px;
+  gap: 0.75rem;
   overflow: auto;
-  padding-block: 0 12px;
-  padding-inline: 16px;
+  padding-block: 0 0.75rem;
+  padding-inline: 1rem;
 }
 .mrpr-off-diff-file {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 0.25rem;
 }
 .mrpr-off-diff-path,
 .mrpr-off-diff-line {
   margin: 0;
-  padding-inline: 12px;
+  padding-inline: 0.75rem;
   color: var(--pr-muted);
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 .mrpr-off-diff-file .mrpr-thread-card {
-  margin-block: 4px;
+  margin-block: 0.25rem;
 }
 
 /* A review thread's card, at its line in a diff or in the bar. Pierre's view draws the lines in
    the code font from left to right; the card reads as the panel does. */
 .mrpr-annotation {
-  padding-block: 4px;
+  padding-block: 0.25rem;
   color: var(--pr-fg);
   font-family: var(--pr-font-sans);
-  font-size: 13px;
+  font-size: 0.8125rem;
   line-height: 1.5;
 }
 .mrpr-annotation:dir(rtl) {
   direction: rtl;
 }
 .mrpr-thread-card {
-  margin-block: 8px;
-  margin-inline: 12px;
-  padding: 12px;
+  margin-block: 0.5rem;
+  margin-inline: 0.75rem;
+  padding: 0.75rem;
   border: 1px solid var(--pr-border);
-  border-radius: 12px;
+  border-radius: 0.75rem;
   background: var(--pr-surface);
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 .mrpr-thread-card-head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 0.5rem;
   color: var(--pr-muted);
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 .mrpr-thread-card-toggle {
   padding: 0;
@@ -664,8 +667,8 @@
 .mrpr-thread-card-comments {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  margin-block-start: 8px;
+  gap: 0.75rem;
+  margin-block-start: 0.5rem;
 }
 .mrpr-thread-comment {
   min-inline-size: 0;
@@ -674,15 +677,15 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 0.5rem;
   color: var(--pr-muted);
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 .mrpr-thread-comment-head .mrpr-reactions {
   margin-inline-start: auto;
 }
 .mrpr-thread-comment .mrpr-comment-body {
-  margin-block-start: 4px;
+  margin-block-start: 0.25rem;
 }
 /* The body's first and last paragraphs keep no margin outside it, so the card's padding is all. */
 .mrpr-thread-comment .mrpr-markdown > :first-child {
@@ -702,13 +705,13 @@
 }
 
 .mrpr-panel-note {
-  padding: 12px 16px;
+  padding: 0.75rem 1rem;
 }
 
 /* That the token was removed from MindRoom, above whatever the panel shows next. */
 .mrpr-panel-removed {
   margin: 0;
-  padding: 12px 16px 0;
+  padding: 0.75rem 1rem 0;
 }
 /* Drawn while it says nothing too, a live region, but taking no room. */
 .mrpr-panel-removed:empty {
@@ -718,24 +721,24 @@
 .mrpr-header {
   flex-shrink: 0;
   min-inline-size: 0;
-  padding-inline: 16px;
-  padding-block: 4px 16px;
+  padding-inline: 1rem;
+  padding-block: 0.25rem 1rem;
 }
 
 .mrpr-crumbs {
   display: flex;
   min-inline-size: 0;
   align-items: center;
-  gap: 4px;
-  block-size: 28px;
-  font-size: 12px;
+  gap: 0.25rem;
+  block-size: 1.75rem;
+  font-size: 0.75rem;
   font-weight: 500;
   color: var(--pr-muted);
 }
 
 .mrpr-panel-title {
   margin: 0;
-  font-size: 16px;
+  font-size: 1rem;
   font-weight: 600;
   line-height: 1.375;
   text-wrap: pretty;
@@ -746,24 +749,24 @@
   display: flex;
   min-inline-size: 0;
   align-items: center;
-  min-block-size: 20px;
-  margin-block-start: 8px;
+  min-block-size: 1.25rem;
+  margin-block-start: 0.5rem;
   white-space: nowrap;
 }
 .mrpr-panel-meta .mrpr-meta {
   min-inline-size: 0;
-  font-size: 12px;
-  line-height: 16px;
+  font-size: 0.75rem;
+  line-height: 1rem;
 }
 
 .mrpr-branches {
   display: flex;
   min-inline-size: 0;
   align-items: center;
-  gap: 8px;
-  min-block-size: 20px;
-  margin-block-start: 16px;
-  font-size: 12px;
+  gap: 0.5rem;
+  min-block-size: 1.25rem;
+  margin-block-start: 1rem;
+  font-size: 0.75rem;
   color: var(--pr-muted);
 }
 
@@ -772,14 +775,14 @@
   min-inline-size: 0;
   flex: 1;
   align-items: center;
-  gap: 6px;
+  gap: 0.375rem;
   font-family: var(--pr-font-mono);
   opacity: 0.7;
 }
 
 .mrpr-arrow {
-  inline-size: 14px;
-  block-size: 14px;
+  inline-size: 0.875rem;
+  block-size: 0.875rem;
   flex-shrink: 0;
   opacity: 0.6;
 }
@@ -802,7 +805,7 @@
   display: flex;
   min-inline-size: 0;
   align-items: center;
-  gap: 6px;
+  gap: 0.375rem;
 }
 
 .mrpr-counts {
@@ -810,16 +813,16 @@
   flex-shrink: 0;
   align-items: baseline;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 0.5rem;
   margin-inline-start: auto;
 }
 
 .mrpr-file-count {
   display: inline-flex;
-  min-inline-size: 64px;
+  min-inline-size: 4rem;
   align-items: baseline;
   justify-content: flex-end;
-  gap: 6px;
+  gap: 0.375rem;
   font-variant-numeric: tabular-nums;
 }
 .mrpr-file-icon {
@@ -831,9 +834,9 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
-  margin-block-start: 12px;
-  font-size: 12px;
+  gap: 0.75rem;
+  margin-block-start: 0.75rem;
+  font-size: 0.75rem;
 }
 
 /* The header's actions: the primary control in the accent, the menu's button, and the line that
@@ -863,7 +866,7 @@
   flex-basis: 100%;
   order: 1;
   align-items: center;
-  gap: 8px;
+  gap: 0.5rem;
   color: var(--pr-muted);
   overflow-wrap: anywhere;
 }
@@ -876,7 +879,7 @@
   margin-inline-start: auto;
 }
 .mrpr-actions-menu {
-  min-inline-size: 220px;
+  min-inline-size: 13.75rem;
 }
 /* A menu row's wrapper that holds the ref of its two-click confirm, without a box of its own. */
 .mrpr-menu-slot {
@@ -886,9 +889,9 @@
    text starts where theirs does (a menu item's 300 size). */
 .mrpr-menu-status {
   margin: 0;
-  padding: 4px 12px;
+  padding: 0.25rem 0.75rem;
   color: var(--pr-muted);
-  font-size: 12px;
+  font-size: 0.75rem;
   overflow-wrap: anywhere;
 }
 .mrpr-menu-radio-group,
@@ -900,41 +903,41 @@
 /* Where an unchosen method's check mark would be, so the labels line up. */
 .mrpr-menu-icon-space {
   flex-shrink: 0;
-  inline-size: 16px;
+  inline-size: 1rem;
 }
 .mrpr-dialog {
   box-sizing: border-box;
   inline-size: min(28rem, calc(100vw - 2rem));
-  padding: 16px;
+  padding: 1rem;
 }
 .mrpr-dialog-title {
-  margin: 0 0 8px;
-  font-size: 15px;
+  margin: 0 0 0.5rem;
+  font-size: 0.9375rem;
   font-weight: 600;
   overflow-wrap: anywhere;
 }
 .mrpr-dialog-body {
-  margin: 0 0 16px;
-  font-size: 13px;
+  margin: 0 0 1rem;
+  font-size: 0.8125rem;
   overflow-wrap: anywhere;
 }
 .mrpr-dialog-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 0.5rem;
 }
 /* A finger needs a larger target than a pointer. */
 @media (any-pointer: coarse) {
   .mrpr-button-primary,
   .mrpr-dialog-actions .mrpr-button,
   .mrpr-popover-actions .mrpr-button {
-    min-block-size: 44px;
-    padding-inline: 14px;
+    min-block-size: 2.75rem;
+    padding-inline: 0.875rem;
   }
   .mrpr-header-more,
   .mrpr-action-result-dismiss {
-    min-inline-size: 44px;
-    min-block-size: 44px;
+    min-inline-size: 2.75rem;
+    min-block-size: 2.75rem;
   }
 }
 
@@ -943,28 +946,28 @@
   flex-shrink: 0;
   min-inline-size: 0;
   align-items: center;
-  padding-block: 8px;
-  padding-inline: 16px;
+  padding-block: 0.5rem;
+  padding-inline: 1rem;
   border-block-start: 1px solid var(--pr-border);
 }
 
 .mrpr-tabs {
   display: inline-flex;
   flex-shrink: 0;
-  gap: 2px;
-  padding: 2px;
-  border-radius: 8px;
+  gap: 0.125rem;
+  padding: 0.125rem;
+  border-radius: 0.5rem;
   background: var(--pr-hover);
 }
 
 .mrpr-tab {
-  padding: 3px 12px;
+  padding: 0.1875rem 0.75rem;
   border: 0;
-  border-radius: 6px;
+  border-radius: 0.375rem;
   background: transparent;
   color: var(--pr-muted);
   font: inherit;
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 500;
   cursor: pointer;
 }
@@ -977,8 +980,8 @@
   flex: 1;
   min-block-size: 0;
   overflow: auto;
-  padding: 12px 16px;
-  font-size: 13px;
+  padding: 0.75rem 1rem;
+  font-size: 0.8125rem;
   line-height: 1.5;
 }
 .mrpr-tabpanel-code {
@@ -1049,39 +1052,39 @@
 .mrpr-button-quiet {
   border-color: transparent;
   color: var(--pr-muted);
-  font-size: 11px;
+  font-size: 0.6875rem;
 }
 
 /* The checks popover and the header's line that opens it. */
 .mrpr-popover {
   box-sizing: border-box;
-  inline-size: 360px;
+  inline-size: 22.5rem;
   max-inline-size: calc(100vw - 2rem);
-  padding: 12px;
+  padding: 0.75rem;
 }
 .mrpr-popover-fit {
   inline-size: auto;
 }
 .mrpr-popover-line {
   margin: 0;
-  font-size: 12px;
-  line-height: 16px;
+  font-size: 0.75rem;
+  line-height: 1rem;
 }
 .mrpr-popover-line + .mrpr-popover-line {
-  margin-block-start: 2px;
+  margin-block-start: 0.125rem;
 }
 .mrpr-popover-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin-block-start: 8px;
+  gap: 0.375rem;
+  margin-block-start: 0.5rem;
 }
 .mrpr-breakdown {
   display: grid;
   grid-template-columns: auto auto auto;
   justify-content: start;
-  gap: 4px 16px;
-  font-size: 12px;
+  gap: 0.25rem 1rem;
+  font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
 }
 .mrpr-breakdown > .mrpr-added,
@@ -1096,7 +1099,7 @@
 .mrpr-checks-line {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 0.375rem;
 }
 .mrpr-checks-line .mrpr-status {
   margin: 0;
@@ -1105,14 +1108,14 @@
   display: inline-flex;
   min-width: 0;
   align-items: center;
-  gap: 6px;
-  padding: 2px 6px;
+  gap: 0.375rem;
+  padding: 0.125rem 0.375rem;
   border: 0;
-  border-radius: 6px;
+  border-radius: 0.375rem;
   background: transparent;
   color: var(--pr-muted);
   font: inherit;
-  font-size: 12px;
+  font-size: 0.75rem;
   cursor: pointer;
 }
 /* The summary stays on one line: passed over all where the tab bar is too narrow for it (a phone,
@@ -1126,7 +1129,7 @@
   display: none;
   font-variant-numeric: tabular-nums;
 }
-@container mrpr-tabbar (max-width: 440px) {
+@container mrpr-tabbar (max-width: 27.5rem) {
   .mrpr-checks-full {
     display: none;
   }
@@ -1141,21 +1144,21 @@
 .mrpr-checks-heading {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 0.375rem;
   margin: 0;
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 500;
 }
 .mrpr-checks {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 4px 8px;
-  max-block-size: 256px;
-  margin: 8px 0 0;
+  gap: 0.25rem 0.5rem;
+  max-block-size: 16rem;
+  margin: 0.5rem 0 0;
   padding: 0;
   overflow-y: auto;
   list-style: none;
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 .mrpr-checks-with-details {
   grid-template-columns: auto minmax(0, 1fr) auto auto;
@@ -1192,10 +1195,10 @@
 }
 .mrpr-outcome-badge {
   position: absolute;
-  inset-inline-end: -4px;
-  inset-block-end: -4px;
-  inline-size: 12px;
-  block-size: 12px;
+  inset-inline-end: -0.25rem;
+  inset-block-end: -0.25rem;
+  inline-size: 0.75rem;
+  block-size: 0.75rem;
   border-radius: 9999px;
   background: var(--pr-surface);
 }
@@ -1205,12 +1208,12 @@
 .mrpr-badge {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 1px 6px;
+  gap: 0.25rem;
+  padding: 1px 0.375rem;
   border: 1px solid var(--pr-border);
   border-radius: 9999px;
-  font-size: 11px;
-  line-height: 16px;
+  font-size: 0.6875rem;
+  line-height: 1rem;
   white-space: nowrap;
 }
 .mrpr-badge-success {
@@ -1231,21 +1234,21 @@
   min-width: 0;
   max-inline-size: 10rem;
   align-items: center;
-  gap: 4px;
-  padding: 1px 8px;
+  gap: 0.25rem;
+  padding: 1px 0.5rem;
   border: 1px solid color-mix(in srgb, var(--label) 50%, transparent);
   border-radius: 9999px;
   background: color-mix(in srgb, var(--label) 18%, transparent);
   color: var(--pr-fg);
-  font-size: 11px;
-  line-height: 16px;
+  font-size: 0.6875rem;
+  line-height: 1rem;
 }
 
 .mrpr-actor {
   display: inline-flex;
   min-width: 0;
   align-items: center;
-  gap: 6px;
+  gap: 0.375rem;
   color: inherit;
   text-decoration: none;
 }
@@ -1262,18 +1265,18 @@
   min-width: 0;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px;
+  gap: 0.25rem;
 }
 .mrpr-reaction {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  block-size: 24px;
-  padding-inline: 8px;
+  gap: 0.25rem;
+  block-size: 1.5rem;
+  padding-inline: 0.5rem;
   border: 1px solid var(--pr-border);
   border-radius: 9999px;
   color: var(--pr-muted);
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .mrpr-comment-body {
@@ -1283,22 +1286,22 @@
   position: relative;
 }
 .mrpr-comment-clamped {
-  max-block-size: 240px;
+  max-block-size: 15rem;
   overflow: hidden;
 }
 .mrpr-comment-fade {
   position: absolute;
   inset-inline: 0;
   inset-block-end: 0;
-  block-size: 40px;
+  block-size: 2.5rem;
   pointer-events: none;
   background: linear-gradient(to top, var(--pr-surface), transparent);
 }
 .mrpr-comment-body .mrpr-button {
-  margin-block-start: 8px;
+  margin-block-start: 0.5rem;
 }
 .mrpr-markdown {
-  font-size: 13px;
+  font-size: 0.8125rem;
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
@@ -1326,7 +1329,7 @@
   display: inline-flex;
   flex-shrink: 0;
   align-items: center;
-  gap: 6px;
+  gap: 0.375rem;
   margin-inline-start: auto;
 }
 .mrpr-badge-state {
@@ -1334,14 +1337,14 @@
 }
 .mrpr-panel-meta {
   justify-content: space-between;
-  gap: 8px;
+  gap: 0.5rem;
 }
 .mrpr-base-plain,
 .mrpr-base-warning {
   display: inline-flex;
   min-inline-size: 0;
   align-items: center;
-  gap: 4px;
+  gap: 0.25rem;
 }
 .mrpr-base-warning {
   padding: 0;
@@ -1363,21 +1366,21 @@
 /* The end of the tab bar: the checks line on Summary, the counts and the order on Timeline. */
 .mrpr-tabbar {
   justify-content: space-between;
-  gap: 8px;
+  gap: 0.5rem;
   container: mrpr-tabbar / inline-size;
 }
 .mrpr-tabbar-end {
   display: flex;
   min-inline-size: 0;
   align-items: center;
-  gap: 10px;
-  font-size: 12px;
+  gap: 0.625rem;
+  font-size: 0.75rem;
   color: var(--pr-muted);
 }
 .mrpr-count {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 0.25rem;
   font-variant-numeric: tabular-nums;
 }
 
@@ -1390,32 +1393,32 @@
 .mrpr-summary-meta {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding-block-end: 4px;
+  gap: 0.5rem;
+  padding-block-end: 0.25rem;
 }
 .mrpr-meta-row {
   display: grid;
   grid-template-columns: 6rem minmax(0, 1fr);
   align-items: start;
-  gap: 8px;
-  min-block-size: 24px;
-  font-size: 12px;
+  gap: 0.5rem;
+  min-block-size: 1.5rem;
+  font-size: 0.75rem;
 }
 .mrpr-meta-row-label {
   display: flex;
   align-items: center;
-  gap: 6px;
-  min-block-size: 24px;
+  gap: 0.375rem;
+  min-block-size: 1.5rem;
   color: var(--pr-muted);
 }
 /* As tall as its label at least, centred the same way, so a one-line value sits on its line. */
 .mrpr-meta-row-value {
   display: flex;
   min-inline-size: 0;
-  min-block-size: 24px;
+  min-block-size: 1.5rem;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: 0.375rem;
 }
 .mrpr-meta-row-value .mrpr-status {
   margin: 0;
@@ -1426,7 +1429,7 @@
   min-inline-size: 0;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: 0.375rem;
 }
 .mrpr-avatars {
   display: flex;
@@ -1438,7 +1441,7 @@
   border-radius: 9999px;
 }
 .mrpr-avatars > .mrpr-reviewer + .mrpr-reviewer {
-  margin-inline-start: -4px;
+  margin-inline-start: -0.25rem;
 }
 .mrpr-reviewer:hover {
   z-index: 1;
@@ -1449,14 +1452,14 @@
 
 .mrpr-section-heading {
   position: sticky;
-  inset-block-start: -12px;
+  inset-block-start: -0.75rem;
   z-index: 2;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  margin-inline: -16px;
-  padding-inline: 16px;
+  gap: 0.5rem;
+  margin-inline: -1rem;
+  padding-inline: 1rem;
   /* The panel's own background, so a heading shows no band of its own; opaque, as it stays over
      what scrolls under it. */
   background: var(--pr-panel);
@@ -1466,15 +1469,15 @@
   min-inline-size: 0;
   flex: 1;
   align-items: center;
-  gap: 6px;
+  gap: 0.375rem;
   /* No inline padding of the button's own, so the title starts where the rows above do. */
-  padding-block: 10px;
+  padding-block: 0.625rem;
   padding-inline: 0;
   border: 0;
   background: transparent;
   color: var(--pr-muted);
   font: inherit;
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 500;
   text-align: start;
   cursor: pointer;
@@ -1492,18 +1495,18 @@
   scale: -1 1;
 }
 .mrpr-section-body {
-  padding-block-end: 12px;
+  padding-block-end: 0.75rem;
 }
 .mrpr-section-actions {
   display: flex;
   flex-shrink: 0;
   align-items: center;
-  gap: 4px;
+  gap: 0.25rem;
 }
 .mrpr-section-actions .mrpr-button {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 0.25rem;
 }
 .mrpr-button-wide {
   inline-size: 100%;
@@ -1512,33 +1515,33 @@
 .mrpr-conversations {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 0.75rem;
 }
 .mrpr-thread {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 0.5rem;
 }
 .mrpr-replies {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-inline-start: 16px;
-  padding-inline-start: 12px;
+  gap: 0.5rem;
+  margin-inline-start: 1rem;
+  padding-inline-start: 0.75rem;
   border-inline-start: 2px solid var(--pr-border);
 }
 .mrpr-comment-card {
   min-inline-size: 0;
   border: 1px solid var(--pr-border);
-  border-radius: 8px;
-  padding: 10px 12px;
+  border-radius: 0.5rem;
+  padding: 0.625rem 0.75rem;
 }
 .mrpr-comment-head {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 8px;
-  font-size: 12px;
+  gap: 0.5rem;
+  font-size: 0.75rem;
 }
 .mrpr-comment-head .mrpr-reactions {
   margin-inline-start: auto;
@@ -1555,23 +1558,23 @@ a.mrpr-time-link:hover {
   display: flex;
   min-inline-size: 0;
   align-items: center;
-  gap: 8px;
-  margin-block-start: 8px;
+  gap: 0.5rem;
+  margin-block-start: 0.5rem;
   color: var(--pr-muted);
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 .mrpr-mono {
   font-family: var(--pr-font-mono);
 }
 .mrpr-comment-card .mrpr-comment-body {
-  margin-block-start: 8px;
+  margin-block-start: 0.5rem;
 }
 
 .mrpr-timeline {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 0.25rem;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -1580,32 +1583,32 @@ a.mrpr-time-link:hover {
 .mrpr-timeline::before {
   content: '';
   position: absolute;
-  inset-block: 16px;
-  inset-inline-start: 11px;
+  inset-block: 1rem;
+  inset-inline-start: calc(0.75rem - 1px);
   inline-size: 1px;
   background: var(--pr-border);
 }
 .mrpr-timeline-event {
   position: relative;
   min-inline-size: 0;
-  padding-inline-start: 36px;
+  padding-inline-start: 2.25rem;
 }
 .mrpr-timeline-marker {
   position: absolute;
   inset-inline-start: 0;
-  inset-block-start: 6px;
+  inset-block-start: 0.375rem;
   z-index: 1;
   display: flex;
-  inline-size: 24px;
-  block-size: 24px;
+  inline-size: 1.5rem;
+  block-size: 1.5rem;
   align-items: center;
   justify-content: center;
   background: var(--pr-surface);
   color: var(--pr-muted);
 }
 .mrpr-timeline-marker .mrpr-avatar {
-  inline-size: 20px;
-  block-size: 20px;
+  inline-size: 1.25rem;
+  block-size: 1.25rem;
 }
 .mrpr-timeline-marker-muted {
   opacity: 0.55;
@@ -1615,8 +1618,8 @@ a.mrpr-time-link:hover {
   inline-size: 100%;
   min-inline-size: 0;
   flex-direction: column;
-  gap: 2px;
-  padding: 6px 0;
+  gap: 0.125rem;
+  padding: 0.375rem 0;
   border: 0;
   background: none;
   color: inherit;
@@ -1637,21 +1640,21 @@ button.mrpr-timeline-row:hover .mrpr-timeline-title {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 8px;
+  gap: 0.25rem 0.5rem;
   color: var(--pr-muted);
-  font-size: 11px;
+  font-size: 0.6875rem;
 }
 .mrpr-timeline-group-toggle {
   display: flex;
   inline-size: 100%;
   align-items: center;
-  gap: 8px;
-  padding: 6px 0;
+  gap: 0.5rem;
+  padding: 0.375rem 0;
   border: 0;
   background: none;
   color: var(--pr-muted);
   font: inherit;
-  font-size: 12px;
+  font-size: 0.75rem;
   text-align: start;
   cursor: pointer;
 }
@@ -1661,8 +1664,8 @@ button.mrpr-timeline-row:hover .mrpr-timeline-title {
 .mrpr-timeline-group-items {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding-block-end: 4px;
+  gap: 0.5rem;
+  padding-block-end: 0.25rem;
 }
 .mrpr-timeline-stale {
   color: var(--pr-muted);
@@ -1712,7 +1715,7 @@ button.mrpr-timeline-row:hover .mrpr-timeline-title {
   flex: none;
   flex-wrap: nowrap;
   align-items: center;
-  gap: 4px;
+  gap: 0.25rem;
 }
 .mrpr-thread-card-chip {
   display: contents;
@@ -1882,7 +1885,7 @@ button.mrpr-thread-menu-item[aria-current='true'] {
 /* A chip's hover card: fixed by its chip, placed and capped in height by usePlacement, hidden
    until then. It takes no pointer, so the pointer goes on to the chip and the card's button under
    it. Sized in rem and em, it follows the client's page zoom; its own rules size the shared parts
-   it draws (avatars, icons, labels, meta lines), which the panel sizes in px. */
+   it draws (avatars, icons, labels, meta lines) apart from the panel's. */
 .mrpr-hover {
   position: fixed;
   box-sizing: border-box;
@@ -2031,22 +2034,22 @@ button.mrpr-thread-menu-item[aria-current='true'] {
 .mrpr-details {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 0.625rem;
   --mrpr-details-tone: 45%;
   color: color-mix(in srgb, var(--pr-fg) 84%, var(--pr-surface));
-  font-size: 12px;
-  line-height: 16px;
+  font-size: 0.75rem;
+  line-height: 1rem;
 }
 .mrpr-details-pull-request,
 .mrpr-details-worktree {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 0.1875rem;
   min-inline-size: 0;
 }
 .mrpr-details-pull-request + .mrpr-details-pull-request,
 .mrpr-details-pull-request + .mrpr-details-worktree {
-  padding-block-start: 10px;
+  padding-block-start: 0.625rem;
   border-block-start: 1px solid var(--pr-border);
 }
 /* A pull request's lines wrap between their parts, never inside one. */
@@ -2065,13 +2068,13 @@ button.mrpr-thread-menu-item[aria-current='true'] {
   display: flex;
   min-inline-size: 0;
   align-items: flex-start;
-  gap: 6px;
+  gap: 0.375rem;
 }
 .mrpr-details .mrpr-icon {
   flex: none;
   inline-size: calc(0.65rem * 1.1);
   block-size: calc(0.65rem * 1.1);
-  margin-block: calc((16px - 0.65rem * 1.1) / 2);
+  margin-block: calc((1rem - 0.65rem * 1.1) / 2);
 }
 /* The words of a state or of the checks (in the parent's tone), the size and this worktree, in
    their tone mixed with the text's color: GitHub's colors and the theme's are an icon's, too light
@@ -2097,9 +2100,9 @@ button.mrpr-thread-menu-item[aria-current='true'] {
   overflow: hidden;
   margin: 0;
   color: var(--pr-fg);
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 600;
-  line-height: 17px;
+  line-height: 1.0625rem;
   overflow-wrap: anywhere;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -2107,7 +2110,7 @@ button.mrpr-thread-menu-item[aria-current='true'] {
 }
 .mrpr-details-label {
   margin: 0;
-  font-size: 10.5px;
+  font-size: 0.65625rem;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -2119,5 +2122,5 @@ button.mrpr-thread-menu-item[aria-current='true'] {
 }
 .mrpr-details-path {
   font-family: var(--pr-font-mono);
-  font-size: 11px;
+  font-size: 0.6875rem;
 }
