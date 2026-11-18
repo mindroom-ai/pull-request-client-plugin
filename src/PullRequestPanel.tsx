@@ -48,7 +48,9 @@ import { pluginRootStyle } from './theme';
 import {
   PanelTokenFormContext,
   GitHubConnectedNote,
+  RemovedTokenNote,
   RemoveServerToken,
+  RemovedTokenProvider,
   RoomGitHub,
   TokenForm,
   useGitHubAccess,
@@ -298,7 +300,11 @@ type PanelProps = { roomId: string; request?: unknown };
 export default function PullRequestPanel(props: PanelProps) {
   return (
     <RoomGitHub roomId={props.roomId}>
-      <Panel {...props} />
+      {/* A token removed from MindRoom may take the pull request with it (it reads anonymously
+          then, or not at all), so the panel says it was removed, where neither view replaces it. */}
+      <RemovedTokenProvider>
+        <Panel {...props} />
+      </RemovedTokenProvider>
     </RoomGitHub>
   );
 }
@@ -367,6 +373,7 @@ function Panel({ roomId, request }: PanelProps) {
         focused.current = false;
       }}
     >
+      <RemovedTokenNote className="mrpr-status mrpr-panel-removed" />
       {!ref ? (
         <p className="mrpr-status mrpr-panel-note">{t('emptyPanel')}</p>
       ) : !pr || !state ? (

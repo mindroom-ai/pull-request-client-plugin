@@ -444,36 +444,98 @@ function useServerToken() {
   }, [forget, origin, queryClient, server, storedToken, writing]);
 }
 
+/** That a token was removed from MindRoom, by the origin it was removed from, and how to say so. */
+type RemovedToken = { removed: string | undefined; setRemoved(origin: string | undefined): void };
+
+/** Where a token's removal is kept, for one part whose own parts may go and come back meanwhile. */
+function useRemovedToken(): RemovedToken {
+  const [removed, setRemoved] = useState<string>();
+  return useMemo(() => ({ removed, setRemoved }), [removed]);
+}
+
+const NO_REMOVAL: RemovedToken = { removed: undefined, setRemoved: () => undefined };
+const RemovedTokenContext = createContext<RemovedToken | undefined>(undefined);
+
+/**
+ * The panel's: there what removed the token goes once it is removed (the header, an error), and
+ * what shows next may be another of them, so the panel says it was removed (`RemovedTokenNote`).
+ * Forgotten with the panel.
+ */
+export function RemovedTokenProvider({ children }: { children: ReactNode }) {
+  const value = useRemovedToken();
+  return <RemovedTokenContext.Provider value={value}>{children}</RemovedTokenContext.Provider>;
+}
+
+/**
+ * Says that the token was removed from MindRoom, from the room's server, and takes the focus as it
+ * does: the button that removed it goes with it. Gone once a token is used again.
+ */
+export function RemovedTokenNote({
+  note: own,
+  className,
+}: {
+  /** Whose removal it says; the panel's, inside it, without one. */
+  note?: RemovedToken;
+  /** For a note of its own line: the class of the paragraph it is then. */
+  className?: string;
+}) {
+  const lifted = useContext(RemovedTokenContext);
+  const note = own ?? lifted ?? NO_REMOVAL;
+  const t = usePluginTranslation('pull-requests');
+  const { via, connection } = useGitHubAccess();
+  const serverToken = useServerToken();
+  const said = useRef<HTMLSpanElement>(null);
+  const writing = serverToken?.writing === true;
+  const removed = serverToken !== undefined && note.removed === serverToken.origin;
+  // A token saved again, here or in the browser, is not the one removed.
+  const used = via === 'token' || (via === 'server' && connection === 'token');
+  const shown = removed && !used && !writing;
+  const { setRemoved } = note;
+  useEffect(() => {
+    if (removed && used && !writing) setRemoved(undefined);
+  }, [removed, setRemoved, used, writing]);
+  useEffect(() => {
+    if (shown) said.current?.focus();
+  }, [shown]);
+  if (!shown) return null;
+  const text = (
+    <span ref={said} tabIndex={-1}>
+      {t('token.removed')}
+    </span>
+  );
+  return className === undefined ? text : <p className={className}>{text}</p>;
+}
+
 /** Removes the token saved in MindRoom, while the requests through MindRoom go with it. */
 export function RemoveServerToken() {
+  const lifted = useContext(RemovedTokenContext);
+  const own = useRemovedToken();
+  // Outside the panel it says itself that the token was removed, where it was.
+  return lifted ? (
+    <RemoveButton note={lifted} />
+  ) : (
+    <>
+      <RemoveButton note={own} />
+      <RemovedTokenNote note={own} />
+    </>
+  );
+}
+
+function RemoveButton({ note }: { note: RemovedToken }) {
   const t = usePluginTranslation('pull-requests');
   const { via, connection, appConnected } = useGitHubAccess();
   const serverToken = useServerToken();
   const [failed, setFailed] = useState(false);
-  const [removed, setRemoved] = useState(false);
   const fallsBack = useId();
-  const said = useRef<HTMLSpanElement>(null);
   const shown = via === 'server' && connection === 'token' && serverToken !== undefined;
-  // The button goes once the token is removed: focus goes to what says so, not to the page.
-  useEffect(() => {
-    if (removed && !shown) said.current?.focus();
-  }, [removed, shown]);
-  // A token saved again is not the one removed: one that goes later was not removed here.
-  if (shown && removed && !serverToken.writing) setRemoved(false);
-  if (!shown) {
-    return removed ? (
-      <span ref={said} tabIndex={-1}>
-        {t('token.removed')}
-      </span>
-    ) : null;
-  }
+  if (!shown) return null;
   const remove = async () => {
     if (serverToken.busy()) return;
     setFailed(false);
-    setRemoved(false);
+    note.setRemoved(undefined);
     const done = await serverToken.remove();
     setFailed(!done);
-    setRemoved(done);
+    note.setRemoved(done ? serverToken.origin : undefined);
   };
   return (
     <>

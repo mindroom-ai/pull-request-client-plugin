@@ -1147,8 +1147,35 @@ describe('with the GitHub account connected in MindRoom', () => {
       )
     ).toBeTruthy();
     expect(view.queryByText(title as string)).toBeNull();
-    // The focus goes from the button, gone with the header, to the token form.
-    expect(document.activeElement).toBe(view.getByLabelText('GitHub token'));
+    // The focus goes from the button, gone with the header, to what says the token is removed.
+    expect(view.getByLabelText('GitHub token')).toBeTruthy();
+    await waitUntil(() =>
+      expect(document.activeElement).toBe(view.getByText('Token removed from MindRoom.'))
+    );
+  });
+
+  it('keeps saying the token is removed, focused, once the pull request no longer reads without it', async () => {
+    const mindroom = githubServer(withUser);
+    await saveInMindroom(mindroom);
+    // No GitHub App: once the token is removed, the panel reads anonymously, and GitHub hides it.
+    mindroom.connected(false);
+    fetchMock.mockImplementation(async () => respond({ message: 'Not Found' }, 404));
+    roomServer.current = mindroom.server;
+    const view = await show();
+    expect(await view.findByText('Signed in as pat-login through MindRoom (token).')).toBeTruthy();
+    view.getByRole('button', { name: 'Remove token from MindRoom' }).focus();
+    await click(view.getByRole('button', { name: 'Remove token from MindRoom' }));
+    await waitUntil(() => expect(fetchMock).toHaveBeenCalled());
+    expect(await view.findByText(/GitHub did not find this pull request/)).toBeTruthy();
+    const note = view.getByText('Token removed from MindRoom.');
+    await waitUntil(() => expect(document.activeElement).toBe(note));
+    expect(mindroom.storedToken()).toBeUndefined();
+    // A token saved there again is not the one removed.
+    await type(view.getByLabelText('GitHub token'), 'ghp_good');
+    await click(view.getByLabelText('Save in MindRoom at mindroom.example.org'));
+    await click(view.getByRole('button', { name: 'Save' }));
+    expect(await view.findByText('Signed in as pat-login through MindRoom (token).')).toBeTruthy();
+    expect(view.queryByText('Token removed from MindRoom.')).toBeNull();
   });
 
   it('names the token saved in MindRoom, and removes it from there, back to the App', async () => {
@@ -1187,8 +1214,10 @@ describe('with the GitHub account connected in MindRoom', () => {
         await view.findByText('Signed in as octo through MindRoom (GitHub App).')
       ).toBeTruthy();
       expect(view.queryByText(said)).toBeNull();
-      // The focus goes from the button, gone with the error, to the pull request's title.
-      await waitUntil(() => expect(document.activeElement?.className).toBe('mrpr-panel-title'));
+      // The focus goes from the button, gone with the error, to what says the token is removed.
+      await waitUntil(() =>
+        expect(document.activeElement).toBe(view.getByText('Token removed from MindRoom.'))
+      );
       expect(mindroom.storedToken()).toBeUndefined();
     }
   );

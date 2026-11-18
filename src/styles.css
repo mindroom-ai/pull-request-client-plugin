@@ -705,6 +705,12 @@
   padding: 12px 16px;
 }
 
+/* That the token was removed from MindRoom, above whatever the panel shows next. */
+.mrpr-panel-removed {
+  margin: 0;
+  padding: 12px 16px 0;
+}
+
 .mrpr-header {
   flex-shrink: 0;
   min-inline-size: 0;
