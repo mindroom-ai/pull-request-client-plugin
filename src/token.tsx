@@ -737,6 +737,9 @@ const hostOf = (origin: string) => {
   }
 };
 
+/** Why the token form shows, which its hint says. */
+export type TokenFormReason = 'notFound' | 'rateLimited' | 'badToken' | 'unreadable' | 'override';
+
 export function TokenForm({
   reason,
   inputRef,
@@ -747,7 +750,7 @@ export function TokenForm({
    * Why it shows; `override`, to use a token instead of MindRoom's connection, has no hint;
    * `unreadable`, MindRoom cannot read the token saved there, also offers to remove it.
    */
-  reason: 'notFound' | 'rateLimited' | 'badToken' | 'unreadable' | 'override';
+  reason: TokenFormReason;
   inputRef?: Ref<HTMLInputElement>;
   /** Closes the form without saving, for one the person opened; without it, none shows. */
   onCancel?: () => void;

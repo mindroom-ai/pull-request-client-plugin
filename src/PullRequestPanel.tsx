@@ -1,6 +1,14 @@
 // Ported from T3 Code (https://github.com/pingdotgg/t3code, apps/web/src/components/pullRequest/PullRequestDetailLayout.tsx and PullRequestDetailCrumbs.tsx at 8ab427c6), MIT, Copyright (c) 2026 T3 Tools Inc. See NOTICE.
 // The side panel: the header of the pull request a link opened, then its Summary and its Code.
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import {
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+} from 'react';
 import {
   ArrowLeft,
   Check,
@@ -27,7 +35,7 @@ import {
   type PullRequest,
   type PullRequestRef,
 } from './github';
-import { GitHubErrorState } from './GitHubErrorState';
+import { GitHubErrorState, useErrorTokenReason } from './GitHubErrorState';
 import {
   PullRequestActorLabel,
   PullRequestMetaLine,
@@ -48,12 +56,14 @@ import { pluginRootStyle } from './theme';
 import {
   PanelTokenFormContext,
   GitHubConnectedNote,
+  GitHubServerContext,
   RemovedTokenNote,
   placeFocus,
   RemoveServerToken,
   RemovedTokenProvider,
   RoomGitHub,
   TokenForm,
+  type TokenFormReason,
   useGitHubAccess,
   useGitHubToken,
   usePanelTokenForm,
@@ -321,6 +331,8 @@ function Panel({ roomId, request }: PanelProps) {
   const query = usePullRequest(ref);
   const { token, forget } = useGitHubToken();
   const { via, unreadable } = useGitHubAccess();
+  const { server } = useContext(GitHubServerContext);
+  const serverOrigin = server?.origin ?? '';
   const tokenForm = usePanelTokenForm();
   // The token form a person opened to use a token instead of MindRoom's connection, which goes
   // once a token is saved.
@@ -368,6 +380,16 @@ function Panel({ roomId, request }: PanelProps) {
   const behind = useBehindBy(ref, pr?.baseRef ?? '', pr?.headSha ?? '', pr?.state === 'open');
   const freshness =
     pr?.state === 'open' ? baseFreshness(behind.data, pr.mergeableState) : undefined;
+  // Why the panel's token form shows: in the loaded view, for the token MindRoom cannot read, a
+  // part below that a token would let load, or Use a token instead; else as the error view says.
+  const errorReason = useErrorTokenReason(error);
+  const formReason: TokenFormReason | undefined = !ref
+    ? undefined
+    : !pr || !state
+    ? errorReason
+    : unreadable
+    ? 'unreadable'
+    : tokenForm.reason ?? (overriding && via === 'server' ? 'override' : undefined);
   const forkOwner =
     pr?.headRepo && pr.headRepo !== pr.baseRepo ? pr.headRepo.split('/')[0] : undefined;
 
@@ -383,25 +405,23 @@ function Panel({ roomId, request }: PanelProps) {
         focused.current = false;
       }}
     >
-      <RemovedTokenNote className="mrpr-status mrpr-panel-removed" />
-      {!ref ? (
-        <p className="mrpr-status mrpr-panel-note">{t('emptyPanel')}</p>
-      ) : !pr || !state ? (
-        <div className="mrpr-panel-note">
-          {error === undefined ? (
-            <p className="mrpr-status">{t('loading')}</p>
-          ) : (
-            <GitHubErrorState
-              error={error}
-              onRetry={() => void query.refetch()}
-              tokenForm={false}
-            />
-          )}
-          {/* Its own place, so that it stays while the pull request loads, fails and loads. */}
-          {unreadable ? <TokenForm reason="unreadable" /> : null}
-        </div>
-      ) : (
-        <PanelTokenFormContext.Provider value={tokenForm.context}>
+      <PanelTokenFormContext.Provider value={tokenForm.context}>
+        <RemovedTokenNote className="mrpr-status mrpr-panel-removed" />
+        {!ref ? (
+          <p className="mrpr-status mrpr-panel-note">{t('emptyPanel')}</p>
+        ) : !pr || !state ? (
+          <div className="mrpr-panel-note">
+            {error === undefined ? (
+              <p className="mrpr-status">{t('loading')}</p>
+            ) : (
+              <GitHubErrorState
+                error={error}
+                onRetry={() => void query.refetch()}
+                withTokenForm={false}
+              />
+            )}
+          </div>
+        ) : (
           <div className="mrpr-header">
             <div className="mrpr-crumbs">
               <state.Icon aria-hidden className={`mrpr-icon ${state.toneClassName}`} />
@@ -508,66 +528,74 @@ function Panel({ roomId, request }: PanelProps) {
               ) : null}
             </div>
           </div>
-          {/* One token form for every part below that a token would let load, and for the token
-              MindRoom cannot read, which nothing else mends. */}
-          {unreadable || tokenForm.reason || (overriding && via === 'server') ? (
-            <div className="mrpr-panel-token">
-              <TokenForm
-                reason={unreadable ? 'unreadable' : tokenForm.reason ?? 'override'}
-                inputRef={tokenForm.inputRef}
-                // Only the form opened to use a token instead closes: a failure keeps the other.
-                onCancel={unreadable || tokenForm.reason ? undefined : () => setOverriding(false)}
-                // A token saved in MindRoom keeps the requests going through it, so the form
-                // opened for it closes once it is saved.
-                onSaved={() => setOverriding(false)}
-              />
-            </div>
-          ) : null}
-          <TabBar
-            value={tab}
-            onChange={setTab}
-            end={
-              tab === 'summary' ? (
-                <ChecksStatusLine pullRequest={pr} pullRequestRef={ref} />
-              ) : tab === 'timeline' ? (
-                <TimelineBarEnd
-                  pullRequest={pr}
-                  pullRequestRef={ref}
-                  order={order}
-                  onOrder={setOrder}
-                />
-              ) : null
-            }
-          />
-          <div
-            className={tab === 'code' ? 'mrpr-tabpanel mrpr-tabpanel-code' : 'mrpr-tabpanel'}
-            role="tabpanel"
-            id={`mrpr-tabpanel-${tab}`}
-            aria-labelledby={`mrpr-tab-${tab}`}
-          >
-            {tab === 'summary' ? (
-              <SummaryTab pullRequest={pr} pullRequestRef={ref} />
-            ) : tab === 'timeline' ? (
-              <TimelineTab
-                pullRequestRef={ref}
-                pullRequest={pr}
-                order={order}
-                onOpenCommit={(sha) => {
-                  selectCommit(sha);
-                  setTab('code');
-                }}
-              />
-            ) : (
-              <Files
-                pullRequest={ref}
-                commitCount={pr.commitCount}
-                commit={selectedCommit}
-                onCommitChange={selectCommit}
-              />
-            )}
+        )}
+        {/* Invariant: the panel's token form has exactly one owner, here, and one tree position,
+          keyed only by the server's origin and the pull request; the loading, error and loaded
+          views never mount their own copy. So what was typed in it, where it saves, and what came
+          of a save stay while the pull request loads, fails and loads. */}
+        {formReason ? (
+          <div className="mrpr-panel-token" key={`${serverOrigin} ${pullRequestKey}`}>
+            <TokenForm
+              reason={formReason}
+              inputRef={tokenForm.inputRef}
+              // Only the form opened to use a token instead closes: a failure keeps the other.
+              onCancel={
+                formReason === 'override' && overriding ? () => setOverriding(false) : undefined
+              }
+              // A token saved in MindRoom keeps the requests going through it, so the form
+              // opened for it closes once it is saved.
+              onSaved={() => setOverriding(false)}
+            />
           </div>
-        </PanelTokenFormContext.Provider>
-      )}
+        ) : null}
+        {pr && state && ref ? (
+          <>
+            <TabBar
+              value={tab}
+              onChange={setTab}
+              end={
+                tab === 'summary' ? (
+                  <ChecksStatusLine pullRequest={pr} pullRequestRef={ref} />
+                ) : tab === 'timeline' ? (
+                  <TimelineBarEnd
+                    pullRequest={pr}
+                    pullRequestRef={ref}
+                    order={order}
+                    onOrder={setOrder}
+                  />
+                ) : null
+              }
+            />
+            <div
+              className={tab === 'code' ? 'mrpr-tabpanel mrpr-tabpanel-code' : 'mrpr-tabpanel'}
+              role="tabpanel"
+              id={`mrpr-tabpanel-${tab}`}
+              aria-labelledby={`mrpr-tab-${tab}`}
+            >
+              {tab === 'summary' ? (
+                <SummaryTab pullRequest={pr} pullRequestRef={ref} />
+              ) : tab === 'timeline' ? (
+                <TimelineTab
+                  pullRequestRef={ref}
+                  pullRequest={pr}
+                  order={order}
+                  onOpenCommit={(sha) => {
+                    selectCommit(sha);
+                    setTab('code');
+                  }}
+                />
+              ) : (
+                <Files
+                  pullRequest={ref}
+                  commitCount={pr.commitCount}
+                  commit={selectedCommit}
+                  onCommitChange={selectCommit}
+                />
+              )}
+            </div>
+          </>
+        ) : null}
+      </PanelTokenFormContext.Provider>
     </div>
   );
 }

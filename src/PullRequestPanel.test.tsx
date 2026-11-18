@@ -1414,6 +1414,28 @@ describe('with the GitHub account connected in MindRoom', () => {
     expect(view.getAllByLabelText('GitHub token')).toHaveLength(1);
   });
 
+  it('keeps the form, what was typed and where it saves, once the pull request reads without it', async () => {
+    const mindroom = githubServer(withUser);
+    await saveInMindroom(mindroom);
+    mindroom.unreadable(true);
+    let release!: (value: Response) => void;
+    const held = new Promise<Response>((resolve) => (release = resolve));
+    const files = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url, init) =>
+      url.endsWith('/pulls/200') ? held : files(url, init)
+    );
+    roomServer.current = mindroom.server;
+    const view = await show();
+    await type(await view.findByLabelText('GitHub token'), 'ghp_typed');
+    await click(view.getByLabelText('Save in MindRoom at mindroom.example.org'));
+    await act(async () => release(respond(pull())));
+    expect(await view.findByText('Add pull request cards')).toBeTruthy();
+    expect((view.getByLabelText('GitHub token') as HTMLInputElement).value).toBe('ghp_typed');
+    const inMindroom = view.getByLabelText('Save in MindRoom at mindroom.example.org');
+    expect((inMindroom as HTMLInputElement).checked).toBe(true);
+    expect(view.getAllByLabelText('GitHub token')).toHaveLength(1);
+  });
+
   it.each([
     ['MindRoom cannot read the token saved there', true],
     ['GitHub hides the pull request', false],
