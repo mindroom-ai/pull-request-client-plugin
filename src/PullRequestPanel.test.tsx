@@ -1138,7 +1138,9 @@ describe('with the GitHub account connected in MindRoom', () => {
       const view = await show();
       expect(await view.findByText(said)).toBeTruthy();
       await click(view.getByRole('button', { name: 'Remove token from MindRoom' }));
-      expect(await view.findByText('Signed in as octo through MindRoom (GitHub App).')).toBeTruthy();
+      expect(
+        await view.findByText('Signed in as octo through MindRoom (GitHub App).')
+      ).toBeTruthy();
       expect(view.queryByText(said)).toBeNull();
       expect(mindroom.storedToken()).toBeUndefined();
     }

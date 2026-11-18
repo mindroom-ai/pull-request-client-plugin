@@ -411,7 +411,11 @@ describe('the token saved in MindRoom', () => {
       if (auth === 'Bearer ghp_new') return respond({ login: 'octo' });
       return respond({ message: 'Bad credentials' }, 401);
     }
-    const title = !auth ? 'with the App' : auth === 'Bearer ghp_new' ? 'with the new token' : 'with the token';
+    const title = !auth
+      ? 'with the App'
+      : auth === 'Bearer ghp_new'
+      ? 'with the new token'
+      : 'with the token';
     return respond({ ...apiPull, title });
   };
   const type = (field: HTMLElement, value: string) =>
@@ -528,19 +532,26 @@ describe('the token saved in MindRoom', () => {
   it.each([
     ['GitHub refused it', 'ghp_refused', 'GitHub refused this token.'],
     ['it is no token (422)', 'ghp bad', 'This is not a GitHub token.'],
-    ['GitHub could not be reached (502)', 'ghp_down', 'MindRoom could not save the token. Try again.'],
-  ])('says so when %s, keeps it in the field to try again, and nowhere else', async (_, token, said) => {
-    const mindroom = githubServer(github);
-    const view = await form(mindroom.server);
-    await waitUntil(() => expect(accesses.reader?.connection).toBe('app'));
-    await chooseMindroom(view);
-    await save(view, token);
-    await waitUntil(() => expect(view.getByRole('alert').textContent).toBe(said));
-    expect(mindroom.storedToken()).toBeUndefined();
-    expect(accesses.reader?.connection).toBe('app');
-    expect(field(view).value).toBe(token);
-    expect(kept(token)).toBe(false);
-  });
+    [
+      'GitHub could not be reached (502)',
+      'ghp_down',
+      'MindRoom could not save the token. Try again.',
+    ],
+  ])(
+    'says so when %s, keeps it in the field to try again, and nowhere else',
+    async (_, token, said) => {
+      const mindroom = githubServer(github);
+      const view = await form(mindroom.server);
+      await waitUntil(() => expect(accesses.reader?.connection).toBe('app'));
+      await chooseMindroom(view);
+      await save(view, token);
+      await waitUntil(() => expect(view.getByRole('alert').textContent).toBe(said));
+      expect(mindroom.storedToken()).toBeUndefined();
+      expect(accesses.reader?.connection).toBe('app');
+      expect(field(view).value).toBe(token);
+      expect(kept(token)).toBe(false);
+    }
+  );
 
   it.each([404, 405])(
     'says a MindRoom server that answers %s cannot save tokens yet',

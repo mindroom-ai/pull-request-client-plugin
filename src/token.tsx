@@ -167,12 +167,7 @@ function readAgain(queryClient: QueryClient, refetch?: AccessKey) {
  * Another way to the same login, or another token of it, keeps its keys, so what shows under them
  * is read again here.
  */
-function setStatus(
-  queryClient: QueryClient,
-  origin: string,
-  status: ServerStatus,
-  saved = false
-) {
+function setStatus(queryClient: QueryClient, origin: string, status: ServerStatus, saved = false) {
   const before = queryClient.getQueryData<ServerStatus>(statusKey(origin));
   queryClient.setQueryData(statusKey(origin), status);
   if (!before) return;

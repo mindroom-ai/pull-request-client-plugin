@@ -102,7 +102,9 @@ export function GitHubErrorState({
         </button>
       ) : null}
       {/* The token saved in MindRoom comes before the App, and nothing loads while it fails. */}
-      {via === 'server' && connection === 'token' && (kind === 'badToken' || kind === 'notFound') ? (
+      {via === 'server' &&
+      connection === 'token' &&
+      (kind === 'badToken' || kind === 'notFound') ? (
         <p className="mrpr-status">
           <RemoveServerToken />
         </p>
