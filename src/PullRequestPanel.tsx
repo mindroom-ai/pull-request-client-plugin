@@ -49,6 +49,7 @@ import {
   PanelTokenFormContext,
   GitHubConnectedNote,
   RemovedTokenNote,
+  placeFocus,
   RemoveServerToken,
   RemovedTokenProvider,
   RoomGitHub,
@@ -336,7 +337,7 @@ function Panel({ roomId, request }: PanelProps) {
   const focused = useRef(false);
   useEffect(() => {
     if (!focused.current || document.activeElement !== document.body) return;
-    root.current?.querySelector<HTMLElement>('.mrpr-panel-title, .mrpr-token input')?.focus();
+    placeFocus(root.current?.querySelector<HTMLElement>('.mrpr-panel-title, .mrpr-token input'));
   });
   const [tab, setTab] = useState<Tab>('summary');
   // The Timeline tab's order, which the tab bar's toggle sets.

@@ -1319,6 +1319,56 @@ describe('with the GitHub account connected in MindRoom', () => {
     expect(view.queryByText('Token removed from MindRoom.')).toBeNull();
   });
 
+  it('leaves the focus where the person moved it while the token was being removed', async () => {
+    const mindroom = githubServer(withUser);
+    await saveInMindroom(mindroom);
+    let proceed!: () => void;
+    const held = new Promise<void>((resolve) => (proceed = resolve));
+    const real = mindroom.server.request.getMockImplementation()!;
+    mindroom.server.request.mockImplementation(async (path, init) => {
+      if (path === '/api/github/token' && init?.method === 'DELETE') await held;
+      return real(path, init);
+    });
+    roomServer.current = mindroom.server;
+    const view = await show();
+    const remove = await view.findByRole('button', { name: 'Remove token from MindRoom' });
+    remove.focus();
+    await click(remove);
+    const elsewhere = document.body.appendChild(document.createElement('button'));
+    try {
+      elsewhere.focus();
+      await act(async () => proceed());
+      const note = await view.findByText('Token removed from MindRoom.');
+      // Said, not focused: the line it is in is a live region.
+      expect(note.closest('[aria-live="polite"]')).toBeTruthy();
+      expect(document.activeElement).toBe(elsewhere);
+    } finally {
+      elsewhere.remove();
+    }
+  });
+
+  it('focuses the note once per removal, not again when a later save fails', async () => {
+    const mindroom = githubServer(withUser);
+    await saveInMindroom(mindroom);
+    mindroom.connected(false);
+    fetchMock.mockImplementation(async () => respond({ message: 'Not Found' }, 404));
+    roomServer.current = mindroom.server;
+    const view = await show();
+    const remove = await view.findByRole('button', { name: 'Remove token from MindRoom' });
+    remove.focus();
+    await click(remove);
+    const note = await view.findByText('Token removed from MindRoom.');
+    await waitUntil(() => expect(document.activeElement).toBe(note));
+    await type(view.getByLabelText('GitHub token'), 'ghp_bad');
+    await click(view.getByLabelText('Save in MindRoom at mindroom.example.org'));
+    view.getByRole('button', { name: 'Save' }).focus();
+    await click(view.getByRole('button', { name: 'Save' }));
+    await waitUntil(() => expect(mindroom.tokenRequests()).toEqual(['PUT', 'DELETE', 'PUT']));
+    await waitUntil(() => expect(document.activeElement).toBe(view.getByLabelText('GitHub token')));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(document.activeElement).toBe(view.getByLabelText('GitHub token'));
+  });
+
   const UNREADABLE = 'MindRoom cannot read the token saved there. Save a new one or remove it.';
 
   it('says MindRoom cannot read the token saved there, and saves a new one there', async () => {

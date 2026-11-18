@@ -476,12 +476,28 @@ function useServerToken() {
   }, [forget, origin, queryClient, server, storedToken, writing]);
 }
 
-/** That a token was removed from MindRoom, by the origin it was removed from, and how to say so. */
-type RemovedToken = { removed: string | undefined; setRemoved(origin: string | undefined): void };
+// The element a part focused in place of one that went with the focus, until another has it.
+let placed: Element | null = null;
+
+/** Focuses `element` in place of a control that went while it had the focus. */
+export function placeFocus(element: HTMLElement | null | undefined) {
+  element?.focus();
+  placed = element ?? null;
+}
+
+/**
+ * That a token was removed from MindRoom: the origin it was removed from, and whether the note
+ * that says so takes the focus, once, as the button that had it went.
+ */
+type Removal = { origin: string; focus: boolean };
+type RemovedToken = {
+  removed: Removal | undefined;
+  setRemoved(removal: Removal | undefined): void;
+};
 
 /** Where a token's removal is kept, for one part whose own parts may go and come back meanwhile. */
 function useRemovedToken(): RemovedToken {
-  const [removed, setRemoved] = useState<string>();
+  const [removed, setRemoved] = useState<Removal>();
   return useMemo(() => ({ removed, setRemoved }), [removed]);
 }
 
@@ -518,24 +534,34 @@ export function RemovedTokenNote({
   const serverToken = useServerToken();
   const said = useRef<HTMLSpanElement>(null);
   const writing = serverToken?.writing === true;
-  const removed = serverToken !== undefined && note.removed === serverToken.origin;
+  const removal = note.removed;
+  const removed = serverToken !== undefined && removal?.origin === serverToken.origin;
   // A token saved again, here or in the browser, is not the one removed.
   const used = via === 'token' || (via === 'server' && connection === 'token');
-  const shown = removed && !used && !writing;
+  const shown = removed && !used;
+  const focus = shown && removal?.focus === true;
   const { setRemoved } = note;
   useEffect(() => {
     if (removed && used && !writing) setRemoved(undefined);
   }, [removed, setRemoved, used, writing]);
   useEffect(() => {
-    if (shown) said.current?.focus();
-  }, [shown]);
-  if (!shown) return null;
-  const text = (
+    if (!focus || !removal) return;
+    said.current?.focus();
+    setRemoved({ ...removal, focus: false });
+  }, [focus, removal, setRemoved]);
+  // Always there, a live region that says it also where the focus stays elsewhere.
+  const text = shown ? (
     <span ref={said} tabIndex={-1}>
       {t('token.removed')}
     </span>
+  ) : null;
+  return className === undefined ? (
+    <span aria-live="polite">{text}</span>
+  ) : (
+    <p className={className} aria-live="polite">
+      {text}
+    </p>
   );
-  return className === undefined ? text : <p className={className}>{text}</p>;
 }
 
 /** Removes the token saved in MindRoom, while the requests through MindRoom go with it. */
@@ -559,6 +585,7 @@ function RemoveButton({ note }: { note: RemovedToken }) {
   const serverToken = useServerToken();
   const [failed, setFailed] = useState(false);
   const fallsBack = useId();
+  const button = useRef<HTMLButtonElement>(null);
   // Also the token MindRoom cannot read, which removing there mends.
   const shown =
     ((via === 'server' && connection === 'token') || unreadable) && serverToken !== undefined;
@@ -569,11 +596,16 @@ function RemoveButton({ note }: { note: RemovedToken }) {
     note.setRemoved(undefined);
     const done = await serverToken.remove();
     setFailed(!done);
-    note.setRemoved(done ? serverToken.origin : undefined);
+    // The focus follows from the button, or from where it fell once the button went, but not
+    // from where the person moved it meanwhile.
+    const active = document.activeElement;
+    const focus = [null, document.body, button.current, placed].includes(active);
+    note.setRemoved(done ? { origin: serverToken.origin, focus } : undefined);
   };
   return (
     <>
       <button
+        ref={button}
         type="button"
         className="mrpr-link-button"
         // Not disabled, which would take the focus from it while it is pressed.

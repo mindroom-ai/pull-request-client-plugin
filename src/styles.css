@@ -710,6 +710,10 @@
   margin: 0;
   padding: 12px 16px 0;
 }
+/* Drawn while it says nothing too, a live region, but taking no room. */
+.mrpr-panel-removed:empty {
+  padding: 0;
+}
 
 .mrpr-header {
   flex-shrink: 0;
