@@ -1,6 +1,12 @@
 import { usePluginTranslation } from '@mindroom/client-sdk/core';
 import { GitHubError } from './github';
-import { TokenForm, useGitHubAccess, useGitHubToken, usePanelTokenFormFor } from './token';
+import {
+  RemoveServerToken,
+  TokenForm,
+  useGitHubAccess,
+  useGitHubToken,
+  usePanelTokenFormFor,
+} from './token';
 
 /** Why GitHub gave no answer, in one sentence, by the error and how GitHub is reached. */
 export function useGitHubErrorMessage(error: unknown): string {
@@ -37,7 +43,7 @@ export function GitHubErrorState({
 }) {
   const t = usePluginTranslation('pull-requests');
   const { token, forget } = useGitHubToken();
-  const { via, recheck } = useGitHubAccess();
+  const { via, connection, recheck } = useGitHubAccess();
   const focusTokenForm = usePanelTokenFormFor(compact ? error : undefined);
   const message = useGitHubErrorMessage(error);
   const hasToken = token !== undefined;
@@ -94,6 +100,12 @@ export function GitHubErrorState({
         <button className="mrpr-button" type="button" onClick={forget}>
           {t('token.forget')}
         </button>
+      ) : null}
+      {/* The token saved in MindRoom comes before the App, and nothing loads while it fails. */}
+      {via === 'server' && connection === 'token' && (kind === 'badToken' || kind === 'notFound') ? (
+        <p className="mrpr-status">
+          <RemoveServerToken />
+        </p>
       ) : null}
       <TokenForm
         reason={

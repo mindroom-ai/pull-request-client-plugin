@@ -1119,6 +1119,31 @@ describe('with the GitHub account connected in MindRoom', () => {
     expect(mindroom.storedToken()).toBeUndefined();
   });
 
+  it.each([
+    [401, 'GitHub refused the token saved in MindRoom.'],
+    [
+      404,
+      'GitHub did not find this pull request. The token saved in MindRoom may not be able to read this repository.',
+    ],
+  ])(
+    'offers to remove the token saved in MindRoom when GitHub answers %s to it, and reads with the App then',
+    async (status, said) => {
+      const mindroom = githubServer(async (url, init) =>
+        url !== 'https://api.github.com/user' && new Headers(init?.headers).has('authorization')
+          ? respond({ message: 'No' }, status)
+          : withUser(url, init)
+      );
+      await saveInMindroom(mindroom);
+      roomServer.current = mindroom.server;
+      const view = await show();
+      expect(await view.findByText(said)).toBeTruthy();
+      await click(view.getByRole('button', { name: 'Remove token from MindRoom' }));
+      expect(await view.findByText('Signed in as octo through MindRoom (GitHub App).')).toBeTruthy();
+      expect(view.queryByText(said)).toBeNull();
+      expect(mindroom.storedToken()).toBeUndefined();
+    }
+  );
+
   it('says GitHub refused the token saved in MindRoom, not the App, and keeps it', async () => {
     const mindroom = githubServer(async (url, init) =>
       init?.method === 'PUT' ? respond({ message: 'Bad credentials' }, 401) : withUser(url, init)
