@@ -334,8 +334,7 @@ export type GitHubAccess = {
   authFor(key: AccessKey): GitHubAuth | undefined;
   /**
    * Asks the server again whether GitHub is connected there, as a part's Try again does; resolves
-   * to whether the parts read again by themselves now, under the keys of another connection: one
-   * that differs from the one before, or the first connected one when none was known.
+   * to whether the parts read again by themselves now: whether the key a read starts with changed.
    */
   recheck(): Promise<boolean>;
 };
@@ -679,15 +678,12 @@ export function useGitHubAccess(): GitHubAccess {
     if (!server || storedToken() !== undefined) return false;
     // The parts read again by themselves once the token is saved or removed.
     if (credentialOf(queryClient, server.origin).writing) return true;
-    const key = statusKey(server.origin);
-    const before = queryClient.getQueryData<ServerStatus>(key);
-    await queryClient.invalidateQueries({ queryKey: key });
-    const now = queryClient.getQueryData<ServerStatus>(key);
-    if (now === undefined) return false;
-    // A first status after a failed one reads everything again only when it is connected,
-    // through the new keys; one that is not leaves the reading again to the caller.
-    return before === undefined ? now.connected : identity(before) !== identity(now);
-  }, [queryClient, server, storedToken]);
+    const before = current().key;
+    await queryClient.invalidateQueries({ queryKey: statusKey(server.origin) });
+    // Only the parts under another key read by themselves; a status that changed and left the
+    // key (as from a token MindRoom cannot read to none, both anonymous) leaves it to the caller.
+    return current().key !== before;
+  }, [current, queryClient, server, storedToken]);
   return useMemo(
     () => ({
       via: token !== undefined ? 'token' : connected ? 'server' : undefined,

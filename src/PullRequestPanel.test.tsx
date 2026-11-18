@@ -1458,6 +1458,26 @@ describe('with the GitHub account connected in MindRoom', () => {
     }
   );
 
+  it('reads the pull request again on Try again once the token was removed elsewhere, which reads as before', async () => {
+    const mindroom = githubServer(withUser);
+    await saveInMindroom(mindroom);
+    mindroom.unreadable(true);
+    fetchMock.mockImplementation(async () => respond({ message: 'Server Error' }, 500));
+    roomServer.current = mindroom.server;
+    const view = await show();
+    const retry = await view.findByRole('button', { name: 'Try again' }, { timeout: 5000 });
+    // Removed on another device, with no App: the panel reads without either, as it did.
+    mindroom.connected(false);
+    await mindroom.server.request('/api/github/token', { method: 'DELETE' });
+    fetchMock.mockClear();
+    fetchMock.mockImplementation(async () => respond(pull()));
+    await click(retry);
+    await waitUntil(() => expect(view.queryByText(UNREADABLE)).toBeNull());
+    await waitUntil(() =>
+      expect(fetchMock.mock.calls.filter(([url]) => url.endsWith('/pulls/200'))).toHaveLength(1)
+    );
+  });
+
   it('keeps a failed read, its message and Try again, beside the token MindRoom cannot read', async () => {
     const mindroom = githubServer(withUser);
     await saveInMindroom(mindroom);
