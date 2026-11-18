@@ -611,9 +611,11 @@ export function RemoveServerToken({ onRemoved }: { onRemoved?: (done: boolean) =
  * note takes a lost focus.
  */
 function useRemoval(note: RemovedToken) {
-  const { via, connection, appConnected, unreadable } = useGitHubAccess();
+  const { via, connection, appConnected, unreadable, key, current } = useGitHubAccess();
   const serverToken = useServerToken();
-  const [failed, setFailed] = useState(false);
+  // The access a removal failed under: a token saved or removed since is another one, of which
+  // the failure says nothing.
+  const [failedUnder, setFailedUnder] = useState<AccessKey>();
   // Also the token MindRoom cannot read, which removing there mends.
   const shown =
     ((via === 'server' && connection === 'token') || unreadable) && serverToken !== undefined;
@@ -621,10 +623,10 @@ function useRemoval(note: RemovedToken) {
     control: Element | null
   ): Promise<{ done: boolean; lost: boolean } | undefined> => {
     if (!serverToken || serverToken.busy()) return undefined;
-    setFailed(false);
+    setFailedUnder(undefined);
     note.setRemoved(undefined);
     const done = await serverToken.remove();
-    setFailed(!done);
+    setFailedUnder(done ? undefined : current().key);
     // The focus follows from the button, or from where it fell once the button went, but not
     // from where the person moved it meanwhile.
     const active = document.activeElement;
@@ -632,6 +634,7 @@ function useRemoval(note: RemovedToken) {
     note.setRemoved(done ? { origin: serverToken.origin, focus: lost } : undefined);
     return { done, lost };
   };
+  const failed = shown && failedUnder !== undefined && failedUnder === key;
   return { shown, appConnected, writing: serverToken?.writing === true, failed, remove };
 }
 

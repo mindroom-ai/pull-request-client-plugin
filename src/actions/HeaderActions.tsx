@@ -448,9 +448,10 @@ export function HeaderActions({
         }
       />
       {removal.failed ? (
-        <span role="alert" className="mrpr-status">
+        // On a line of its own under the controls, as what an action came to.
+        <div role="alert" className="mrpr-action-result">
           {t('token.removeFailed')}
-        </span>
+        </div>
       ) : null}
       {writable ? (
         <ResultLine

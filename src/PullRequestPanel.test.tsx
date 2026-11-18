@@ -1033,6 +1033,30 @@ describe('with the GitHub account connected in MindRoom', () => {
     await waitUntil(() => expect(document.activeElement).toBe(more));
   });
 
+  it('says a removal from the menu failed on a line of its own, until a token is saved again', async () => {
+    const mindroom = githubServer(withUser);
+    await saveInMindroom(mindroom);
+    const real = mindroom.server.request.getMockImplementation()!;
+    mindroom.server.request.mockImplementation(async (path, init) => {
+      if (path === '/api/github/token' && init?.method === 'DELETE') {
+        throw new MindroomServerError('Forbidden', 403, {});
+      }
+      return real(path, init);
+    });
+    roomServer.current = mindroom.server;
+    const view = await show();
+    await choose(view, 'Remove token from MindRoom');
+    const failed = await view.findByText('MindRoom could not remove the token.');
+    // Under the row of the header's controls, as what an action came to.
+    expect(failed.closest('[role="alert"]')?.classList.contains('mrpr-action-result')).toBe(true);
+    await choose(view, 'Use a token in this browser');
+    await type(view.getByLabelText('GitHub token'), 'ghp_good');
+    await click(view.getByLabelText('Save in MindRoom at mindroom.example.org'));
+    await click(view.getByRole('button', { name: 'Save' }));
+    await waitUntil(() => expect(view.queryByLabelText('GitHub token')).toBeNull());
+    expect(view.queryByText('MindRoom could not remove the token.')).toBeNull();
+  });
+
   it('leaves the focus where the person moved it while a removal from the menu fails', async () => {
     const mindroom = githubServer(withUser);
     await saveInMindroom(mindroom);
