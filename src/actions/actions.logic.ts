@@ -12,6 +12,7 @@ export type PrimaryControl =
   | 'auto-merge-armed'
   | 'enable-auto-merge'
   | 'merge'
+  | 'checking'
   | null;
 
 // The states in which GitHub merges at once. It refuses to arm auto-merge in them, so there
@@ -23,11 +24,16 @@ function canArmAutoMerge(pr: PullRequest, repo: Repository): boolean {
   return repo.autoMergeAllowed && !MERGES_NOW.has(pr.mergeableState);
 }
 
-/** The header's one control; checks not loaded yet, or none at all, count as passing. */
+/**
+ * The header's one control; checks not loaded yet, or none at all, count as passing. While
+ * `checking`, GitHub still computes whether the pull request merges (`mergeable` null) and it is
+ * read again for that: what depends on it waits.
+ */
 export function primaryControl(
   pr: PullRequest,
   repo: Repository,
-  checks: ChecksState | undefined
+  checks: ChecksState | undefined,
+  checking = false
 ): PrimaryControl {
   if (pr.state === 'merged') return 'merged';
   if (pr.state === 'closed') return 'closed';
@@ -35,6 +41,7 @@ export function primaryControl(
   if (pr.draft) return repo.canWrite ? 'ready' : null;
   if (pr.autoMerge) return 'auto-merge-armed';
   if (repo.mergeMethods.length === 0) return null;
+  if (checking) return 'checking';
   if ((checks === 'pending' || checks === 'failing') && canArmAutoMerge(pr, repo)) {
     return 'enable-auto-merge';
   }

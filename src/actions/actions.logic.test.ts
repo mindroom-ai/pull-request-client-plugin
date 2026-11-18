@@ -57,6 +57,22 @@ const armed = { autoMerge: { method: 'squash' as const } };
 const blocked = { mergeableState: 'blocked' };
 
 describe('primaryControl', () => {
+  it('waits while GitHub still checks whether it merges, and acts on what it found after', () => {
+    const unknown = pr({ mergeable: null, mergeableState: 'unknown' });
+    expect(primaryControl(unknown, repository, 'passing', true)).toBe('checking');
+    expect(primaryControl(unknown, repository, 'pending', true)).toBe('checking');
+    expect(menuActions(unknown, repository, 'checking', undefined)).toEqual(['draft', 'close']);
+    // Once the tries are spent, as before.
+    expect(primaryControl(unknown, repository, 'passing', false)).toBe('merge');
+    // What does not depend on it does not wait.
+    expect(primaryControl(pr({ mergeable: null, draft: true }), repository, 'passing', true)).toBe(
+      'ready'
+    );
+    expect(primaryControl(pr({ mergeable: null, ...armed }), repository, 'passing', true)).toBe(
+      'auto-merge-armed'
+    );
+  });
+
   it('shows a merged pull request as merged', () => {
     expect(primaryControl(pr({ state: 'merged' }), repository, 'passing')).toBe('merged');
   });

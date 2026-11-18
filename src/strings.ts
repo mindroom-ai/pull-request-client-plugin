@@ -86,6 +86,8 @@ export const en = {
       'delete-branch': 'Deleting branch...',
     },
     conflicts: 'Conflicts',
+    // In place of Merge, while GitHub still computes whether the pull request merges.
+    checking: 'Checking whether it can merge...',
     more: 'More actions',
     methodGroup: 'Merge method',
     mergeNow: 'Merge now',

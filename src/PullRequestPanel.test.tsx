@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { notifyManager, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act } from 'react-dom/test-utils';
 import { MindroomServerError } from '@mindroom/client-sdk/server';
 import { renderPluginComponent } from '@mindroom/client-sdk/testing';
@@ -959,6 +959,96 @@ describe('with the GitHub account connected in MindRoom', () => {
     expect(fetchMock).not.toHaveBeenCalled();
     expect(mindroom.statusRequests()).toBe(1);
     expect(view.queryByRole('button', { name: 'Forget token' })).toBeNull();
+  });
+
+  describe('while GitHub still checks whether it merges', () => {
+    const CHECKING = 'Checking whether it can merge...';
+    const pullReads = () => github.mock.calls.filter(([url]) => url.endsWith('/pulls/200')).length;
+    // Only `setTimeout` is fake, which the reads again wait with; the queries tell what they read
+    // in a microtask instead. This polls until `check` passes, running what is due now, but never
+    // moves the clock (`vi.waitFor` would).
+    const settle = async (check: () => void) => {
+      const end = performance.now() + 2_000;
+      for (;;) {
+        await act(() => vi.advanceTimersByTimeAsync(0));
+        try {
+          check();
+          return;
+        } catch (error) {
+          if (performance.now() > end) throw error;
+        }
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+    };
+    const later = (ms: number) => act(() => vi.advanceTimersByTimeAsync(ms));
+    /** GitHub answers `mergeable` with each of `answers` in turn, then with the last. */
+    const answering = (answers: (boolean | null)[]) => {
+      const base = github.getMockImplementation()!;
+      github.mockImplementation(async (url, init) => {
+        if (!url.endsWith('/pulls/200')) return base(url, init);
+        const mergeable = answers.length > 1 ? answers.shift() : answers[0];
+        const state = mergeable === null ? 'unknown' : 'clean';
+        return respond(pull({ node_id: 'PR_kw200', head, mergeable, mergeable_state: state }));
+      });
+    };
+
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      notifyManager.setScheduler(queueMicrotask);
+    });
+    afterEach(() => {
+      notifyManager.setScheduler((callback) => setTimeout(callback, 0));
+      vi.useRealTimers();
+    });
+
+    it('reads it again after 1 s, then 2 s, and shows Merge once GitHub found it mergeable', async () => {
+      answering([null, null, true]);
+      roomServer.current = githubServer(github).server;
+      const view = await show();
+      await settle(() => expect(view.getByText(CHECKING)).toBeTruthy());
+      expect(view.queryByRole('button', { name: 'Merge' })).toBeNull();
+      expect(pullReads()).toBe(1);
+      await later(999);
+      expect(pullReads()).toBe(1);
+      await later(1);
+      await settle(() => expect(pullReads()).toBe(2));
+      expect(view.getByText(CHECKING)).toBeTruthy();
+      await later(1999);
+      expect(pullReads()).toBe(2);
+      await later(1);
+      await settle(() => expect(view.getByRole('button', { name: 'Merge' })).toBeTruthy());
+      expect(pullReads()).toBe(3);
+      expect(view.queryByText(CHECKING)).toBeNull();
+    });
+
+    it('stops after three reads again, and offers Merge as GitHub answers then', async () => {
+      answering([null]);
+      roomServer.current = githubServer(github).server;
+      const view = await show();
+      await settle(() => expect(view.getByText(CHECKING)).toBeTruthy());
+      for (const [ms, reads] of [
+        [1000, 2],
+        [2000, 3],
+        [4000, 4],
+      ] as const) {
+        await later(ms);
+        await settle(() => expect(pullReads()).toBe(reads));
+      }
+      await settle(() => expect(view.getByRole('button', { name: 'Merge' })).toBeTruthy());
+      expect(view.queryByText(CHECKING)).toBeNull();
+      await later(60_000);
+      expect(pullReads()).toBe(4);
+    });
+
+    it('reads nothing again once the panel is gone', async () => {
+      answering([null]);
+      roomServer.current = githubServer(github).server;
+      const view = await show();
+      await settle(() => expect(view.getByText(CHECKING)).toBeTruthy());
+      view.unmount();
+      await later(10_000);
+      expect(pullReads()).toBe(1);
+    });
   });
 
   it("names MindRoom's GitHub App when GitHub refuses a write", async () => {
