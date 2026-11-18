@@ -79,6 +79,8 @@ type Pull = {
   /** Asked for a review that has not come yet. */
   reviewers?: string[];
   comment?: { author: string; body: string };
+  /** Minutes since its last activity on GitHub; 42 when absent. */
+  updated?: number;
 };
 
 const PULLS = {
@@ -167,6 +169,7 @@ const PULLS = {
     size: [23, 0, 1],
     author: 'platform-lead',
     body: 'Release notes for 2026.11.3.',
+    updated: 20,
   },
   ipRateLimit: {
     repo: 'api',
@@ -203,6 +206,7 @@ const PULLS = {
     size: [204, 12, 8],
     author: 'acme-builder',
     body: 'Each admin action writes who, what and when to the audit log table.',
+    updated: 300,
   },
   avatarCache: {
     repo: 'webapp',
@@ -225,11 +229,28 @@ const PULLS = {
     size: [133, 0, 4],
     author: 'acme-builder',
     body: 'A first export of the messages as CSV, behind a flag.',
+    updated: 10,
   },
 } satisfies Record<string, Pull>;
 const ALL_PULLS: Pull[] = Object.values(PULLS);
+/** `ALL_PULLS` as the details list them: open, draft, closed, merged, each newest activity first. */
+const MENU_ORDER: Pull[] = [
+  PULLS.sessionStore,
+  PULLS.tokenEndpoint,
+  PULLS.checkoutClock,
+  PULLS.webhookRetries,
+  PULLS.avatarCache,
+  PULLS.auditLog,
+  PULLS.exportCsv,
+  PULLS.darkMode,
+  PULLS.ipRateLimit,
+  PULLS.changelog,
+  PULLS.rateLimit,
+];
 
 const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
+// The last activity, from one moment, so that answers sent apart tie and keep their link order.
+const STARTED = Date.now();
 const headSha = (pull: Pull) =>
   `${pull.repo === 'api' ? 'a' : 'b'}${String(pull.number).padStart(39, '0')}`;
 // The head after an update of the branch, which the checks and the comparison know as well.
@@ -275,7 +296,7 @@ const apiPull = (pull: Pull, head: string = headSha(pull)) => {
     review_comments: 0,
     commits: 3,
     created_at: ago(26 * 60),
-    updated_at: ago(42),
+    updated_at: new Date(STARTED - (pull.updated ?? 42) * 60_000).toISOString(),
     additions: pull.size[0],
     deletions: pull.size[1],
     changed_files: pull.size[2],
@@ -1004,17 +1025,18 @@ test("the open thread's pull requests are one button in its banner, whose menu l
   await page.keyboard.press('Tab');
   await expect(tooltip).toHaveCount(0);
 
-  // The menu: every pull request in the order linked, then the worktree; inside the window, its
-  // items scrolling inside it.
+  // The menu: every pull request, open, draft, closed then merged, each newest activity first,
+  // then the worktree; inside the window, its items scrolling inside it.
   const items = await openPrMenu(page);
   await expect(button).toHaveAttribute('aria-expanded', 'true');
   await expect(tooltip).toHaveCount(0);
   await expect(items).toHaveCount(ALL_PULLS.length + 1);
-  await expectItems(items, ALL_PULLS);
+  await expectItems(items, MENU_ORDER);
   await expect(items.last()).toHaveAttribute('aria-disabled', 'true');
   await expect(items.last()).toContainText('worktrees/platform-hardening');
   await expect(items.nth(0)).toContainText(PULLS.sessionStore.title, { timeout: 30_000 });
   await expectMenuInWindow(page);
+  await shot(page, 'menu-sorted', { keepPointer: true });
   await shotBothThemes(page, 'menu-open');
 
   // The pointer on an item highlights it, in a fill and a rim the menu's surface does not have.
@@ -1089,7 +1111,7 @@ test("the open thread's pull requests are one button in its banner, whose menu l
   // An item opens its pull request in the panel and closes the menu; opened again, the menu marks
   // that item current.
   const { checkoutClock } = PULLS;
-  const index = ALL_PULLS.indexOf(checkoutClock);
+  const index = MENU_ORDER.indexOf(checkoutClock);
   await (await openPrMenu(page)).nth(index).click();
   await expect(prMenu(page)).toHaveCount(0);
   await expect(panel(page).locator('.mrpr-panel-title')).toHaveText(checkoutClock.title, {
@@ -1167,8 +1189,10 @@ test("on a phone the open thread's pull requests menu fits the window and opens 
     const items = await openPrMenu(page);
     await expect(items).toHaveCount(ALL_PULLS.length);
     await expect(items.nth(0)).toContainText(PULLS.sessionStore.title, { timeout: 30_000 });
+    await expectItems(items, MENU_ORDER);
     await expectMenuInWindow(page);
     await shot(page, 'phone-menu-open');
+    await shot(page, 'phone-menu-sorted', { keepPointer: true });
     await items.nth(1).tap();
     await expect(prMenu(page)).toHaveCount(0);
     await expect(panel(page).locator('.mrpr-panel-title')).toHaveText(PULLS.tokenEndpoint.title, {
@@ -1438,8 +1462,10 @@ const expectDetailsTitles = async (details: Locator, pulls: Pull[]) => {
 
 test("resting the pointer on a card shows all its pull requests' details", async ({ page }) => {
   test.setTimeout(4 * 60_000);
-  const [rateLimit] = THREADS.release.pulls;
-  // The worktree is on the first pull request's branch, in a path longer than the card is wide.
+  const { rateLimit } = PULLS;
+  // As the details order them: the closed one, then the merged ones, newest activity first.
+  const shown = [PULLS.ipRateLimit, PULLS.changelog, rateLimit];
+  // The worktree is on the merged rate limit's branch, in a path longer than the card is wide.
   const path = '/srv/agents/builder/workspace/worktrees/api-rate-limit-per-token';
   await writeWorktree(roots.release, {
     path,
@@ -1456,19 +1482,19 @@ test("resting the pointer on a card shows all its pull requests' details", async
 
     // All three pull requests, also the one the card's chips leave to their count.
     await card(page, roots.release).hover();
-    await expectDetailsTitles(details, THREADS.release.pulls);
+    await expectDetailsTitles(details, shown);
     // Each by its repository without the owner, and its state in words.
-    const first = blocks.first();
-    await expect(first.locator('.mrpr-details-row')).toHaveText(`api #${rateLimit.number}·Merged`);
-    await expect(
-      blocks.nth(THREADS.release.pulls.indexOf(PULLS.ipRateLimit)).getByText('Closed')
-    ).toBeVisible();
+    const ours = blocks.nth(shown.indexOf(rateLimit));
+    await expect(ours.locator('.mrpr-details-row')).toHaveText(`api #${rateLimit.number}·Merged`);
+    await expect(blocks.first().getByText('Closed')).toBeVisible();
     // Its size and age, and the mark of the worktree's branch, on a line that wraps between them.
-    const meta = first.locator('.mrpr-details-title + .mrpr-meta');
+    const meta = ours.locator('.mrpr-details-title + .mrpr-meta');
     await expect(meta).toContainText('+268');
     await expect(meta).toContainText('9 files');
     await expect(meta.getByText('this worktree', { exact: true })).toBeVisible();
-    await expect(blocks.nth(1).getByText('this worktree')).toHaveCount(0);
+    await expect(blocks.nth(shown.indexOf(PULLS.changelog)).getByText('this worktree')).toHaveCount(
+      0
+    );
     await expectEachOnOneLine(details.locator('.mrpr-meta > *'), details);
     // Neither the branches nor the author; the worktree leaves out the branch the mark names.
     await expect(details).not.toContainText('→');
@@ -1485,7 +1511,7 @@ test("resting the pointer on a card shows all its pull requests' details", async
     await page.emulateMedia({ colorScheme: 'dark' });
     await expect(page.locator('html')).toHaveAttribute('data-theme-kind', 'dark');
     await card(page, roots.release).hover();
-    await expectDetailsTitles(details, THREADS.release.pulls);
+    await expectDetailsTitles(details, shown);
     await shot(page, 'details-dark', { keepPointer: true });
     expect(unanswered).toEqual([]);
     expect(warnings).toEqual([]);
