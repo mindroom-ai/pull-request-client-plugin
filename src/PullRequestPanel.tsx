@@ -1,6 +1,7 @@
 // Ported from T3 Code (https://github.com/pingdotgg/t3code, apps/web/src/components/pullRequest/PullRequestDetailLayout.tsx and PullRequestDetailCrumbs.tsx at 8ab427c6), MIT, Copyright (c) 2026 T3 Tools Inc. See NOTICE.
 // The side panel: the header of the pull request a link opened, then its Summary and its Code.
 import {
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -392,6 +393,15 @@ function Panel({ roomId, request }: PanelProps) {
     : unreadable
     ? 'unreadable'
     : tokenForm.reason ?? (overriding && via === 'server' ? 'override' : undefined);
+  // The form stays while a change it started runs or failed (`TokenForm`'s `onHold`), with the
+  // reason it last had, though the reads that change starts take that reason away meanwhile.
+  const formScope = `${serverOrigin} ${pullRequestKey}`;
+  const [held, setHeld] = useState<string>();
+  const hold = useCallback((on: boolean) => setHeld(on ? formScope : undefined), [formScope]);
+  const lastReason = useRef<{ scope: string; reason: TokenFormReason }>();
+  if (formReason) lastReason.current = { scope: formScope, reason: formReason };
+  const kept = held === formScope && lastReason.current?.scope === formScope;
+  const shownReason = formReason ?? (kept ? lastReason.current?.reason : undefined);
   const forkOwner =
     pr?.headRepo && pr.headRepo !== pr.baseRepo ? pr.headRepo.split('/')[0] : undefined;
 
@@ -533,16 +543,22 @@ function Panel({ roomId, request }: PanelProps) {
         )}
         {/* Invariant: the panel's token form has exactly one owner, here, and one tree position,
           keyed only by the server's origin and the pull request; the loading, error and loaded
-          views never mount their own copy. So what was typed in it, where it saves, and what came
-          of a save stay while the pull request loads, fails and loads. */}
-        {formReason ? (
-          <div className="mrpr-panel-token" key={`${serverOrigin} ${pullRequestKey}`}>
+          views never mount their own copy. And it stays mounted while it has a reason, while a
+          save or removal it started is pending, and after that change failed until the person
+          retries or dismisses it (or the origin or pull request changes); an untouched form may
+          still go when the pull request loads. */}
+        {shownReason ? (
+          <div className="mrpr-panel-token" key={formScope}>
             <TokenForm
-              reason={formReason}
+              reason={shownReason}
               inputRef={tokenForm.inputRef}
-              // Only the form opened to use a token instead closes: a failure keeps the other.
+              onHold={hold}
+              // Only the form opened to use a token instead closes, and one kept for what came of
+              // its save: a failure keeps the other.
               onCancel={
-                formReason === 'override' && overriding ? () => setOverriding(false) : undefined
+                (shownReason === 'override' && overriding) || !formReason
+                  ? () => setOverriding(false)
+                  : undefined
               }
               // A token saved in MindRoom keeps the requests going through it, so the form
               // opened for it closes once it is saved.

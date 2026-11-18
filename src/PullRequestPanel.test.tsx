@@ -116,9 +116,10 @@ const waitUntil = async (check: () => void) => {
 const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>();
 const filesRequests = () => fetchMock.mock.calls.filter(([url]) => url.includes('/files'));
 
+let client: QueryClient;
 const show = async (...args: [] | [unknown]) => {
   const request = args.length === 0 ? REQUEST : args[0];
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return renderPluginComponent(
     <QueryClientProvider client={client}>
       <PullRequestPanel roomId="!room:example.org" request={request} />
@@ -1458,6 +1459,92 @@ describe('with the GitHub account connected in MindRoom', () => {
     await waitUntil(() => expect(view.queryByText('Loading pull request')).toBeNull());
     expect((view.getByLabelText('GitHub token') as HTMLInputElement).value).toBe('ghp_typed');
     expect(view.getAllByLabelText('GitHub token')).toHaveLength(1);
+  });
+
+  describe('a save from the token form, while the pull request reads again', () => {
+    const refused = 'GitHub refused this token.';
+    const saveBad = async (view: Awaited<ReturnType<typeof show>>, token = 'ghp_bad') => {
+      await type(view.getByLabelText('GitHub token'), token);
+      await click(view.getByLabelText('Save in MindRoom at mindroom.example.org'));
+      await click(view.getByRole('button', { name: 'Save' }));
+    };
+    const kept = (view: Awaited<ReturnType<typeof show>>, token = 'ghp_bad') => {
+      expect((view.getByLabelText('GitHub token') as HTMLInputElement).value).toBe(token);
+      const inMindroom = view.getByLabelText('Save in MindRoom at mindroom.example.org');
+      expect((inMindroom as HTMLInputElement).checked).toBe(true);
+    };
+
+    it('keeps the form and says the token was refused once the pull request read again loaded', async () => {
+      const mindroom = githubServer(withUser);
+      mindroom.connected(false);
+      const real = mindroom.server.request.getMockImplementation()!;
+      let releasePut!: () => void;
+      const put = new Promise<void>((resolve) => (releasePut = resolve));
+      mindroom.server.request.mockImplementation(async (path, init) => {
+        if (path === '/api/github/token' && init?.method === 'PUT') await put;
+        return real(path, init);
+      });
+      roomServer.current = mindroom.server;
+      fetchMock.mockImplementation(async () => respond({ message: 'Not Found' }, 404));
+      const view = await show();
+      await view.findByLabelText('GitHub token');
+      let releasePr!: (response: Response) => void;
+      const pr = new Promise<Response>((resolve) => (releasePr = resolve));
+      fetchMock.mockImplementation(() => pr);
+      const key = ['pull-requests', 'pr', 'mindroom-ai', 'mindroom-chat', 200, false];
+      await act(async () => void client.refetchQueries({ queryKey: key, exact: true }));
+      await saveBad(view);
+      await waitUntil(() => expect(mindroom.tokenRequests()).toEqual(['PUT']));
+      await act(async () => releasePr(respond(pull())));
+      expect(await view.findByText('Add pull request cards')).toBeTruthy();
+      await act(async () => releasePut());
+      expect(await view.findByText(refused)).toBeTruthy();
+      kept(view);
+    });
+
+    it('keeps the form a failed part asked for, and says the token was refused', async () => {
+      const mindroom = githubServer(withUser);
+      mindroom.connected(false);
+      roomServer.current = mindroom.server;
+      fetchMock.mockImplementation(async (url) => {
+        if (url.endsWith('/pulls/200')) return respond(pull());
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        const limited = { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': '0' };
+        return new Response('{}', { status: 403, headers: limited });
+      });
+      const view = await show();
+      await view.findByText('Add pull request cards');
+      await waitUntil(() => expect(view.getAllByLabelText('GitHub token')).toHaveLength(1));
+      await saveBad(view);
+      expect(await view.findByText(refused)).toBeTruthy();
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(view.getByText(refused)).toBeTruthy();
+      kept(view);
+    });
+
+    it('keeps the form opened to use a token, and says MindRoom could not save it, on a 500', async () => {
+      const mindroom = githubServer(withUser);
+      const real = mindroom.server.request.getMockImplementation()!;
+      mindroom.server.request.mockImplementation(async (path, init) => {
+        if (path !== '/api/github/token' || init?.method !== 'PUT') return real(path, init);
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        throw new MindroomServerError('Internal Server Error', 500, {});
+      });
+      const base = github.getMockImplementation()!;
+      github.mockImplementation(async (url, init) => {
+        if (url.endsWith('/pulls/200')) await new Promise((resolve) => setTimeout(resolve, 30));
+        return base(url, init);
+      });
+      roomServer.current = mindroom.server;
+      const view = await show();
+      await click(await view.findByRole('button', { name: 'Use a token instead' }));
+      await saveBad(view, 'ghp_good');
+      const failed = 'MindRoom could not save the token. Try again.';
+      expect(await view.findByText(failed)).toBeTruthy();
+      await waitUntil(() => expect(view.getByText('Add pull request cards')).toBeTruthy());
+      expect(view.getByText(failed)).toBeTruthy();
+      kept(view, 'ghp_good');
+    });
   });
 
   it('keeps the form, what was typed and where it saves, once the pull request reads without it', async () => {

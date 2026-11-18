@@ -762,6 +762,7 @@ export function TokenForm({
   inputRef,
   onCancel,
   onSaved,
+  onHold,
 }: {
   /**
    * Why it shows; `override`, to use a token instead of MindRoom's connection, has no hint;
@@ -773,6 +774,8 @@ export function TokenForm({
   onCancel?: () => void;
   /** Once a token is saved, in the browser or in MindRoom. */
   onSaved?: () => void;
+  /** Whether a change it started runs, or failed and says so until retried or dismissed. */
+  onHold?: (held: boolean) => void;
 }) {
   const t = usePluginTranslation('pull-requests');
   const { token, setToken } = useGitHubToken();
@@ -797,6 +800,9 @@ export function TokenForm({
   );
   const inMindroom = serverToken !== undefined && chosen === serverToken.origin;
   const writing = serverToken?.writing === true;
+  const held = saving || writing || problem !== undefined;
+  useEffect(() => onHold?.(held), [held, onHold]);
+  useEffect(() => () => onHold?.(false), [onHold]);
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     const trimmed = value.trim();
@@ -854,7 +860,11 @@ export function TokenForm({
             type="button"
             // The form stays while it saves: what comes of it is said here.
             aria-disabled={saving || undefined}
-            onClick={() => (saving ? undefined : onCancel())}
+            onClick={() => {
+              if (saving) return;
+              setProblem(undefined);
+              onCancel();
+            }}
           >
             {t('token.cancel')}
           </button>
