@@ -446,8 +446,10 @@ function useServerToken() {
           // the token of this browser as it was.
           if (!saved.connected || saved.via !== 'token') throw new Error('not saved');
           // Saving answers with the token's account alone; the status says whether the App
-          // connection is there too.
-          return askStatus(queryClient, server).catch(() => saved);
+          // connection is there too. One that cannot read the token just saved did not save it.
+          const now = await askStatus(queryClient, server).catch(() => saved);
+          if (now.unreadable) throw new Error('not saved');
+          return now;
         });
         if (error === undefined) {
           // The token of this browser comes first, and would hide the one just saved.

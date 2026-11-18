@@ -648,6 +648,27 @@ describe('the token saved in MindRoom', () => {
     }
   );
 
+  it('counts a save as failed when MindRoom then cannot read the token, and keeps the browser token', async () => {
+    localStorage.setItem(TOKEN_KEY, 'ghp_old');
+    vi.stubGlobal('fetch', vi.fn(github));
+    const mindroom = githubServer(github);
+    answerToken(mindroom, async () => {
+      mindroom.unreadable(true);
+      return { connected: true, via: 'token', login: 'octo' };
+    });
+    const view = await form(mindroom.server);
+    await waitUntil(() => expect(accesses.reader?.via).toBe('token'));
+    await chooseMindroom(view);
+    await save(view, 'ghp_good');
+    await waitUntil(() =>
+      expect(view.getByRole('alert').textContent).toBe(
+        'MindRoom could not save the token. Try again.'
+      )
+    );
+    expect(localStorage.getItem(TOKEN_KEY)).toBe('ghp_old');
+    expect(accesses.reader?.via).toBe('token');
+  });
+
   it('keeps the token in the browser alone when asked to again, and asks MindRoom nothing of it', async () => {
     const mindroom = githubServer(github);
     const view = await form(mindroom.server);
