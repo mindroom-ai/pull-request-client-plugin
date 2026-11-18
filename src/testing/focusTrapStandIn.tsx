@@ -5,7 +5,8 @@ import { useEffect, useRef, type ReactNode } from 'react';
 
 type TrapOptions = {
   escapeDeactivates?: () => boolean;
-  clickOutsideDeactivates?: () => boolean;
+  clickOutsideDeactivates?: boolean | ((event: Event) => boolean);
+  allowOutsideClick?: boolean | ((event: Event) => boolean);
 };
 
 let lastOptions: TrapOptions | undefined;

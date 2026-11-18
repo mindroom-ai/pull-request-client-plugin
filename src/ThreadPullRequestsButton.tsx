@@ -46,7 +46,12 @@ export const ThreadPullRequestsButton: ThreadHeaderSlotComponent = ({ room, thre
   const count = pullRequests.length;
   const label = count > 0 ? t('threadPullRequests.button', { count }) : t('details.worktree');
   const current = panel?.isOpen ? shown : undefined;
-  const close = () => {
+  // A press on the button itself is the button's: its click closes the open menu, so the trap
+  // neither closes it on the mousedown (the click would open it again) nor swallows that click.
+  const onButton = (event: Event) =>
+    event.target instanceof Node && !!buttonRef.current?.contains(event.target);
+  const closeOutside = (event: Event) => {
+    if (onButton(event)) return false;
     setAnchor(undefined);
     return true;
   };
@@ -138,10 +143,12 @@ export const ThreadPullRequestsButton: ThreadHeaderSlotComponent = ({ room, thre
             focusTrapOptions={{
               initialFocus: false,
               returnFocusOnDeactivate: false,
-              clickOutsideDeactivates: close,
+              clickOutsideDeactivates: closeOutside,
+              allowOutsideClick: onButton,
               escapeDeactivates: () => {
                 refocus.current = true;
-                return close();
+                setAnchor(undefined);
+                return true;
               },
             }}
           >

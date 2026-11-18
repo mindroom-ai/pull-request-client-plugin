@@ -155,9 +155,35 @@ describe('ThreadPullRequestsButton', () => {
     expect(document.activeElement).toBe(trigger(view));
     await openMenu(view);
     await act(async () => {
-      trapOptions().clickOutsideDeactivates?.();
+      const outside = trapOptions().clickOutsideDeactivates;
+      if (typeof outside === 'function')
+        outside({ target: document.body } as unknown as MouseEvent);
     });
     expect(view.queryByRole('menu')).toBeNull();
+  });
+
+  it('closes, and stays closed, when its button is pressed while the menu is open', async () => {
+    const { view } = await show([{ number: 1 }]);
+    await openMenu(view);
+    // The press, as the focus trap hears it: on its own button the trap neither closes the menu
+    // on the mousedown nor swallows the click, which then closes it.
+    const press = { target: trigger(view) } as unknown as MouseEvent;
+    const { clickOutsideDeactivates, allowOutsideClick } = trapOptions();
+    let closes = false;
+    await act(async () => {
+      closes =
+        typeof clickOutsideDeactivates === 'function'
+          ? clickOutsideDeactivates(press)
+          : !!clickOutsideDeactivates;
+    });
+    expect(closes).toBe(false);
+    expect(
+      typeof allowOutsideClick === 'function' ? allowOutsideClick(press) : allowOutsideClick
+    ).toBe(true);
+    expect(view.getByRole('menu')).toBeTruthy();
+    await act(async () => trigger(view).click());
+    expect(view.queryByRole('menu')).toBeNull();
+    expect(trigger(view).getAttribute('aria-expanded')).toBe('false');
   });
 
   it('marks the row of the pull request the open panel shows, in any letter case', async () => {
