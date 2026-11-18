@@ -992,12 +992,6 @@
 .mrpr-description img {
   max-inline-size: 100%;
 }
-.mrpr-description pre {
-  overflow: auto;
-  padding: 8px;
-  border-radius: 6px;
-  background: var(--pr-hover);
-}
 .mrpr-description a {
   color: var(--pr-primary);
 }
@@ -1282,8 +1276,10 @@
 .mrpr-markdown img {
   max-inline-size: 100%;
 }
-.mrpr-markdown pre {
-  overflow-x: auto;
+/* The app draws tables and code blocks as a thread does; a SHA or name in a table cell stays whole. */
+:is(.mrpr-markdown, .mrpr-description) table code {
+  white-space: nowrap;
+  overflow-wrap: normal;
 }
 .mrpr-comment-plain {
   white-space: pre-wrap;

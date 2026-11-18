@@ -15,7 +15,7 @@ import FocusTrap from 'focus-trap-react';
 import type { RectCords } from 'folds';
 import { ArrowDownUp, ChevronRight, ListFilter, Tag, Users } from 'lucide-react';
 import { usePluginStorage, usePluginTranslation } from '@mindroom/client-sdk/core';
-import { Menu, PopOut, useMarkdownHtml } from '@mindroom/client-sdk/ui';
+import { MarkdownContent, Menu, PopOut, useMarkdownHtml } from '@mindroom/client-sdk/ui';
 import type { Paged, PullRequest, PullRequestRef, Review } from '../github';
 import { GitHubErrorState } from '../GitHubErrorState';
 import { imageResolver, type ImageSources } from '../images';
@@ -179,9 +179,7 @@ function Description({ body, images }: { body: string; images: ImageSources }) {
   const imagesRef = useSignedImageFallback(images);
   if (body.trim() === '') return <p className="mrpr-status">{t('noDescription')}</p>;
   if (html === undefined) return null;
-  return (
-    <div ref={imagesRef} className="mrpr-description" dangerouslySetInnerHTML={{ __html: html }} />
-  );
+  return <MarkdownContent ref={imagesRef} className="mrpr-description" html={html} />;
 }
 
 /** The checks of the head commit, one row each; loaded once the section is open. */

@@ -52,6 +52,15 @@ describe('CommentBody', () => {
     expect(view.container.querySelector('strong')?.textContent).toBe('good');
   });
 
+  it('scrolls a wide table in its own box, as a thread shows one', async () => {
+    vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockReturnValue(900);
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(300);
+    markdown.html = '<table><tbody><tr><td><code>ed6eed9</code></td></tr></tbody></table>';
+    const view = await render(<CommentBody body="| a |" images={NO_IMAGES} />);
+    const box = view.getByRole('region', { name: 'Scrollable table' });
+    expect(box.querySelector('td code')?.textContent).toBe('ed6eed9');
+  });
+
   it("resolves its images by GitHub's HTML, with one function while that stays", async () => {
     const images = { byUrl: { [BADGE]: CAMO }, byAttachment: { [UUID]: SIGNED } };
     const body = `![a](${ATTACHMENT}) ![b](${BADGE})`;
