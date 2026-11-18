@@ -778,7 +778,10 @@ describe('the token saved in MindRoom', () => {
     );
     await waitUntil(() => expect(view.getByTestId('reader').textContent).toBe('with the token'));
     const remove = view.getByRole('button', { name: 'Remove token from MindRoom' });
-    expect(remove.title).toBe('MindRoom then uses your GitHub App connection.');
+    // Said beside it, and as its description, not in a tooltip alone.
+    const fallsBack = view.getByText('Then MindRoom uses your GitHub App connection.');
+    expect(remove.getAttribute('aria-describedby')).toBe(fallsBack.id);
+    expect(remove.title).toBe('');
     await click(remove);
     await waitUntil(() => expect(view.getByTestId('reader').textContent).toBe('with the App'));
     expect(accesses.reader).toMatchObject({ connection: 'app', key: `server:${ORIGIN}:octo` });

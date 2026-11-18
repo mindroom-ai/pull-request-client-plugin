@@ -393,7 +393,7 @@ export const en = {
     connectedNoLogin: 'Signed in through MindRoom ({{how}}).',
     how: { token: 'token', app: 'GitHub App' },
     remove: 'Remove token from MindRoom',
-    removeFallsBack: 'MindRoom then uses your GitHub App connection.',
+    removeFallsBack: 'Then MindRoom uses your GitHub App connection.',
     removeFailed: 'MindRoom could not remove the token.',
     overrides: 'A token saved here is used instead.',
     useToken: 'Use a token instead',

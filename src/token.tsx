@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -377,6 +378,7 @@ export function RemoveServerToken() {
   const serverToken = useServerToken();
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
+  const fallsBack = useId();
   if (via !== 'server' || connection !== 'token' || !serverToken) return null;
   const remove = async () => {
     setBusy(true);
@@ -391,11 +393,17 @@ export function RemoveServerToken() {
         type="button"
         className="mrpr-link-button"
         disabled={busy}
-        title={appConnected ? t('token.removeFallsBack') : undefined}
+        aria-describedby={appConnected ? fallsBack : undefined}
         onClick={() => void remove()}
       >
         {t('token.remove')}
       </button>
+      {appConnected ? (
+        <>
+          {' '}
+          <span id={fallsBack}>{t('token.removeFallsBack')}</span>
+        </>
+      ) : null}
       {failed ? <span role="alert"> {t('token.removeFailed')}</span> : null}
     </>
   );
