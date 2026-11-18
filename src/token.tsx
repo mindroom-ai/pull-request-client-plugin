@@ -17,7 +17,6 @@ import {
   CancelledError,
   useQuery,
   useQueryClient,
-  type Query,
   type QueryClient,
   type QueryKey,
 } from '@tanstack/react-query';
@@ -129,8 +128,8 @@ const identity = (status: ServerStatus) =>
 /** How GitHub is reached in a key of `queries.ts`, after the pull request or the repository. */
 const accessOf = (queryKey: QueryKey) => queryKey[queryKey[1] === 'repo' ? 4 : 5];
 
-const serverKey = (origin: string, login: string | undefined) =>
-  `server:${origin}:${login ?? 'unknown'}`;
+const serverKey = (origin: string, login: string | undefined, generation: number) =>
+  `server:${origin}:${login ?? 'unknown'}:${generation}`;
 
 /**
  * The parts reach GitHub as another account now, or as none. Nothing is read again here under the
@@ -140,8 +139,7 @@ const serverKey = (origin: string, login: string | undefined) =>
  * (`retryOnMount: false`), so the refusals with nothing read that no part shows are forgotten:
  * they are asked anew then. One a part shows is asked again once that part shows it anew, under a
  * key it changes to. `refetch`, the key the parts keep (a new token's), is read again where it
- * shows, once each read still under way there is cancelled: it went with the access before, and a
- * query with nothing read yet would take its answer for the read again.
+ * shows.
  */
 function readAgain(queryClient: QueryClient, refetch?: AccessKey) {
   const queryKey = ['pull-requests'];
@@ -155,49 +153,44 @@ function readAgain(queryClient: QueryClient, refetch?: AccessKey) {
     .forEach((query) => query.reset());
   void queryClient.invalidateQueries({ queryKey, refetchType: 'none' });
   if (refetch === undefined) return;
-  const kept = { queryKey, predicate: (query: Query) => accessOf(query.queryKey) === refetch };
-  // What shows now; a part that shows it later reads it itself, as the key is invalidated.
-  const shown = new Set(queryClient.getQueryCache().findAll({ ...kept, type: 'active' }));
-  void queryClient.cancelQueries(kept).then(() =>
-    queryClient.refetchQueries(
-      { queryKey, type: 'active', predicate: (query) => shown.has(query) },
-      // A read started since goes with the access now: it is the read again.
-      { cancelRefetch: false }
-    )
-  );
+  void queryClient.refetchQueries({
+    queryKey,
+    type: 'active',
+    predicate: (query) => accessOf(query.queryKey) === refetch,
+  });
 }
 
 /**
- * Keeps `status` as the server's, and reads everything again when it names another connection, or
- * when `saved`: a token was saved or removed in MindRoom, which the same status may name as well.
- * Another way to the same login, or another token of it, keeps its keys, so what shows under them
- * is read again here.
+ * The credential a server uses for the person: `generation` counts each one it may have changed
+ * to, and goes in the keys, so that no two credentials share what was read, also of one login;
+ * `writing` while a token is being saved in or removed from it, when nobody knows which one a
+ * request would go with, so none starts.
  */
-function setStatus(queryClient: QueryClient, origin: string, status: ServerStatus, saved = false) {
+type Credential = { generation: number; writing: boolean };
+const FIRST: Credential = { generation: 0, writing: false };
+const credentials = new WeakMap<QueryClient, Map<string, Credential>>();
+const credentialOf = (queryClient: QueryClient, origin: string) =>
+  credentials.get(queryClient)?.get(origin) ?? FIRST;
+function setCredential(queryClient: QueryClient, origin: string, credential: Credential) {
+  const servers = credentials.get(queryClient) ?? new Map<string, Credential>();
+  credentials.set(queryClient, servers);
+  servers.set(origin, credential);
+  notify();
+}
+
+/**
+ * Keeps `status` as the server's. One that names another connection is another credential, read
+ * under keys of its own; a token being saved or removed there took its generation as it started.
+ */
+function setStatus(queryClient: QueryClient, origin: string, status: ServerStatus) {
   const before = queryClient.getQueryData<ServerStatus>(statusKey(origin));
   queryClient.setQueryData(statusKey(origin), status);
-  if (!before) return;
-  const sameLogin = before.connected && status.connected && before.login === status.login;
-  if (identity(before) === identity(status) && !(saved && sameLogin)) return;
-  readAgain(queryClient, sameLogin ? serverKey(origin, status.login) : undefined);
-}
-
-// How often a token was saved in or removed from each server, by the query client that keeps its
-// status: what the server answered to a request sent before the last time says nothing of now.
-const savedTimes = new WeakMap<QueryClient, Map<string, number>>();
-const savedTime = (queryClient: QueryClient, origin: string) =>
-  savedTimes.get(queryClient)?.get(origin) ?? 0;
-
-/**
- * Sets `status`, a server's answer to saving or removing a token there, once no status asked
- * before it is still under way, and fences off what answers to requests sent before it.
- */
-async function setSavedStatus(queryClient: QueryClient, origin: string, status: ServerStatus) {
-  await queryClient.cancelQueries({ queryKey: statusKey(origin) });
-  const times = savedTimes.get(queryClient) ?? new Map<string, number>();
-  savedTimes.set(queryClient, times);
-  times.set(origin, savedTime(queryClient, origin) + 1);
-  setStatus(queryClient, origin, status, true);
+  if (!before || identity(before) === identity(status)) return;
+  const credential = credentialOf(queryClient, origin);
+  if (!credential.writing) {
+    setCredential(queryClient, origin, { ...credential, generation: credential.generation + 1 });
+  }
+  readAgain(queryClient);
 }
 
 /** The status in a server's answer (of `/api/github/status`, or of saving or removing a token). */
@@ -215,9 +208,28 @@ function statusOf(answer: unknown): ServerStatus {
   };
 }
 
-async function readStatus(server: MindroomServer): Promise<ServerStatus> {
-  return statusOf(await server.request('/api/github/status'));
-}
+/**
+ * The query of a server's status. Its answer is kept as the server's (`setStatus`), unless a token
+ * was saved in or removed from the server since it was asked: that says nothing of now.
+ */
+const statusQuery = (queryClient: QueryClient, server: MindroomServer | undefined) => ({
+  queryKey: statusKey(server?.origin ?? ''),
+  queryFn: async () => {
+    const { origin } = server as MindroomServer;
+    const { generation } = credentialOf(queryClient, origin);
+    const now = statusOf(await (server as MindroomServer).request('/api/github/status'));
+    if (generation !== credentialOf(queryClient, origin).generation) {
+      return queryClient.getQueryData<ServerStatus>(statusKey(origin)) ?? now;
+    }
+    setStatus(queryClient, origin, now);
+    return now;
+  },
+  retry: false,
+});
+
+/** Asks `server` for its status now, whoever shows it. */
+const askStatus = (queryClient: QueryClient, server: MindroomServer) =>
+  queryClient.fetchQuery({ ...statusQuery(queryClient, server), staleTime: 0 });
 
 /**
  * Requests through `server` as the person's connected GitHub account, `account` the signed-in
@@ -229,13 +241,13 @@ function viaServer(
   server: MindroomServer,
   account: string
 ): GitHubViaServer {
-  const sent = savedTime(queryClient, server.origin);
+  const { generation } = credentialOf(queryClient, server.origin);
   return {
     server,
     account,
-    // Not for a request sent before a token was saved or removed there: that says nothing of now.
+    // Not for a request sent with a credential before this one: that says nothing of now.
     disconnected: () => {
-      if (sent === savedTime(queryClient, server.origin)) {
+      if (generation === credentialOf(queryClient, server.origin).generation) {
         setStatus(queryClient, server.origin, NOT_CONNECTED);
       }
     },
@@ -257,13 +269,15 @@ export type GitHubAccess = {
   appConnected: boolean;
   /**
    * What the query keys carry of it, never a token: false without either, true with the token,
-   * `server:<origin>:<login>` through MindRoom (`unknown` for a login the server did not name),
-   * so no two of them share what was read.
+   * `server:<origin>:<login>:<generation>` through MindRoom (`unknown` for a login the server
+   * did not name; the generation counts the credentials the server may have used, as a token
+   * saved or removed there is another one of the same login), so no two share what was read.
    */
   key: AccessKey;
   /**
-   * While the room does not know its server yet, or the server has not said whether GitHub is
-   * connected there, with no token stored; nothing should read yet.
+   * While the room does not know its server yet, the server has not said whether GitHub is
+   * connected there, or a token is being saved in or removed from it, with no token stored;
+   * nothing should read yet. Meanwhile the parts show what they read before.
    */
   pending: boolean;
   /**
@@ -307,70 +321,93 @@ type SaveProblem = 'rejected' | 'invalid' | 'unsupported' | 'failed';
 
 /**
  * The token the person saves in the room's MindRoom server, which MindRoom uses before the GitHub
- * App, on every device; undefined in a room without one. Each answer is the status, set as the
- * status query's own is, so the parts switch to it as they would.
+ * App, on every device; undefined in a room without one.
  */
 function useServerToken() {
   const { server } = useContext(GitHubServerContext);
   const queryClient = useQueryClient();
   const storedToken = useStoredToken();
   const { forget } = useGitHubToken();
+  const origin = server?.origin ?? '';
+  const { writing } = useSyncExternalStore(subscribe, () => credentialOf(queryClient, origin));
   return useMemo(() => {
     if (!server) return undefined;
-    const answered = (now: ServerStatus) => {
-      const before = queryClient.getQueryData<ServerStatus>(statusKey(server.origin));
-      // Saving answers with the token's account alone; the App connection there stays.
-      const app = now.via === 'token' && (before?.via === 'app' || before?.appConnected === true);
-      return setSavedStatus(queryClient, server.origin, app ? { ...now, appConnected: true } : now);
+    /**
+     * Sends one change of the token, alone: from its start the server may use another credential,
+     * so the reads under way through it are cancelled and none starts until its status is known
+     * again, from `send`'s answer or, once that failed, asked anew.
+     */
+    const change = async (send: () => Promise<ServerStatus>): Promise<unknown> => {
+      const generation = credentialOf(queryClient, origin).generation + 1;
+      setCredential(queryClient, origin, { generation, writing: true });
+      void queryClient.cancelQueries({ queryKey: statusKey(origin) });
+      void queryClient.cancelQueries({
+        queryKey: ['pull-requests'],
+        predicate: ({ queryKey }) => String(accessOf(queryKey)).startsWith(`server:${origin}:`),
+      });
+      try {
+        setStatus(queryClient, origin, await send());
+        return undefined;
+      } catch (error) {
+        // Whether the server took the change is not known: without its status, nothing goes
+        // through it as an account it may no longer use.
+        await askStatus(queryClient, server).catch(() =>
+          setStatus(queryClient, origin, NOT_CONNECTED)
+        );
+        return error ?? new Error('failed');
+      } finally {
+        setCredential(queryClient, origin, { generation, writing: false });
+      }
     };
     return {
       /** Where it saves the token: the server's origin. */
-      origin: server.origin,
+      origin,
+      /** While a token is being saved or removed there, as of this render. */
+      writing,
+      /** The same as of now: a second press in one event finds it under way. */
+      busy: () => credentialOf(queryClient, origin).writing,
       /** Saves `token` there; resolves to what went wrong, or undefined once it is saved. */
       save: async (token: string): Promise<SaveProblem | undefined> => {
-        let answer: unknown;
-        try {
-          answer = await server.request('/api/github/token', {
-            method: 'PUT',
-            body: JSON.stringify({ token }),
-            headers: { 'Content-Type': 'application/json' },
-            redirect: NO_REDIRECT,
-          });
-        } catch (error) {
-          const status = error instanceof MindroomServerError ? error.status : 0;
-          const body = error instanceof MindroomServerError ? error.body : undefined;
-          const code =
-            typeof body === 'object' && body !== null
-              ? (body as { error?: unknown }).error
-              : undefined;
-          if (status === 400 && code === 'github_token_rejected') return 'rejected';
-          if (status === 404 || status === 405) return 'unsupported';
-          return status === 422 ? 'invalid' : 'failed';
+        const error = await change(async () => {
+          const saved = statusOf(
+            await server.request('/api/github/token', {
+              method: 'PUT',
+              body: JSON.stringify({ token }),
+              headers: { 'Content-Type': 'application/json' },
+              redirect: NO_REDIRECT,
+            })
+          );
+          // Saved only once MindRoom says it uses the token now; an answer that does not leaves
+          // the token of this browser as it was.
+          if (!saved.connected || saved.via !== 'token') throw new Error('not saved');
+          // Saving answers with the token's account alone; the status says whether the App
+          // connection is there too.
+          return askStatus(queryClient, server).catch(() => saved);
+        });
+        if (error === undefined) {
+          // The token of this browser comes first, and would hide the one just saved.
+          if (storedToken() !== undefined) forget();
+          return undefined;
         }
-        // Saved only once MindRoom says it uses the token now; an answer that does not leaves the
-        // status, and the token of this browser, as they were.
-        const now = statusOf(answer);
-        if (!now.connected || now.via !== 'token') return 'failed';
-        await answered(now);
-        // The token of this browser comes first, and would hide the one just saved.
-        if (storedToken() !== undefined) forget();
-        return undefined;
+        const status = error instanceof MindroomServerError ? error.status : 0;
+        const body = error instanceof MindroomServerError ? error.body : undefined;
+        const code =
+          typeof body === 'object' && body !== null
+            ? (body as { error?: unknown }).error
+            : undefined;
+        if (status === 400 && code === 'github_token_rejected') return 'rejected';
+        if (status === 404 || status === 405) return 'unsupported';
+        return status === 422 ? 'invalid' : 'failed';
       },
       /** Removes it there; resolves to whether it did. */
-      remove: async (): Promise<boolean> => {
-        try {
-          await answered(
-            statusOf(
-              await server.request('/api/github/token', { method: 'DELETE', redirect: NO_REDIRECT })
-            )
-          );
-          return true;
-        } catch {
-          return false;
-        }
-      },
+      remove: async (): Promise<boolean> =>
+        (await change(async () =>
+          statusOf(
+            await server.request('/api/github/token', { method: 'DELETE', redirect: NO_REDIRECT })
+          )
+        )) === undefined,
     };
-  }, [forget, queryClient, server, storedToken]);
+  }, [forget, origin, queryClient, server, storedToken, writing]);
 }
 
 /** Removes the token saved in MindRoom, while the requests through MindRoom go with it. */
@@ -378,7 +415,6 @@ export function RemoveServerToken() {
   const t = usePluginTranslation('pull-requests');
   const { via, connection, appConnected } = useGitHubAccess();
   const serverToken = useServerToken();
-  const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
   const [removed, setRemoved] = useState(false);
   const fallsBack = useId();
@@ -396,12 +432,10 @@ export function RemoveServerToken() {
     ) : null;
   }
   const remove = async () => {
-    if (busy) return;
-    setBusy(true);
+    if (serverToken.busy()) return;
     setFailed(false);
     setRemoved(false);
     const done = await serverToken.remove();
-    setBusy(false);
     setFailed(!done);
     setRemoved(done);
   };
@@ -411,7 +445,7 @@ export function RemoveServerToken() {
         type="button"
         className="mrpr-link-button"
         // Not disabled, which would take the focus from it while it is pressed.
-        aria-disabled={busy || undefined}
+        aria-disabled={serverToken.writing || undefined}
         aria-describedby={appConnected ? fallsBack : undefined}
         onClick={() => void remove()}
       >
@@ -440,21 +474,12 @@ export function useGitHubAccess(): GitHubAccess {
   const userId = useMatrixClient().getSafeUserId();
   const queryClient = useQueryClient();
   const origin = server?.origin ?? '';
+  const credential = useSyncExternalStore(subscribe, () => credentialOf(queryClient, origin));
   const status = useQuery({
-    queryKey: statusKey(origin),
-    queryFn: async () => {
-      const sent = savedTime(queryClient, origin);
-      const now = await readStatus(server as MindroomServer);
-      // A status asked before a token was saved or removed there is older than the one set then.
-      if (sent !== savedTime(queryClient, origin)) {
-        return queryClient.getQueryData<ServerStatus>(statusKey(origin)) ?? now;
-      }
-      setStatus(queryClient, origin, now);
-      return now;
-    },
-    enabled: server !== undefined && token === undefined,
+    ...statusQuery(queryClient, server),
+    // Not while a token is saved or removed there: that asks, or answers, the status itself.
+    enabled: server !== undefined && token === undefined && !credential.writing,
     staleTime: statusStaleTime(queryClient.getQueryData<ServerStatus>(statusKey(origin))),
-    retry: false,
     retryOnMount: false,
   });
   const connected = server !== undefined && token === undefined && status.data?.connected === true;
@@ -466,8 +491,11 @@ export function useGitHubAccess(): GitHubAccess {
     if (stored !== undefined) return { key: true, auth: stored };
     const now = server && queryClient.getQueryData<ServerStatus>(statusKey(server.origin));
     if (!server || !now?.connected) return { key: false, auth: undefined };
+    const { generation, writing } = credentialOf(queryClient, server.origin);
+    // Which credential the server uses is not known while a token is saved or removed there.
+    if (writing) return { key: false, auth: undefined };
     return {
-      key: serverKey(server.origin, now.login),
+      key: serverKey(server.origin, now.login, generation),
       auth: viaServer(queryClient, server, `${userId} ${now.login ?? ''}`),
     };
   }, [queryClient, server, storedToken, userId]);
@@ -483,6 +511,8 @@ export function useGitHubAccess(): GitHubAccess {
   );
   const recheck = useCallback(async () => {
     if (!server || storedToken() !== undefined) return false;
+    // The parts read again by themselves once the token is saved or removed.
+    if (credentialOf(queryClient, server.origin).writing) return true;
     const key = statusKey(server.origin);
     const before = queryClient.getQueryData<ServerStatus>(key);
     await queryClient.invalidateQueries({ queryKey: key });
@@ -498,8 +528,16 @@ export function useGitHubAccess(): GitHubAccess {
       login,
       connection,
       appConnected,
-      key: token !== undefined ? true : connected ? serverKey(origin, login) : false,
-      pending: token === undefined && (serverPending || (server !== undefined && status.isPending)),
+      // While a token is saved or removed there, the key before: what was read stays on screen.
+      key:
+        token !== undefined
+          ? true
+          : connected
+          ? serverKey(origin, login, credential.generation - (credential.writing ? 1 : 0))
+          : false,
+      pending:
+        token === undefined &&
+        (serverPending || (server !== undefined && (status.isPending || credential.writing))),
       current,
       authFor,
       recheck,
@@ -509,6 +547,7 @@ export function useGitHubAccess(): GitHubAccess {
       authFor,
       connected,
       connection,
+      credential,
       current,
       login,
       origin,
@@ -566,10 +605,11 @@ export function TokenForm({
     [inputRef]
   );
   const inMindroom = serverToken !== undefined && chosen === serverToken.origin;
+  const writing = serverToken?.writing === true;
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     const trimmed = value.trim();
-    if (trimmed === '' || saving) return;
+    if (trimmed === '' || serverToken?.busy()) return;
     setProblem(undefined);
     if (!inMindroom) {
       setValue('');
@@ -608,11 +648,17 @@ export function TokenForm({
           onChange={(event) => setValue(event.target.value)}
         />
         {/* Not disabled while saving, which would take the focus from it. */}
-        <button className="mrpr-button" type="submit" aria-disabled={saving || undefined}>
+        <button className="mrpr-button" type="submit" aria-disabled={writing || undefined}>
           {t('token.save')}
         </button>
         {onCancel ? (
-          <button className="mrpr-button" type="button" onClick={onCancel}>
+          <button
+            className="mrpr-button"
+            type="button"
+            // The form stays while it saves: what comes of it is said here.
+            aria-disabled={saving || undefined}
+            onClick={() => (saving ? undefined : onCancel())}
+          >
             {t('token.cancel')}
           </button>
         ) : null}

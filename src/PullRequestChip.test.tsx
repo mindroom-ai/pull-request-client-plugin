@@ -213,7 +213,7 @@ describe('PullRequestChip', () => {
       .findAll({ queryKey: ['pull-requests'], predicate: ({ state }) => state.dataUpdatedAt > 0 });
     expect(keys.length).toBeGreaterThan(0);
     expect(keys.map(({ queryKey }) => queryKey[5])).toEqual(
-      keys.map(() => 'server:https://mindroom.example.org:octo')
+      keys.map(() => 'server:https://mindroom.example.org:octo:0')
     );
     expect(JSON.stringify(keys.map(({ queryKey }) => queryKey))).not.toContain('ghp_');
   });

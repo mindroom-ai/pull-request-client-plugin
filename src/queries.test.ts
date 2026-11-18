@@ -28,12 +28,12 @@ describe('refreshPullRequest', () => {
   it('settles on the read with the access the write used, not on another room shown without', async () => {
     client = new QueryClient();
     let reads = 0;
-    shown('server:https://m.example.org:octo', async () => ({ title: `read ${++reads}` }));
+    shown('server:https://m.example.org:octo:0', async () => ({ title: `read ${++reads}` }));
     // A room without the server shows the private pull request as not found.
     shown(false, () => Promise.reject(new GitHubError('notFound', 404)));
     await settled();
     await expect(
-      refreshPullRequest(client, REF, 'server:https://m.example.org:octo')
+      refreshPullRequest(client, REF, 'server:https://m.example.org:octo:0')
     ).resolves.toBe(true);
     expect(reads).toBe(2);
   });
