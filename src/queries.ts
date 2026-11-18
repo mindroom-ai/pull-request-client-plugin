@@ -125,7 +125,8 @@ const MERGEABLE_RECHECKS = [1_000, 2_000, 4_000];
  * While GitHub still computes whether the open pull request `pr` merges (`mergeable` null), reads
  * it again a few times, later each time, under the key it shows now and while it shows (`enabled`
  * and mounted); true meanwhile, so that what depends on it waits. Once the reads are spent, what
- * depends on it goes by GitHub's answer then. Another key, or an answer, starts the count afresh.
+ * depends on it goes by GitHub's answer then. Another key, an answer, or the pull request changed
+ * on GitHub (its `updatedAt` or head) starts the count afresh.
  * None starts while `paused` (an action runs): the read after it is the action's own.
  */
 export function useMergeableRecheck(
@@ -136,13 +137,11 @@ export function useMergeableRecheck(
 ): boolean {
   const queryClient = useQueryClient();
   const { key } = useGitHubAccess();
-  const scope = JSON.stringify(keyOf(ref, key));
+  const scope = JSON.stringify([keyOf(ref, key), pr?.updatedAt, pr?.headSha]);
   const unknown = enabled && ref !== undefined && pr?.state === 'open' && pr.mergeable === null;
   const [reads, setReads] = useState({ scope, count: 0 });
+  if (reads.scope !== scope || (!unknown && reads.count !== 0)) setReads({ scope, count: 0 });
   const count = unknown && reads.scope === scope ? reads.count : 0;
-  useEffect(() => {
-    if (!unknown) setReads((now) => (now.count === 0 ? now : { scope, count: 0 }));
-  }, [scope, unknown]);
   useEffect(() => {
     if (!unknown || paused || count >= MERGEABLE_RECHECKS.length) return undefined;
     // A read that ends after the key changed, or the panel went, counts for none.

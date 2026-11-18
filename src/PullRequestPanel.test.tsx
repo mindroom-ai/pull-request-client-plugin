@@ -985,14 +985,18 @@ describe('with the GitHub account connected in MindRoom', () => {
       }
     };
     const later = (ms: number) => act(() => vi.advanceTimersByTimeAsync(ms));
+    // The pull request as last updated on GitHub, which a test moves on.
+    let updated: string;
     /** GitHub answers `mergeable` with each of `answers` in turn, then with the last. */
     const answering = (answers: (boolean | null)[]) => {
       const base = github.getMockImplementation()!;
+      updated = '2026-11-10T00:00:00Z';
       github.mockImplementation(async (url, init) => {
         if (!url.endsWith('/pulls/200')) return base(url, init);
         const mergeable = answers.length > 1 ? answers.shift() : answers[0];
         const state = mergeable === null ? 'unknown' : 'clean';
-        return respond(pull({ node_id: 'PR_kw200', head, mergeable, mergeable_state: state }));
+        const over = { node_id: 'PR_kw200', head, mergeable, mergeable_state: state };
+        return respond(pull({ ...over, updated_at: updated }));
       });
     };
 
@@ -1042,6 +1046,14 @@ describe('with the GitHub account connected in MindRoom', () => {
       expect(view.queryByText(CHECKING)).toBeNull();
       await later(60_000);
       expect(pullReads()).toBe(4);
+      // Read again once it changed on GitHub, and still computing, it is read again as before.
+      updated = '2026-11-11T00:00:00Z';
+      await click(view.getByRole('button', { name: 'More actions' }));
+      await click(view.getByRole('menuitem', { name: 'Refresh' }));
+      await settle(() => expect(view.getByText(CHECKING)).toBeTruthy());
+      expect(pullReads()).toBe(5);
+      await later(1000);
+      await settle(() => expect(pullReads()).toBe(6));
     });
 
     it("does not replace an action's read after it, which keeps the action running", async () => {
