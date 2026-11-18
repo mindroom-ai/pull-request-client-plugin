@@ -1999,14 +1999,19 @@ test("without a token, the GitHub account connected in MindRoom reads and merges
   await expect(panel(page).locator('.mrpr-panel-title')).toHaveText(tokenEndpoint.title, {
     timeout: 30_000,
   });
-  await expect(
-    panel(page).getByText(`Signed in as ${CONNECTED_LOGIN} through MindRoom (GitHub App).`)
-  ).toBeVisible();
   await expect(panel(page).getByRole('button', { name: 'Forget token' })).toHaveCount(0);
   const merge = panel(page).getByRole('button', { name: 'Merge', exact: true });
   await expect(merge).toBeVisible({ timeout: 30_000 });
   await expect(panel(page).getByText(/^Loading/)).toHaveCount(0);
+  // Once it works the panel's body says nothing of it; More actions says as whom it goes.
+  await expect(page.getByText(/through MindRoom/)).toHaveCount(0);
   await shot(page, 'mindroom-connected');
+  await panel(page).getByRole('button', { name: 'More actions' }).click();
+  const menu = page.getByRole('menu', { name: 'More actions' });
+  await expect(menu.getByText(`Signed in as ${CONNECTED_LOGIN} through MindRoom`)).toBeVisible();
+  await expect(menu.getByRole('menuitem', { name: 'Use a token in this browser' })).toBeVisible();
+  await shot(page, 'mindroom-connected-menu');
+  await page.keyboard.press('Escape');
 
   await merge.click();
   await panel(page).getByRole('button', { name: 'Confirm merge?' }).click();
