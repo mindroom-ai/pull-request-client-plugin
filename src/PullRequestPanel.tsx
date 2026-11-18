@@ -330,7 +330,7 @@ function Panel({ roomId, request }: PanelProps) {
   }, [roomId, ref]);
   const query = usePullRequest(ref);
   const { token, forget } = useGitHubToken();
-  const { via, unreadable } = useGitHubAccess();
+  const { via, unreadable, key: accessKey } = useGitHubAccess();
   const { server } = useContext(GitHubServerContext);
   const serverOrigin = server?.origin ?? '';
   const tokenForm = usePanelTokenForm();
@@ -358,13 +358,14 @@ function Panel({ roomId, request }: PanelProps) {
   // The commit the Code tab shows, chosen there or from the Timeline. It belongs to the pull
   // request it was chosen in: another one opens on All commits.
   const pullRequestKey = ref ? pullRequestUrl(ref) : '';
-  // What GitHub answered last, shown while the pull request is read again: a read again from an
-  // error forgets it, and its view, the token form with what was typed among it, would go.
+  // What GitHub answered last, shown while the pull request is read again with the same access:
+  // a read again from an error forgets it. Read with another, it says nothing of now.
+  const readAs = `${accessKey} ${pullRequestKey}`;
   const lastError = useRef<{ key: string; error: unknown }>();
-  if (query.isError) lastError.current = { key: pullRequestKey, error: query.error };
+  if (query.isError) lastError.current = { key: readAs, error: query.error };
   const error = query.isError
     ? query.error
-    : query.isFetching && lastError.current?.key === pullRequestKey
+    : query.isFetching && lastError.current?.key === readAs
     ? lastError.current.error
     : undefined;
   const [commitScope, setCommitScope] = useState<{ pullRequestKey: string; sha?: string }>({

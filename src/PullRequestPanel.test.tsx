@@ -1165,6 +1165,24 @@ describe('with the GitHub account connected in MindRoom', () => {
     );
   });
 
+  it("says it loads, not the forgotten token's error, while it reads without it", async () => {
+    localStorage.setItem(TOKEN_KEY, 'ghp_refused');
+    let release!: (value: Response) => void;
+    const held = new Promise<Response>((resolve) => (release = resolve));
+    fetchMock.mockImplementation(async (url, init) =>
+      new Headers(init?.headers).has('authorization')
+        ? respond({ message: 'Bad credentials' }, 401)
+        : held
+    );
+    const view = await show();
+    expect(await view.findByText('GitHub refused the saved token.')).toBeTruthy();
+    await click(view.getByRole('button', { name: 'Forget token' }));
+    await waitUntil(() => expect(view.getByText('Loading pull request')).toBeTruthy());
+    expect(view.queryByText('GitHub refused the saved token.')).toBeNull();
+    await act(async () => release(respond(pull())));
+    expect(await view.findByText('Add pull request cards')).toBeTruthy();
+  });
+
   it('reads with the token stored in the browser first, and asks MindRoom nothing', async () => {
     localStorage.setItem(TOKEN_KEY, 'tok');
     const mindroom = githubServer(github);
