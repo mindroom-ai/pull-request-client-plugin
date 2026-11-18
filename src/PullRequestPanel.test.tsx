@@ -1347,6 +1347,34 @@ describe('with the GitHub account connected in MindRoom', () => {
     }
   });
 
+  it('leaves the focus on the title the person moved it back to, though the panel put it there once', async () => {
+    const mindroom = githubServer(withUser);
+    let proceed!: () => void;
+    const held = new Promise<void>((resolve) => (proceed = resolve));
+    const real = mindroom.server.request.getMockImplementation()!;
+    mindroom.server.request.mockImplementation(async (path, init) => {
+      if (path === '/api/github/token' && init?.method === 'DELETE') await held;
+      return real(path, init);
+    });
+    roomServer.current = mindroom.server;
+    const view = await show();
+    // Saved from the form opened for it, which goes: the panel puts the focus on the title.
+    await click(await view.findByRole('button', { name: 'Use a token instead' }));
+    await type(view.getByLabelText('GitHub token'), 'ghp_good');
+    await click(view.getByLabelText('Save in MindRoom at mindroom.example.org'));
+    view.getByRole('button', { name: 'Save' }).focus();
+    await click(view.getByRole('button', { name: 'Save' }));
+    const title = () => view.container.querySelector<HTMLElement>('.mrpr-panel-title');
+    await waitUntil(() => expect(document.activeElement).toBe(title()));
+    const remove = await view.findByRole('button', { name: 'Remove token from MindRoom' });
+    remove.focus();
+    await click(remove);
+    title()?.focus();
+    await act(async () => proceed());
+    await view.findByText('Token removed from MindRoom.');
+    expect(document.activeElement).toBe(title());
+  });
+
   it('focuses the note once per removal, not again when a later save fails', async () => {
     const mindroom = githubServer(withUser);
     await saveInMindroom(mindroom);

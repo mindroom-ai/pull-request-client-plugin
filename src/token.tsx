@@ -475,15 +475,6 @@ function useServerToken() {
   }, [forget, origin, queryClient, server, storedToken, writing]);
 }
 
-// The element a part focused in place of one that went with the focus, until another has it.
-let placed: Element | null = null;
-
-/** Focuses `element` in place of a control that went while it had the focus. */
-export function placeFocus(element: HTMLElement | null | undefined) {
-  element?.focus();
-  placed = element ?? null;
-}
-
 /**
  * That a token was removed from MindRoom: the origin it was removed from, and whether the note
  * that says so takes the focus, once, as the button that had it went.
@@ -492,15 +483,45 @@ type Removal = { origin: string; focus: boolean };
 type RemovedToken = {
   removed: Removal | undefined;
   setRemoved(removal: Removal | undefined): void;
+  /**
+   * The element the panel focused in place of a control that went with the focus, while it has
+   * held the focus ever since: the focus is lost there, not put there by the person.
+   */
+  placed: MutableRefObject<Element | null>;
 };
 
 /** Where a token's removal is kept, for one part whose own parts may go and come back meanwhile. */
 function useRemovedToken(): RemovedToken {
   const [removed, setRemoved] = useState<Removal>();
-  return useMemo(() => ({ removed, setRemoved }), [removed]);
+  const placed = useRef<Element | null>(null);
+  return useMemo(() => ({ removed, setRemoved, placed }), [removed]);
 }
 
-const NO_REMOVAL: RemovedToken = { removed: undefined, setRemoved: () => undefined };
+/**
+ * Focuses an element in place of a control that went while it had the focus; until that element
+ * loses the focus, a removal counts the focus there as lost (`RemovedToken.placed`).
+ */
+export function usePlaceFocus(): (element: HTMLElement | null | undefined) => void {
+  const { placed } = useContext(RemovedTokenContext) ?? NO_REMOVAL;
+  return useCallback(
+    (element) => {
+      if (!element) return;
+      element.focus();
+      placed.current = element;
+      const lost = () => {
+        if (placed.current === element) placed.current = null;
+      };
+      element.addEventListener('blur', lost, { once: true });
+    },
+    [placed]
+  );
+}
+
+const NO_REMOVAL: RemovedToken = {
+  removed: undefined,
+  setRemoved: () => undefined,
+  placed: { current: null },
+};
 const RemovedTokenContext = createContext<RemovedToken | undefined>(undefined);
 
 /**
@@ -598,7 +619,7 @@ function RemoveButton({ note }: { note: RemovedToken }) {
     // The focus follows from the button, or from where it fell once the button went, but not
     // from where the person moved it meanwhile.
     const active = document.activeElement;
-    const focus = [null, document.body, button.current, placed].includes(active);
+    const focus = [null, document.body, button.current, note.placed.current].includes(active);
     note.setRemoved(done ? { origin: serverToken.origin, focus } : undefined);
   };
   return (

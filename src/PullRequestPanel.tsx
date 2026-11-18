@@ -58,7 +58,7 @@ import {
   GitHubConnectedNote,
   GitHubServerContext,
   RemovedTokenNote,
-  placeFocus,
+  usePlaceFocus,
   RemoveServerToken,
   RemovedTokenProvider,
   RoomGitHub,
@@ -347,6 +347,7 @@ function Panel({ roomId, request }: PanelProps) {
   // the token field while no pull request shows. Nothing blurs when its element goes.
   const root = useRef<HTMLDivElement>(null);
   const focused = useRef(false);
+  const placeFocus = usePlaceFocus();
   useEffect(() => {
     if (!focused.current || document.activeElement !== document.body) return;
     placeFocus(root.current?.querySelector<HTMLElement>('.mrpr-panel-title, .mrpr-token input'));
