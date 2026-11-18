@@ -12,10 +12,12 @@ import { ChevronsDownUp, ChevronsUpDown } from 'lucide-react';
 import {
   useEffect,
   useInsertionEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   useSyncExternalStore,
+  type MutableRefObject,
 } from 'react';
 
 import {
@@ -107,13 +109,73 @@ interface DiffFileTreeProps {
   readonly ariaLabel: string;
 }
 
+/** What the tree shows besides its paths, by the model's paths. */
+interface TreeView {
+  readonly selectedPaths: readonly string[];
+  readonly collapsedDirectories: readonly string[];
+  readonly focusedPath: string | null;
+}
+
+/** What a tree made again for another zoom takes over from the one before. */
+interface CarriedTree extends TreeView {
+  /** How far it was scrolled, in rows. */
+  readonly scrolledRows: number;
+  /** Whether the keyboard's focus was in it. */
+  readonly focused: boolean;
+}
+
+function collapsedDirectoriesOf(model: TreeModel, directoryPaths: readonly string[]): string[] {
+  return directoryPaths.filter((path) => {
+    const directory = model.getItem(path);
+    return directory !== null && 'isExpanded' in directory && !directory.isExpanded();
+  });
+}
+
+/**
+ * Gives `model`, whose paths were just reset, `view`'s selection, folded folders and focus. The
+ * selection it reports meanwhile is its own doing, which the caller ignores while syncing.
+ */
+function applyTreeView(model: TreeModel, view: TreeView, known: (path: string) => boolean) {
+  for (const path of model.getSelectedPaths()) model.getItem(path)?.deselect();
+  for (const path of view.selectedPaths) model.getItem(path)?.select();
+  for (const path of view.collapsedDirectories) {
+    const directory = model.getItem(path);
+    if (directory !== null && 'collapse' in directory) directory.collapse();
+  }
+  if (view.focusedPath !== null && known(view.focusedPath)) model.focusPath(view.focusedPath);
+}
+
+/** The element the tree scrolls in, inside the shadow root Pierre draws it in. */
+const scrollElementOf = (tree: HTMLElement | null) =>
+  tree
+    ?.querySelector('file-tree-container')
+    ?.shadowRoot?.querySelector<HTMLElement>('[data-file-tree-virtualized-scroll="true"]') ?? null;
+
+/** How long the page zoom rests before the tree is made again at its size. */
+const ZOOM_SETTLE_MS = 250;
+
 /**
  * Pierre's tree places its rows by a height in px that it takes once, when it is made, so a page
- * zoom makes it again with the rows' 1.5rem in the new size, its folders open as at the start.
+ * zoom makes it again with the rows' 1.5rem in the new size, once the zoom rests (a pinch changes
+ * it on each frame), with the selection, folded folders, focus and scroll of the one before.
  */
 export function DiffFileTree(props: DiffFileTreeProps) {
   const rem = useRootFontSize();
-  return <SizedDiffFileTree key={rem} {...props} itemHeight={1.5 * rem} />;
+  const [settledRem, setSettledRem] = useState(rem);
+  useEffect(() => {
+    if (rem === settledRem) return undefined;
+    const timer = setTimeout(() => setSettledRem(rem), ZOOM_SETTLE_MS);
+    return () => clearTimeout(timer);
+  }, [rem, settledRem]);
+  const carried = useRef<CarriedTree | null>(null);
+  return (
+    <SizedDiffFileTree
+      key={settledRem}
+      {...props}
+      itemHeight={1.5 * settledRem}
+      carried={carried}
+    />
+  );
 }
 
 function SizedDiffFileTree({
@@ -121,7 +183,11 @@ function SizedDiffFileTree({
   onSelectFile,
   ariaLabel,
   itemHeight,
-}: DiffFileTreeProps & { readonly itemHeight: number }) {
+  carried,
+}: DiffFileTreeProps & {
+  readonly itemHeight: number;
+  readonly carried: MutableRefObject<CarriedTree | null>;
+}) {
   const t = usePluginTranslation('pull-requests');
   const language = useLanguage();
   const themeKind = useThemeKind();
@@ -146,6 +212,7 @@ function SizedDiffFileTree({
   }));
   const directoryLines = useMemo(() => diffFileTreeDirectoryLines(entries), [entries]);
   const syncingSelectionRef = useRef(false);
+  const treeRef = useRef<HTMLDivElement>(null);
   const mountedPresentationRef = useRef<ReturnType<typeof diffFileTreeModel> | null>(null);
 
   // The tree model keeps the first selection handler it was given.
@@ -202,6 +269,21 @@ function SizedDiffFileTree({
     sort: ordering.sort,
     unsafeCSS: PIERRE_TREE_UNSAFE_CSS,
   });
+  // Before Pierre's tree goes, what the next one, made for another zoom, takes over.
+  useLayoutEffect(
+    () => () => {
+      const tree = treeRef.current;
+      const paths = mountedPresentationRef.current?.paths ?? [];
+      carried.current = {
+        selectedPaths: model.getSelectedPaths(),
+        collapsedDirectories: collapsedDirectoriesOf(model, collectDirectoryPaths(paths)),
+        focusedPath: model.getFocusedPath(),
+        scrolledRows: (scrollElementOf(tree)?.scrollTop ?? 0) / model.getItemHeight(),
+        focused: tree?.querySelector('file-tree-container')?.matches(':focus-within') ?? false,
+      };
+    },
+    [carried, model]
+  );
   const allDirectoriesExpanded = useSyncExternalStore(
     (listener) => subscribeOncePerTask(model, listener),
     () => areAllDirectoriesExpanded(model, directoryPaths)
@@ -221,8 +303,27 @@ function SizedDiffFileTree({
     const mounted = mountedPresentationRef.current;
     if (mounted?.paths === modelPaths) return;
     mountedPresentationRef.current = presented;
+    const known = (path: string) => modelPaths.includes(path) || directoryPaths.includes(path);
     if (mounted === null) {
       model.resetPaths(modelPaths);
+      const before = carried.current;
+      carried.current = null;
+      if (before !== null) {
+        syncingSelectionRef.current = true;
+        applyTreeView(model, before, known);
+        queueMicrotask(() => {
+          syncingSelectionRef.current = false;
+        });
+        // Once Pierre has drawn the rows, at the row it showed first, and with the focus.
+        requestAnimationFrame(() => {
+          const scroller = scrollElementOf(treeRef.current);
+          if (scroller) scroller.scrollTop = before.scrolledRows * itemHeight;
+          if (!before.focused || before.focusedPath === null) return;
+          scroller
+            ?.querySelector<HTMLElement>(`[data-item-path="${CSS.escape(before.focusedPath)}"]`)
+            ?.focus();
+        });
+      }
     } else if (mounted.paths.every((path, index) => modelPaths[index] === path)) {
       const updates = buildDiffFileTreeUpdates(mounted.paths, modelPaths);
       if (updates.length > 0) model.batch(updates);
@@ -236,30 +337,30 @@ function SizedDiffFileTree({
         .getSelectedPaths()
         .map((path) => presented.modelPath(mounted.selectionPath(path)))
         .filter((path) => path.endsWith('/') || modelPaths.includes(path));
-      const collapsedDirectories = directoryPaths.filter((path) => {
-        const directory = model.getItem(path);
-        return directory !== null && 'isExpanded' in directory && !directory.isExpanded();
-      });
+      const collapsedDirectories = collapsedDirectoriesOf(model, directoryPaths);
       syncingSelectionRef.current = true;
       model.resetPaths(modelPaths);
-      for (const path of model.getSelectedPaths()) model.getItem(path)?.deselect();
-      for (const path of selectedPaths) model.getItem(path)?.select();
+      applyTreeView(
+        model,
+        { selectedPaths, collapsedDirectories, focusedPath: nextFocusedPath },
+        known
+      );
       queueMicrotask(() => {
         syncingSelectionRef.current = false;
       });
-      for (const path of collapsedDirectories) {
-        const directory = model.getItem(path);
-        if (directory !== null && 'collapse' in directory) directory.collapse();
-      }
-      if (
-        nextFocusedPath !== null &&
-        (modelPaths.includes(nextFocusedPath) || directoryPaths.includes(nextFocusedPath))
-      ) {
-        model.focusPath(nextFocusedPath);
-      }
     }
     model.setGitStatus(gitStatus);
-  }, [directoryPaths, gitStatus, model, modelPaths, ordering, positions, presented]);
+  }, [
+    carried,
+    directoryPaths,
+    gitStatus,
+    itemHeight,
+    model,
+    modelPaths,
+    ordering,
+    positions,
+    presented,
+  ]);
 
   // Pierre draws its rows again on a change of paths or git status, not of counts alone, as when
   // another commit changed the same files. Setting its composition again is its only public call
@@ -271,7 +372,7 @@ function SizedDiffFileTree({
 
   const foldLabel = allDirectoriesExpanded ? t('code.collapseFolders') : t('code.expandFolders');
   return (
-    <div className="mrpr-tree">
+    <div ref={treeRef} className="mrpr-tree">
       <div className="mrpr-tree-header">
         <span className="mrpr-tree-title">{t('code.files')}</span>
         <span className="mrpr-tree-count">{entries.length}</span>
