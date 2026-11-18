@@ -7,7 +7,7 @@ import plugin from './index';
 import { middleTruncate } from './middleTruncate';
 import { linkedRoom, type TestLink, type TestWorktree } from './testing/linkedRoom';
 import { ThreadCardPullRequests } from './ThreadCardPullRequests';
-import { ThreadDetails } from './ThreadDetails';
+import { orderPullRequests, ThreadDetails } from './ThreadDetails';
 import { threadHasDetails } from './threadPullRequests';
 
 // A card's chip opens its thread on a click, which needs the room's page; no test here clicks.
@@ -110,6 +110,57 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+});
+
+describe('orderPullRequests', () => {
+  const answer = (state: 'open' | 'closed' | 'merged', updatedAt: string, draft = false) => ({
+    state,
+    draft,
+    updatedAt,
+  });
+  it.each([
+    ['none', [], []],
+    [
+      'open, draft, closed, merged',
+      [
+        answer('merged', '2026-11-18T10:00:00Z'),
+        answer('closed', '2026-11-18T10:00:00Z'),
+        answer('open', '2026-11-18T10:00:00Z', true),
+        answer('open', '2026-11-18T10:00:00Z'),
+      ],
+      [3, 2, 1, 0],
+    ],
+    [
+      'newest first within a state',
+      [
+        answer('open', '2026-11-17T10:00:00Z'),
+        answer('open', '2026-11-18T09:00:00Z'),
+        answer('open', '2026-11-18T10:00:00Z'),
+      ],
+      [2, 1, 0],
+    ],
+    [
+      'ties keep link order',
+      [
+        answer('merged', '2026-11-18T10:00:00Z'),
+        answer('merged', '2026-11-18T10:00:00Z'),
+        answer('merged', '2026-11-18T10:00:00Z'),
+      ],
+      [0, 1, 2],
+    ],
+    [
+      'unanswered last, in link order',
+      [undefined, answer('merged', '2026-11-01T10:00:00Z'), undefined, answer('open', '')],
+      [3, 1, 0, 2],
+    ],
+  ] as const)('%s', (_name, answers, order) =>
+    expect(
+      orderPullRequests(
+        answers.map((_answer, index) => index),
+        answers
+      )
+    ).toEqual(order)
+  );
 });
 
 describe('ThreadDetails', () => {
@@ -233,6 +284,30 @@ describe('ThreadDetails', () => {
     expect(shown[0]?.textContent).toContain(NUMBER(412));
     expect(shown[1]?.textContent).toContain(NUMBER(7));
     // The worktree comes after the pull requests.
+    const last = view.container.firstElementChild?.lastElementChild;
+    expect(last?.classList.contains('mrpr-details-worktree')).toBe(true);
+  });
+
+  it('orders the pull requests open, draft, closed, merged, newest first, before the worktree', async () => {
+    const at = (hours: number) => new Date(Date.now() - hours * 3_600_000).toISOString();
+    serve({
+      1: pull({ title: 'Merged', state: 'closed', merged_at: at(1), updated_at: at(1) }),
+      2: pull({ title: 'Closed', state: 'closed', updated_at: at(1) }),
+      3: pull({ title: 'Old open', updated_at: at(5) }),
+      4: pull({ title: 'Draft', draft: true, updated_at: at(1) }),
+      5: pull({ title: 'New open', updated_at: at(2) }),
+    });
+    const { view, client } = await show(
+      roomWith(
+        [1, 2, 3, 4, 5, 6].map((number) => ({ number })),
+        [{ path: 'worktrees/x' }]
+      )
+    );
+    await answered(client, '/pulls/5');
+    await view.findByText('New open');
+    expect(blocks(view).map((block) => block.querySelector('.mrpr-truncate')?.textContent)).toEqual(
+      [5, 3, 4, 2, 1, 6].map(NUMBER)
+    );
     const last = view.container.firstElementChild?.lastElementChild;
     expect(last?.classList.contains('mrpr-details-worktree')).toBe(true);
   });

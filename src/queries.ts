@@ -87,8 +87,10 @@ export async function refreshPullRequest(
 }
 
 /** What a caller can change of a query's refetching: the chips leave out the refetch on window focus,
- * a thread's details also the one on mount, for an answer and for a refusal alike. */
+ * a thread's details also the one on mount, for an answer and for a refusal alike; `enabled: false`
+ * reads only what is already there. */
 export type RefetchOptions = {
+  enabled?: false;
   refetchOnWindowFocus?: boolean;
   refetchOnMount?: boolean;
   retryOnMount?: boolean;

@@ -6,7 +6,10 @@ import { renderPluginComponent } from '@mindroom/client-sdk/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import plugin from './index';
 import { setShownPullRequest } from './shownPullRequest';
+import type { PullRequest } from './github';
+import { pullRequestKey } from './queries';
 import { trapOptions } from './testing/focusTrapStandIn';
+import { githubServer } from './testing/mindroomServer';
 import { linkedRoom, type TestLink, type TestWorktree } from './testing/linkedRoom';
 import { ThreadPullRequestsButton } from './ThreadPullRequestsButton';
 
@@ -20,9 +23,10 @@ const page = vi.hoisted(() => ({
   panel: undefined as { isOpen: boolean; open: ReturnType<typeof vi.fn> } | undefined,
 }));
 // The room has no MindRoom server unless a test gives one: the stand-in client knows no room.
+const roomServer = vi.hoisted(() => ({ current: undefined as unknown }));
 vi.mock('@mindroom/client-sdk/server', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@mindroom/client-sdk/server')>()),
-  useMindroomServerStatus: () => ({ server: undefined, pending: false }),
+  useMindroomServerStatus: () => ({ server: roomServer.current, pending: false }),
 }));
 vi.mock('@mindroom/client-sdk/core', async (importOriginal) => {
   const core = await importOriginal<typeof import('@mindroom/client-sdk/core')>();
@@ -34,6 +38,42 @@ const respond = (body: unknown, status = 200) =>
 const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>();
 const pullRequestRequests = () =>
   fetchMock.mock.calls.filter(([url]) => /\/repos\/[^/]+\/[^/]+\/pulls\/\d+$/.test(url));
+
+const pull = (state: string, over: Record<string, unknown> = {}) => ({
+  title: 'Store sessions in Redis',
+  state: state === 'merged' ? 'closed' : state,
+  draft: false,
+  merged_at: state === 'merged' ? '2026-11-18T10:00:00Z' : null,
+  head: { sha: 'abc123', ref: 'redis-sessions', repo: { full_name: 'mindroom-ai/mindroom-chat' } },
+  base: { ref: 'main', repo: { full_name: 'mindroom-ai/mindroom-chat' } },
+  user: { login: 'acme-builder' },
+  updated_at: '2026-11-18T10:00:00Z',
+  ...over,
+});
+// GitHub with the pull requests of `mindroom-chat` by number; one held answers when `release` runs.
+const held = vi.hoisted(() => ({ release: () => {} }));
+const serve = (pulls: Record<number, unknown>, hold?: number) =>
+  fetchMock.mockImplementation(async (url) => {
+    const number = Number(/\/pulls\/(\d+)$/.exec(url)?.[1]);
+    const body = pulls[number];
+    if (number === hold)
+      return new Promise((resolve) => {
+        held.release = () => resolve(respond(body));
+      });
+    return body === undefined ? respond({ message: 'Not Found' }, 404) : respond(body);
+  });
+// Where `usePluginStorage` keeps the GitHub token of the test's account.
+const TOKEN_KEY = 'mindroom.plugin:%40plugin-tester%3Aexample.org/pull-requests/githubToken';
+const withToken = () => localStorage.setItem(TOKEN_KEY, 'ghp_test');
+/** What another surface read anonymously of pull request `number`, as it keeps it. */
+const readAnonymously = (number: number, state: PullRequest['state']) =>
+  client.setQueryData(
+    [...pullRequestKey({ owner: 'mindroom-ai', repo: 'mindroom-chat', number }), false],
+    { state, draft: false } as PullRequest
+  );
+const icon = (view: View) => trigger(view).querySelector('svg')!;
+const tone = (view: View) =>
+  [...icon(view).classList].find((name) => name.startsWith('mrpr-tone-'));
 
 const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 const button = (room: Room, threadId = '$t1') => (
@@ -63,6 +103,7 @@ beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   localStorage.clear();
   client.clear();
+  roomServer.current = undefined;
   page.panel = { isOpen: false, open: vi.fn() };
   setShownPullRequest(ROOM_ID, undefined);
   fetchMock.mockReset();
@@ -108,10 +149,162 @@ describe('ThreadPullRequestsButton', () => {
     expect(rows(view)[0]?.tabIndex).toBe(0);
   });
 
-  it('asks GitHub nothing while the menu is closed', async () => {
+  it('asks GitHub once for each pull request while closed, for no checks, and not again on a second mount', async () => {
+    localStorage.setItem(TOKEN_KEY, 'ghp_test');
+    serve({ 1: pull('open') });
+    const first = await show([{ number: 1 }, { number: 2 }], [WORKTREE]);
+    await vi.waitFor(() => expect(tone(first.view)).toBe('mrpr-tone-open'));
+    expect(pullRequestRequests()).toHaveLength(2);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    first.view.unmount();
+    // The answer and the refusal (number 2) alike are kept: neither is asked again.
     const { view } = await show([{ number: 1 }, { number: 2 }], [WORKTREE]);
     await act(async () => new Promise((resolve) => setTimeout(resolve, 10)));
-    expect(trigger(view)).toBeTruthy();
+    expect(tone(view)).toBe('mrpr-tone-open');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    [{ 1: pull('open'), 2: pull('merged') }, 'open', 'Pull requests (2): Open'],
+    [{ 1: pull('merged'), 2: pull('merged') }, 'merged', 'Pull requests (2): Merged'],
+    [{ 1: pull('merged'), 2: pull('closed') }, 'closed', 'Pull requests (2): Closed'],
+    [
+      { 1: pull('open', { draft: true }), 2: pull('open', { draft: true }) },
+      'draft',
+      'Pull requests (2): Draft',
+    ],
+    // A pull request GitHub refused counts for nothing.
+    [{ 1: pull('merged') }, 'merged', 'Pull requests (2): Merged'],
+  ])('takes the tone and icon of its pull requests together: %#', async (pulls, state, label) => {
+    withToken();
+    serve(pulls);
+    const { view } = await show([{ number: 1 }, { number: 2 }]);
+    await vi.waitFor(() => expect(tone(view)).toBe(`mrpr-tone-${state}`));
+    expect(trigger(view).getAttribute('aria-label')).toBe(label);
+    expect(icon(view).classList).toContain(
+      `lucide-${
+        {
+          open: 'git-pull-request-arrow',
+          draft: 'git-pull-request-draft',
+          closed: 'git-pull-request-closed',
+          merged: 'git-merge',
+        }[state]
+      }`
+    );
+  });
+
+  it('asks GitHub nothing without a token, and takes only the answers other surfaces read', async () => {
+    serve({ 1: pull('open'), 2: pull('merged') });
+    const first = await show([{ number: 1 }, { number: 2 }]);
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 10)));
+    expect(tone(first.view)).toBeUndefined();
+    expect(fetchMock).not.toHaveBeenCalled();
+    first.view.unmount();
+    // A chip read one: still neutral, as the other might be open.
+    readAnonymously(2, 'merged');
+    const second = await show([{ number: 1 }, { number: 2 }]);
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 10)));
+    expect(tone(second.view)).toBeUndefined();
+    second.view.unmount();
+    readAnonymously(1, 'merged');
+    const { view } = await show([{ number: 1 }, { number: 2 }]);
+    await vi.waitFor(() => expect(tone(view)).toBe('mrpr-tone-merged'));
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('stays neutral until it knows how it reaches GitHub, then goes by that answer', async () => {
+    // Anonymously a chip read it merged; the GitHub account connected in MindRoom sees it open.
+    readAnonymously(1, 'merged');
+    serve({ 1: pull('open') });
+    const mindroom = githubServer(fetchMock);
+    let answerStatus = () => {};
+    const request = mindroom.server.request;
+    roomServer.current = {
+      origin: mindroom.server.origin,
+      request: vi.fn((path: string, init?: RequestInit) =>
+        path === '/api/github/status'
+          ? new Promise((resolve) => {
+              answerStatus = () => resolve(request(path, init));
+            })
+          : request(path, init)
+      ),
+    };
+    const { view } = await show([{ number: 1 }]);
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 10)));
+    expect(tone(view)).toBeUndefined();
+    await act(async () => answerStatus());
+    await vi.waitFor(() => expect(tone(view)).toBe('mrpr-tone-open'));
+    expect(mindroom.githubRequests().map(({ path }) => path)).toEqual([
+      '/repos/mindroom-ai/mindroom-chat/pulls/1',
+    ]);
+  });
+
+  it('leaves out a pull request whose refetch GitHub refused, also one that showed before', async () => {
+    localStorage.setItem(TOKEN_KEY, 'ghp_test');
+    serve({ 1: pull('open'), 2: pull('merged') });
+    const { view } = await show([{ number: 1 }, { number: 2 }]);
+    await vi.waitFor(() => expect(tone(view)).toBe('mrpr-tone-open'));
+    // Number 1 is gone now: its query keeps the open pull request beside the error.
+    serve({ 2: pull('merged') });
+    await act(async () => client.invalidateQueries());
+    await vi.waitFor(() => expect(tone(view)).toBe('mrpr-tone-merged'));
+    expect(trigger(view).getAttribute('aria-label')).toBe('Pull requests (2): Merged');
+    // Its menu lists the refused one last too, after the merged one, as one with no answer.
+    await openMenu(view);
+    expect(rows(view).map((row) => row.querySelector('.mrpr-truncate')?.textContent)).toEqual([
+      'mindroom-chat #2',
+      'mindroom-chat #1',
+    ]);
+    serve({});
+    await act(async () => client.invalidateQueries());
+    await vi.waitFor(() => expect(tone(view)).toBeUndefined());
+    expect(trigger(view).getAttribute('aria-label')).toBe('Pull requests (2)');
+  });
+
+  it('names one pull request with its state', async () => {
+    withToken();
+    serve({ 1: pull('merged') });
+    const { view } = await show([{ number: 1 }]);
+    await vi.waitFor(() => expect(tone(view)).toBe('mrpr-tone-merged'));
+    expect(trigger(view).getAttribute('aria-label')).toBe('Pull request: Merged');
+  });
+
+  it('stays neutral while every pull request is refused', async () => {
+    withToken();
+    const { view } = await show([{ number: 1 }, { number: 2 }]);
+    await vi.waitFor(() => expect(pullRequestRequests()).toHaveLength(2));
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 10)));
+    expect(tone(view)).toBeUndefined();
+    expect(trigger(view).getAttribute('aria-label')).toBe('Pull requests (2)');
+  });
+
+  it('stays neutral while one still loads, unless those answered already make it open', async () => {
+    withToken();
+    serve({ 1: pull('merged'), 2: pull('open') }, 2);
+    const { view } = await show([{ number: 1 }, { number: 2 }]);
+    await vi.waitFor(() => expect(pullRequestRequests()).toHaveLength(2));
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 10)));
+    // Not merged first, then open: the tone never changes once it shows.
+    expect(tone(view)).toBeUndefined();
+    expect(trigger(view).getAttribute('aria-label')).toBe('Pull requests (2)');
+    await act(async () => held.release());
+    await vi.waitFor(() => expect(tone(view)).toBe('mrpr-tone-open'));
+    view.unmount();
+    client.clear();
+    serve({ 1: pull('open'), 2: pull('merged') }, 2);
+    const again = await show([{ number: 1 }, { number: 2 }]);
+    await vi.waitFor(() => expect(tone(again.view)).toBe('mrpr-tone-open'));
+  });
+
+  it('keeps the branch icon, without a tone, for a thread with only a worktree, and asks nothing', async () => {
+    const mindroom = githubServer(fetchMock);
+    roomServer.current = mindroom.server;
+    const { view } = await show([], [WORKTREE]);
+    expect(icon(view).classList).toContain('lucide-git-branch');
+    expect(tone(view)).toBeUndefined();
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 10)));
+    // Not even whether the room's MindRoom server has GitHub connected.
+    expect(mindroom.server.request).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -191,6 +384,41 @@ describe('ThreadPullRequestsButton', () => {
     view.rerender(button(linkedRoom(ROOM_ID, [{ number: 2 }])));
     expect(trigger(view).getAttribute('aria-expanded')).toBe('false');
     expect(view.queryByRole('menu')).toBeNull();
+  });
+
+  it('keeps its button and open menu when a thread with only a worktree gains or loses its first link', async () => {
+    const { view } = await show([], [WORKTREE]);
+    const before = trigger(view);
+    before.focus();
+    await openMenu(view);
+    view.rerender(button(linkedRoom(ROOM_ID, [{ number: 1 }], [WORKTREE])));
+    expect(trigger(view)).toBe(before);
+    expect(document.activeElement).toBe(before);
+    expect(view.queryByRole('menu')).not.toBeNull();
+    view.rerender(button(linkedRoom(ROOM_ID, [], [WORKTREE])));
+    expect(trigger(view)).toBe(before);
+    expect(document.activeElement).toBe(before);
+    expect(view.queryByRole('menu')).not.toBeNull();
+  });
+
+  it('keeps the focus on its row when an answer reorders the rows', async () => {
+    withToken();
+    serve({ 1: pull('open'), 2: pull('merged') }, 1);
+    const { view } = await show([{ number: 1 }, { number: 2 }]);
+    await openMenu(view);
+    const number = (row: HTMLElement) => row.querySelector('.mrpr-truncate')?.textContent;
+    // Number 1 is not answered yet: it comes after the merged one.
+    await vi.waitFor(() =>
+      expect(rows(view).map(number)).toEqual(['mindroom-chat #2', 'mindroom-chat #1'])
+    );
+    const merged = rows(view)[0]!;
+    merged.focus();
+    await act(async () => held.release());
+    await vi.waitFor(() =>
+      expect(rows(view).map(number)).toEqual(['mindroom-chat #1', 'mindroom-chat #2'])
+    );
+    expect(rows(view)[1]).toBe(merged);
+    expect(document.activeElement).toBe(merged);
   });
 
   it('marks the row of the pull request the open panel shows, in any letter case', async () => {

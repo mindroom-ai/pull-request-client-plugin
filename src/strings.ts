@@ -337,6 +337,8 @@ export const en = {
     moreLabel_other: '{{count}} more pull requests',
     button_one: 'Pull request',
     button_other: 'Pull requests ({{count}})',
+    buttonWithState_one: 'Pull request: {{state}}',
+    buttonWithState_other: 'Pull requests ({{count}}): {{state}}',
   },
   // The name and tooltip of a thread's worktree, by whether it has a repository and a branch.
   branch: {
