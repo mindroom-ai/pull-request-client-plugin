@@ -882,10 +882,11 @@
 .mrpr-menu-slot {
   display: contents;
 }
-/* Who the requests go as, a quiet line above the entries that change it; nothing to press. */
+/* Who the requests go as, a quiet line above the entries that change it; nothing to press. Its
+   text starts where theirs does (a menu item's 300 size). */
 .mrpr-menu-status {
   margin: 0;
-  padding: 4px 8px;
+  padding: 4px 12px;
   color: var(--pr-muted);
   font-size: 12px;
   overflow-wrap: anywhere;
