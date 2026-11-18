@@ -179,6 +179,24 @@ function setStatus(
   readAgain(queryClient, sameLogin ? serverKey(origin, status.login) : undefined);
 }
 
+// How often a token was saved in or removed from each server, by the query client that keeps its
+// status: what the server answered to a request sent before the last time says nothing of now.
+const savedTimes = new WeakMap<QueryClient, Map<string, number>>();
+const savedTime = (queryClient: QueryClient, origin: string) =>
+  savedTimes.get(queryClient)?.get(origin) ?? 0;
+
+/**
+ * Sets `status`, a server's answer to saving or removing a token there, once no status asked
+ * before it is still under way, and fences off what answers to requests sent before it.
+ */
+async function setSavedStatus(queryClient: QueryClient, origin: string, status: ServerStatus) {
+  await queryClient.cancelQueries({ queryKey: statusKey(origin) });
+  const times = savedTimes.get(queryClient) ?? new Map<string, number>();
+  savedTimes.set(queryClient, times);
+  times.set(origin, savedTime(queryClient, origin) + 1);
+  setStatus(queryClient, origin, status, true);
+}
+
 /** The status in a server's answer (of `/api/github/status`, or of saving or removing a token). */
 function statusOf(answer: unknown): ServerStatus {
   const status =
@@ -208,10 +226,16 @@ function viaServer(
   server: MindroomServer,
   account: string
 ): GitHubViaServer {
+  const sent = savedTime(queryClient, server.origin);
   return {
     server,
     account,
-    disconnected: () => setStatus(queryClient, server.origin, NOT_CONNECTED),
+    // Not for a request sent before a token was saved or removed there: that says nothing of now.
+    disconnected: () => {
+      if (sent === savedTime(queryClient, server.origin)) {
+        setStatus(queryClient, server.origin, NOT_CONNECTED);
+      }
+    },
   };
 }
 
@@ -294,7 +318,7 @@ function useServerToken() {
       const before = queryClient.getQueryData<ServerStatus>(statusKey(server.origin));
       // Saving answers with the token's account alone; the App connection there stays.
       const app = now.via === 'token' && (before?.via === 'app' || before?.appConnected === true);
-      setStatus(queryClient, server.origin, app ? { ...now, appConnected: true } : now, true);
+      return setSavedStatus(queryClient, server.origin, app ? { ...now, appConnected: true } : now);
     };
     return {
       /** Where it saves the token: the server's origin. */
@@ -324,7 +348,7 @@ function useServerToken() {
         // status, and the token of this browser, as they were.
         const now = statusOf(answer);
         if (!now.connected || now.via !== 'token') return 'failed';
-        answered(now);
+        await answered(now);
         // The token of this browser comes first, and would hide the one just saved.
         if (storedToken() !== undefined) forget();
         return undefined;
@@ -332,7 +356,7 @@ function useServerToken() {
       /** Removes it there; resolves to whether it did. */
       remove: async (): Promise<boolean> => {
         try {
-          answered(
+          await answered(
             statusOf(
               await server.request('/api/github/token', { method: 'DELETE', redirect: NO_REDIRECT })
             )
@@ -392,7 +416,12 @@ export function useGitHubAccess(): GitHubAccess {
   const status = useQuery({
     queryKey: statusKey(origin),
     queryFn: async () => {
+      const sent = savedTime(queryClient, origin);
       const now = await readStatus(server as MindroomServer);
+      // A status asked before a token was saved or removed there is older than the one set then.
+      if (sent !== savedTime(queryClient, origin)) {
+        return queryClient.getQueryData<ServerStatus>(statusKey(origin)) ?? now;
+      }
       setStatus(queryClient, origin, now);
       return now;
     },

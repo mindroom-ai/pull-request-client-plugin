@@ -672,6 +672,72 @@ describe('the token saved in MindRoom', () => {
     expect(mindroom.githubRequests()).toHaveLength(2);
   });
 
+  /** Holds the next answer of `mindroom` to `route`, as it was when asked, until released. */
+  const holdNext = (mindroom: ReturnType<typeof githubServer>, route: string) => {
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const routes = mindroom.server.request.getMockImplementation()!;
+    let holding = true;
+    mindroom.server.request.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path !== route || !holding) return routes(path, init);
+      holding = false;
+      const answer = routes(path, init);
+      await held;
+      return answer;
+    });
+    return release;
+  };
+
+  it.each(['octo', 'alice'])(
+    'keeps the token saved once a status asked before it answers with the App of %s',
+    async (login) => {
+      const mindroom = githubServer(github, { connected: true, via: 'app', login });
+      const view = await form(mindroom.server);
+      await waitUntil(() => expect(accesses.reader?.connection).toBe('app'));
+      const release = holdNext(mindroom, '/api/github/status');
+      void accesses.reader?.recheck();
+      await waitUntil(() => expect(mindroom.statusRequests()).toBe(2));
+      await chooseMindroom(view);
+      await save(view, 'ghp_good');
+      await waitUntil(() => expect(accesses.reader?.connection).toBe('token'));
+      release();
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(accesses.reader).toMatchObject({ connection: 'token', key: `server:${ORIGIN}:octo` });
+      expect(client.getQueryData(['pull-requests-github-status', ORIGIN])).toMatchObject({
+        via: 'token',
+        login: 'octo',
+      });
+    }
+  );
+
+  it('keeps the token saved once a request sent before it says the App is no longer connected', async () => {
+    const mindroom = githubServer(github);
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const routes = mindroom.server.request.getMockImplementation()!;
+    let first = true;
+    mindroom.server.request.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path !== '/api/github/request' || !first) return routes(path, init);
+      first = false;
+      await held;
+      // As MindRoom answered it while the App was gone, before the token was saved.
+      throw new MindroomServerError('Conflict', 409, { error: 'github_not_connected' });
+    });
+    const view = await form(mindroom.server);
+    await waitUntil(() => expect(mindroom.githubRequests()).toHaveLength(1));
+    await chooseMindroom(view);
+    await save(view, 'ghp_good');
+    await waitUntil(() => expect(accesses.reader?.connection).toBe('token'));
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(accesses.reader).toMatchObject({ via: 'server', connection: 'token' });
+    await waitUntil(() => expect(view.getByTestId('reader').textContent).toBe('with the token'));
+  });
+
   it('saves and removes it without following a redirect, which would take the token elsewhere', async () => {
     const mindroom = githubServer(github);
     const view = await show(
