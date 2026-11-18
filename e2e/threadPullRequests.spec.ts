@@ -1167,6 +1167,60 @@ test("the banner's pull requests button has the color of its pull requests' stat
   expect(warnings).toEqual([]);
 });
 
+test('a menu item keeps the focus when a later answer moves it', async ({ page }) => {
+  test.setTimeout(4 * 60_000);
+  const unanswered = await stubGitHub(page);
+  const warnings = listenerWarnings(page);
+  // GitHub answers for the avatar cache, open and linked only in the program past its card's
+  // chips, once `release` runs: until then it is last, as one with no answer.
+  const { avatarCache, auditLog, exportCsv } = PULLS;
+  let release = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route(
+    (url) => url.pathname === pullPath(avatarCache),
+    async (route) => {
+      if (route.request().method() === 'GET') await held;
+      await route.fallback();
+    }
+  );
+  await openRoom(page);
+  await openProgram(page);
+  const items = await openPrMenu(page);
+  const waiting = MENU_ORDER.filter((pull) => pull !== avatarCache);
+  await expectItems(items, [...waiting, avatarCache]);
+  await expect(items.nth(waiting.indexOf(exportCsv))).toContainText(exportCsv.title, {
+    timeout: 30_000,
+  });
+  // The focus on the audit log, which the avatar cache's answer moves down past it.
+  const audit = waiting.indexOf(auditLog);
+  await items.nth(audit).focus();
+  await expect(items.nth(audit)).toBeFocused();
+  // React moves the focused item's node itself, which loses a browser's focus: its commit gives the
+  // focus back (react-dom's restoreSelection), so the menu keeps it on the same item.
+  await items.nth(audit).evaluate((item) => {
+    const seen = window as unknown as { mrprMoved?: boolean };
+    seen.mrprMoved = false;
+    new MutationObserver((records) => {
+      if (records.some((record) => [...record.removedNodes].includes(item))) seen.mrprMoved = true;
+    }).observe(item.parentElement!, { childList: true });
+  });
+  release();
+  await expect(items.nth(audit)).toContainText(avatarCache.title, { timeout: 30_000 });
+  await expectItems(items, MENU_ORDER);
+  expect(await page.evaluate(() => (window as unknown as { mrprMoved?: boolean }).mrprMoved)).toBe(
+    true
+  );
+  await expect(items.nth(MENU_ORDER.indexOf(auditLog))).toBeFocused();
+  // And the arrow keys go on from there.
+  await page.keyboard.press('ArrowDown');
+  await expect(items.nth(MENU_ORDER.indexOf(auditLog) + 1)).toBeFocused();
+  await page.keyboard.press('Escape');
+  expect(unanswered).toEqual([]);
+  expect(warnings).toEqual([]);
+});
+
 test("on a phone the open thread's pull requests menu fits the window and opens the panel", async ({
   browser,
   baseURL,
