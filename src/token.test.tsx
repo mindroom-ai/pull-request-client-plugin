@@ -1098,6 +1098,41 @@ describe('the token saved in MindRoom', () => {
     expect(accesses.reader).toMatchObject({ pending: false, key: keyAs('octo', 1) });
   });
 
+  it('asks the status again, and is answered, more than half a minute after a token was saved', async () => {
+    const mindroom = githubServer(github);
+    // As the browser does: a request whose time is up is not sent.
+    const routes = mindroom.server.request.getMockImplementation()!;
+    mindroom.server.request.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (init?.signal?.aborted) throw init.signal.reason;
+      return routes(path, init);
+    });
+    const limits: AbortController[] = [];
+    const timeout = vi.spyOn(AbortSignal, 'timeout').mockImplementation(() => {
+      limits.push(new AbortController());
+      return limits.at(-1)!.signal;
+    });
+    try {
+      const view = await form(mindroom.server);
+      await waitUntil(() => expect(accesses.reader?.connection).toBe('app'));
+      await chooseMindroom(view);
+      await save(view, 'ghp_good');
+      await waitUntil(() => expect(accesses.reader?.connection).toBe('token'));
+      // Half a minute later, the time of every request so far is up.
+      limits.forEach((limit) => limit.abort());
+      const asked = mindroom.statusRequests();
+      mindroom.connected(false);
+      await act(() => accesses.reader?.recheck());
+      expect(mindroom.statusRequests()).toBe(asked + 1);
+      expect(client.getQueryState(['pull-requests-github-status', ORIGIN])?.status).toBe('success');
+      // What changed since shows: the App is no longer there to go back to.
+      await waitUntil(() =>
+        expect(accesses.reader).toMatchObject({ connection: 'token', appConnected: false })
+      );
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
   it('keeps the token saved once a request sent before it says the App is no longer connected', async () => {
     const mindroom = githubServer(github);
     let release = () => {};
