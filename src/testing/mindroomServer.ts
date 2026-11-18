@@ -69,7 +69,10 @@ export function githubServer(
   const saveToken = async (init?: RequestInit) => {
     const { token } = JSON.parse(String(init?.body)) as { token?: unknown };
     if (typeof token !== 'string' || MALFORMED.test(token)) {
-      throw new MindroomServerError('Unprocessable Entity', 422, { detail: 'invalid token' });
+      // MindRoom names none of what it refused, as the token could be among it.
+      throw new MindroomServerError('Unprocessable Entity', 422, {
+        error: 'github_request_invalid',
+      });
     }
     const unreachable = new MindroomServerError('Bad Gateway', 502, {
       error: 'github_unreachable',

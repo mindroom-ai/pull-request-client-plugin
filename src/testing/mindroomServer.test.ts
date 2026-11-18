@@ -111,8 +111,10 @@ describe('githubServer, a token saved in MindRoom', () => {
       body: { error: 'github_unreachable' },
     });
     for (const token of ['', 'ghp a', 'ghp\u0000a', 'a'.repeat(513)]) {
-      expect(await failure(server.request('/api/github/token', put(token)))).toMatchObject({
+      // As MindRoom answers any body it refuses: one code, nothing of what was sent.
+      expect(await failure(server.request('/api/github/token', put(token)))).toEqual({
         status: 422,
+        body: { error: 'github_request_invalid' },
       });
     }
     expect(storedToken()).toBeUndefined();
