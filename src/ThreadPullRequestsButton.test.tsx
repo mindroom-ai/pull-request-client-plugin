@@ -156,7 +156,11 @@ describe('ThreadPullRequestsButton', () => {
     [{ 1: pull('open'), 2: pull('merged') }, 'open', 'Pull requests (2): Open'],
     [{ 1: pull('merged'), 2: pull('merged') }, 'merged', 'Pull requests (2): Merged'],
     [{ 1: pull('merged'), 2: pull('closed') }, 'closed', 'Pull requests (2): Closed'],
-    [{ 1: pull('open', { draft: true }), 2: pull('open', { draft: true }) }, 'draft', 'Pull requests (2): Draft'],
+    [
+      { 1: pull('open', { draft: true }), 2: pull('open', { draft: true }) },
+      'draft',
+      'Pull requests (2): Draft',
+    ],
     // A pull request GitHub refused counts for nothing.
     [{ 1: pull('merged') }, 'merged', 'Pull requests (2): Merged'],
   ])('takes the tone and icon of its pull requests together: %#', async (pulls, state, label) => {
@@ -164,7 +168,16 @@ describe('ThreadPullRequestsButton', () => {
     const { view } = await show([{ number: 1 }, { number: 2 }]);
     await vi.waitFor(() => expect(tone(view)).toBe(`mrpr-tone-${state}`));
     expect(trigger(view).getAttribute('aria-label')).toBe(label);
-    expect(icon(view).classList).toContain(`lucide-${{ open: 'git-pull-request-arrow', draft: 'git-pull-request-draft', closed: 'git-pull-request-closed', merged: 'git-merge' }[state]}`);
+    expect(icon(view).classList).toContain(
+      `lucide-${
+        {
+          open: 'git-pull-request-arrow',
+          draft: 'git-pull-request-draft',
+          closed: 'git-pull-request-closed',
+          merged: 'git-merge',
+        }[state]
+      }`
+    );
   });
 
   it('names one pull request with its state', async () => {

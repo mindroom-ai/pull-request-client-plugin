@@ -62,6 +62,22 @@ export function resolvePullRequestState(input: {
   return PULL_REQUEST_STATE_PRESENTATION[key];
 }
 
+type PullRequestStateKey = PullRequestStatePresentation['key'];
+
+/**
+ * The state of several pull requests together, as T3 Code's thread badge has it
+ * (packages/source-control-core/src/shared/threadPullRequests.ts at 8cf97b5f): draft when every
+ * one is a draft, open while any is open, merged when every one is merged, else closed.
+ */
+export function combinedPullRequestState(
+  states: readonly PullRequestStateKey[]
+): PullRequestStateKey | undefined {
+  if (states.length === 0) return undefined;
+  if (states.every((state) => state === 'draft')) return 'draft';
+  if (states.some((state) => state === 'open' || state === 'draft')) return 'open';
+  return states.every((state) => state === 'merged') ? 'merged' : 'closed';
+}
+
 /** The app's language, which numbers and relative times are formatted in. */
 export function useLanguage(): string | undefined {
   return useTranslation().i18n.resolvedLanguage;

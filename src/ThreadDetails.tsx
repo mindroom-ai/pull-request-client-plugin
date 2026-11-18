@@ -27,7 +27,7 @@ const PATH_MAX = 40;
 // A hover shows what GitHub answered a chip, however old: only a pull request it has no answer for
 // yet is asked for, so moving the pointer over cards spends none of the hourly limit. A refusal is an
 // answer too: without `retryOnMount` every hover would ask again for a pull request GitHub refused.
-const ANSWERED_ONLY = { ...NO_FOCUS_REFETCH, refetchOnMount: false, retryOnMount: false };
+export const ANSWERED_ONLY = { ...NO_FOCUS_REFETCH, refetchOnMount: false, retryOnMount: false };
 
 export function ThreadDetails({ room, threadId }: ThreadDetailProps) {
   const { pullRequests, worktree } = useThreadPullRequests(room, threadId);

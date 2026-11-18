@@ -1,8 +1,9 @@
 // The pull requests of the open thread, in its banner: one button with their count that opens a
 // menu of them, as T3 Code's thread details do. Each item is the pull request's details row and
 // opens it in the side panel (the one the open panel shows is current), or on GitHub where the page
-// has no panel; the thread's worktree comes last, as an item that does nothing. Closed, the button
-// asks GitHub nothing: the rows ask only for a pull request no surface has loaded yet.
+// has no panel; the thread's worktree comes last, as an item that does nothing. The button's icon
+// and tone are its pull requests' state together, as T3 Code's thread badge: it asks GitHub for
+// each pull request no surface has loaded yet (none for checks), once, refusals included.
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import FocusTrap from 'focus-trap-react';
 import { IconButton, type RectCords } from 'folds';
@@ -14,9 +15,16 @@ import {
 } from '@mindroom/client-sdk/core';
 import { IconTooltip, Menu, PopOut } from '@mindroom/client-sdk/ui';
 import { pullRequestUrl, type PullRequestRef } from './github';
+import {
+  combinedPullRequestState,
+  PULL_REQUEST_STATE_PRESENTATION,
+  resolvePullRequestState,
+} from './presentation';
+import { usePullRequests } from './queries';
 import { useShownPullRequest } from './shownPullRequest';
-import { Details } from './ThreadDetails';
+import { ANSWERED_ONLY, Details } from './ThreadDetails';
 import { useThreadPullRequests, type ThreadWorktree } from './threadPullRequests';
+import { pluginRootStyle } from './theme';
 import { RoomGitHub } from './token';
 
 /** Whether `a` and `b` name one pull request; GitHub's owner and repository names ignore case. */
@@ -30,7 +38,11 @@ export const ThreadPullRequestsButton: ThreadHeaderSlotComponent = ({ room, thre
   // A thread can lose its last link or its worktree while it is open: the button then goes, and
   // with it whether its menu was open, so the next link shows it closed.
   if (pullRequests.length === 0 && !worktree) return null;
-  return <PullRequestsMenu roomId={room.roomId} pullRequests={pullRequests} worktree={worktree} />;
+  return (
+    <RoomGitHub roomId={room.roomId}>
+      <PullRequestsMenu roomId={room.roomId} pullRequests={pullRequests} worktree={worktree} />
+    </RoomGitHub>
+  );
 };
 
 function PullRequestsMenu({
@@ -56,7 +68,22 @@ function PullRequestsMenu({
     buttonRef.current?.focus();
   }, [anchor]);
   const count = pullRequests.length;
-  const label = count > 0 ? t('threadPullRequests.button', { count }) : t('details.worktree');
+  const queries = usePullRequests(pullRequests, ANSWERED_ONLY);
+  const answered = queries.flatMap((query) =>
+    query.data ? [resolvePullRequestState(query.data).key] : []
+  );
+  const combined = combinedPullRequestState(answered);
+  // Until every answer is in, only an open one already settles it: the tone never changes once shown.
+  const loading = queries.some((query) => query.data === undefined && query.status === 'pending');
+  const state = loading && combined !== 'open' ? undefined : combined;
+  const presentation = state && PULL_REQUEST_STATE_PRESENTATION[state];
+  const label =
+    count === 0
+      ? t('details.worktree')
+      : state
+      ? t('threadPullRequests.buttonWithState', { count, state: t(`state.${state}`) })
+      : t('threadPullRequests.button', { count });
+  const Icon = count === 0 ? GitBranch : presentation?.Icon ?? GitPullRequestArrow;
   const current = panel?.isOpen ? shown : undefined;
   // The open menu's layer covers the page, the button too: a press over the button closes the
   // menu as any press outside it does, and gives the button back the focus a row may have had.
@@ -143,11 +170,11 @@ function PullRequestsMenu({
               setAnchor(event.currentTarget.getBoundingClientRect())
             }
           >
-            {count > 0 ? (
-              <GitPullRequestArrow aria-hidden className="mrpr-thread-button-icon" />
-            ) : (
-              <GitBranch aria-hidden className="mrpr-thread-button-icon" />
-            )}
+            <Icon
+              aria-hidden
+              className={`mrpr-thread-button-icon ${presentation?.toneClassName ?? ''}`.trim()}
+              style={presentation && pluginRootStyle()}
+            />
             {count > 1 ? <span className="mrpr-thread-button-count">{count}</span> : null}
           </IconButton>
         )}
@@ -171,14 +198,12 @@ function PullRequestsMenu({
             }}
           >
             <Menu role="menu" aria-label={label} className="mrpr-thread-menu">
-              <RoomGitHub roomId={roomId}>
-                <Details
-                  pullRequests={pullRequests}
-                  worktree={worktree}
-                  item={item}
-                  className="mrpr-thread-menu-rows"
-                />
-              </RoomGitHub>
+              <Details
+                pullRequests={pullRequests}
+                worktree={worktree}
+                item={item}
+                className="mrpr-thread-menu-rows"
+              />
             </Menu>
           </FocusTrap>
         }
