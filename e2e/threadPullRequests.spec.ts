@@ -1058,13 +1058,18 @@ test("the open thread's pull requests are one button in its banner, whose menu l
   await page.keyboard.press('Escape');
   await expect(prMenu(page)).toHaveCount(0);
   await expect(button).toBeFocused();
-  // A press on the button closes it from a focused item and gives the button the focus.
+  // A press on the button, under the menu's layer, closes it from a focused item for good and
+  // gives the button the focus.
   await openPrMenu(page);
   await page.keyboard.press('ArrowDown');
   await expect(items.nth(0)).toBeFocused();
-  await button.click();
+  const box = (await button.boundingBox())!;
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
   await expect(prMenu(page)).toHaveCount(0);
   await expect(button).toBeFocused();
+  await page.waitForTimeout(300);
+  await expect(prMenu(page)).toHaveCount(0);
+  await expect(button).toHaveAttribute('aria-expanded', 'false');
   // A click outside closes it too.
   await openPrMenu(page);
   await page.mouse.click(DESKTOP.width / 2, DESKTOP.height - 120);

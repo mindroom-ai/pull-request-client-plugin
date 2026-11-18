@@ -162,36 +162,23 @@ describe('ThreadPullRequestsButton', () => {
     expect(view.queryByRole('menu')).toBeNull();
   });
 
-  it('closes, and stays closed, when its button is pressed while the menu is open', async () => {
-    const { view } = await show([{ number: 1 }]);
-    await openMenu(view);
-    // The press, as the focus trap hears it: on its own button the trap neither closes the menu
-    // on the mousedown nor swallows the click, which then closes it.
-    const press = { target: trigger(view) } as unknown as MouseEvent;
-    const { clickOutsideDeactivates, allowOutsideClick } = trapOptions();
-    let closes = false;
-    await act(async () => {
-      closes =
-        typeof clickOutsideDeactivates === 'function'
-          ? clickOutsideDeactivates(press)
-          : !!clickOutsideDeactivates;
-    });
-    expect(closes).toBe(false);
-    expect(
-      typeof allowOutsideClick === 'function' ? allowOutsideClick(press) : allowOutsideClick
-    ).toBe(true);
-    expect(view.getByRole('menu')).toBeTruthy();
-    await act(async () => trigger(view).click());
-    expect(view.queryByRole('menu')).toBeNull();
-    expect(trigger(view).getAttribute('aria-expanded')).toBe('false');
-  });
-
-  it('gives the focus back to its button when a press on it closes the menu from a row', async () => {
+  it('closes on a press over its button, which the menu layer covers, and gives it the focus', async () => {
     const { view } = await show([{ number: 1 }, { number: 2 }]);
     await openMenu(view);
     rows(view)[1]!.focus();
-    // The trap keeps the focus on the row through the press; the click then closes the menu.
-    await act(async () => trigger(view).click());
+    vi.spyOn(trigger(view), 'getBoundingClientRect').mockReturnValue(
+      DOMRect.fromRect({ x: 10, y: 10, width: 56, height: 32 })
+    );
+    // The press lands on the menu's layer, over the button: the trap hears it outside the menu.
+    const press = new MouseEvent('mousedown', { clientX: 30, clientY: 20, cancelable: true });
+    const outside = trapOptions().clickOutsideDeactivates;
+    let closes = false;
+    await act(async () => {
+      closes = typeof outside === 'function' ? outside(press) : !!outside;
+    });
+    expect(closes).toBe(true);
+    // Nor does the press's own focusing move the focus to the gone layer afterwards.
+    expect(press.defaultPrevented).toBe(true);
     expect(view.queryByRole('menu')).toBeNull();
     expect(document.activeElement).toBe(trigger(view));
   });

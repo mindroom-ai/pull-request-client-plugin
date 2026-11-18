@@ -47,8 +47,8 @@ function PullRequestsMenu({
   const shown = useShownPullRequest(roomId);
   const [anchor, setAnchor] = useState<RectCords>();
   const buttonRef = useRef<HTMLButtonElement | null>(null);
-  // Set when a choice, Escape or the button closes the menu, which then gives the focus back to
-  // its button once the menu's focus trap is gone. A click outside leaves the focus where it went.
+  // Set when a choice, Escape or a press over the button closes the menu, which then gives the
+  // focus back to its button once the menu's focus trap is gone. A press elsewhere leaves it be.
   const refocus = useRef(false);
   useEffect(() => {
     if (anchor !== undefined || !refocus.current) return;
@@ -58,12 +58,19 @@ function PullRequestsMenu({
   const count = pullRequests.length;
   const label = count > 0 ? t('threadPullRequests.button', { count }) : t('details.worktree');
   const current = panel?.isOpen ? shown : undefined;
-  // A press on the button itself is the button's: its click closes the open menu, so the trap
-  // neither closes it on the mousedown (the click would open it again) nor swallows that click.
-  const onButton = (event: Event) =>
-    event.target instanceof Node && !!buttonRef.current?.contains(event.target);
+  // The open menu's layer covers the page, the button too: a press over the button closes the
+  // menu as any press outside it does, and gives the button back the focus a row may have had.
   const closeOutside = (event: Event) => {
-    if (onButton(event)) return false;
+    const box = buttonRef.current?.getBoundingClientRect();
+    refocus.current =
+      event instanceof globalThis.MouseEvent &&
+      !!box &&
+      event.clientX >= box.left &&
+      event.clientX <= box.right &&
+      event.clientY >= box.top &&
+      event.clientY <= box.bottom;
+    // The press would then focus what it hit, the layer, gone by then: the focus would leave.
+    if (refocus.current) event.preventDefault();
     setAnchor(undefined);
     return true;
   };
@@ -132,11 +139,9 @@ function PullRequestsMenu({
             aria-label={label}
             aria-haspopup="menu"
             aria-expanded={anchor !== undefined}
-            onClick={(event: MouseEvent<HTMLButtonElement>) => {
-              // Closing, the focus may be on a row the menu takes with it: it comes back here.
-              refocus.current = anchor !== undefined;
-              setAnchor(anchor ? undefined : event.currentTarget.getBoundingClientRect());
-            }}
+            onClick={(event: MouseEvent<HTMLButtonElement>) =>
+              setAnchor(event.currentTarget.getBoundingClientRect())
+            }
           >
             {count > 0 ? (
               <GitPullRequestArrow aria-hidden className="mrpr-thread-button-icon" />
@@ -158,7 +163,6 @@ function PullRequestsMenu({
               initialFocus: false,
               returnFocusOnDeactivate: false,
               clickOutsideDeactivates: closeOutside,
-              allowOutsideClick: onButton,
               escapeDeactivates: () => {
                 refocus.current = true;
                 setAnchor(undefined);
