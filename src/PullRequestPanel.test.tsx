@@ -95,6 +95,10 @@ const respond = (body: unknown, status = 200) =>
     headers: { 'content-type': 'application/json' },
   });
 
+vi.mock('focus-trap-react', async () => ({
+  default: (await import('./testing/focusTrapStandIn')).FocusTrapStandIn,
+}));
+
 const click = (element: HTMLElement) => act(async () => element.click());
 
 // Polls as testing-library's findBy queries do: outside React's act environment, so that what the
@@ -1038,6 +1042,34 @@ describe('with the GitHub account connected in MindRoom', () => {
       expect(view.queryByText(CHECKING)).toBeNull();
       await later(60_000);
       expect(pullReads()).toBe(4);
+    });
+
+    it("does not replace an action's read after it, which keeps the action running", async () => {
+      const base = github.getMockImplementation()!;
+      let reads = 0;
+      let release!: (value: Response) => void;
+      const held = new Promise<Response>((resolve) => (release = resolve));
+      github.mockImplementation(async (url, init) => {
+        if (!url.endsWith('/pulls/200')) return base(url, init);
+        if (init?.method === 'PATCH') return respond(pull({ state: 'closed' }));
+        reads += 1;
+        if (reads > 1) return held;
+        const unknown = { node_id: 'PR_kw200', head, mergeable: null, mergeable_state: 'unknown' };
+        return respond(pull(unknown));
+      });
+      roomServer.current = githubServer(github).server;
+      const view = await show();
+      await settle(() => expect(view.getByText(CHECKING)).toBeTruthy());
+      const more = view.getByRole('button', { name: 'More actions' });
+      await click(more);
+      await click(view.getByRole('menuitem', { name: 'Close pull request' }));
+      await click(view.getByRole('menuitem', { name: 'Confirm close?' }));
+      await settle(() => expect(reads).toBe(2));
+      await later(10_000);
+      expect(reads).toBe(2);
+      expect(more.getAttribute('aria-disabled')).toBe('true');
+      await act(async () => release(respond(pull({ state: 'closed' }))));
+      await settle(() => expect(more.getAttribute('aria-disabled')).toBeNull());
     });
 
     it('reads nothing again once the panel is gone', async () => {

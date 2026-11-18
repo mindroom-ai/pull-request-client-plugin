@@ -126,11 +126,13 @@ const MERGEABLE_RECHECKS = [1_000, 2_000, 4_000];
  * it again a few times, later each time, under the key it shows now and while it shows (`enabled`
  * and mounted); true meanwhile, so that what depends on it waits. Once the reads are spent, what
  * depends on it goes by GitHub's answer then. Another key, or an answer, starts the count afresh.
+ * None starts while `paused` (an action runs): the read after it is the action's own.
  */
 export function useMergeableRecheck(
   ref: PullRequestRef | undefined,
   pr: PullRequest | undefined,
-  enabled: boolean
+  enabled: boolean,
+  paused: boolean
 ): boolean {
   const queryClient = useQueryClient();
   const { key } = useGitHubAccess();
@@ -142,19 +144,23 @@ export function useMergeableRecheck(
     if (!unknown) setReads((now) => (now.count === 0 ? now : { scope, count: 0 }));
   }, [scope, unknown]);
   useEffect(() => {
-    if (!unknown || count >= MERGEABLE_RECHECKS.length) return undefined;
+    if (!unknown || paused || count >= MERGEABLE_RECHECKS.length) return undefined;
     // A read that ends after the key changed, or the panel went, counts for none.
     let live = true;
     const timer = setTimeout(() => {
       void queryClient
-        .refetchQueries({ queryKey: keyOf(ref, key), exact: true, type: 'active' })
+        // Joining a read under way, which may be an action's, rather than replacing it.
+        .refetchQueries(
+          { queryKey: keyOf(ref, key), exact: true, type: 'active' },
+          { cancelRefetch: false }
+        )
         .finally(() => live && setReads({ scope, count: count + 1 }));
     }, MERGEABLE_RECHECKS[count]);
     return () => {
       live = false;
       clearTimeout(timer);
     };
-  }, [count, key, queryClient, ref, scope, unknown]);
+  }, [count, key, paused, queryClient, ref, scope, unknown]);
   return unknown && count < MERGEABLE_RECHECKS.length;
 }
 

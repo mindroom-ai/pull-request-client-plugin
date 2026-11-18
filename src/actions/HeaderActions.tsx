@@ -101,7 +101,7 @@ export function HeaderActions({
   // The same query as the checks line, so it costs no request of its own where that one shows.
   const checks = useChecks(pullRequestRef, pr.headSha, canWrite);
   // While GitHub still computes whether it merges, the pull request is read again for that.
-  const checking = useMergeableRecheck(pullRequestRef, pr, canWrite);
+  const checking = useMergeableRecheck(pullRequestRef, pr, canWrite, pending !== null);
   // Asked only for a branch that could be deleted at all; the menu offers it while it still
   // ends where the pull request does, so not once it is deleted.
   const headBranch = useHeadBranchSha(
