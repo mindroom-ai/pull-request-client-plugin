@@ -393,15 +393,16 @@ function Panel({ roomId, request }: PanelProps) {
     : unreadable
     ? 'unreadable'
     : tokenForm.reason ?? (overriding && via === 'server' ? 'override' : undefined);
-  // The form stays while a change it started runs or failed (`TokenForm`'s `onHold`), with the
-  // reason it last had, though the reads that change starts take that reason away meanwhile.
+  // Latched for the scope from the render it first shows in; a reason gone since leaves it
+  // without a hint (`override`).
   const formScope = `${serverOrigin} ${pullRequestKey}`;
-  const [held, setHeld] = useState<string>();
-  const hold = useCallback((on: boolean) => setHeld(on ? formScope : undefined), [formScope]);
-  const lastReason = useRef<{ scope: string; reason: TokenFormReason }>();
-  if (formReason) lastReason.current = { scope: formScope, reason: formReason };
-  const kept = held === formScope && lastReason.current?.scope === formScope;
-  const shownReason = formReason ?? (kept ? lastReason.current?.reason : undefined);
+  const [latched, setLatched] = useState<string>();
+  if (formReason && latched !== formScope) setLatched(formScope);
+  const shownReason = formReason ?? (latched === formScope ? 'override' : undefined);
+  const closeForm = () => {
+    setOverriding(false);
+    setLatched(undefined);
+  };
   const forkOwner =
     pr?.headRepo && pr.headRepo !== pr.baseRepo ? pr.headRepo.split('/')[0] : undefined;
 
@@ -543,26 +544,20 @@ function Panel({ roomId, request }: PanelProps) {
         )}
         {/* Invariant: the panel's token form has exactly one owner, here, and one tree position,
           keyed only by the server's origin and the pull request; the loading, error and loaded
-          views never mount their own copy. And it stays mounted while it has a reason, while a
-          save or removal it started is pending, and after that change failed until the person
-          retries or dismisses it (or the origin or pull request changes); an untouched form may
-          still go when the pull request loads. */}
+          views never mount their own copy. Once it has shown for (origin, pull request), it stays
+          mounted until the person cancels it, a save or removal it started succeeds, or the origin
+          or pull request changes. Reads and status changes never unmount it. */}
         {shownReason ? (
           <div className="mrpr-panel-token" key={formScope}>
             <TokenForm
               reason={shownReason}
               inputRef={tokenForm.inputRef}
-              onHold={hold}
-              // Only the form opened to use a token instead closes, and one kept for what came of
-              // its save: a failure keeps the other.
+              // Only one opened to use a token instead, or latched with nothing to show it for,
+              // closes: a failure keeps the other.
               onCancel={
-                (shownReason === 'override' && overriding) || !formReason
-                  ? () => setOverriding(false)
-                  : undefined
+                (shownReason === 'override' && overriding) || !formReason ? closeForm : undefined
               }
-              // A token saved in MindRoom keeps the requests going through it, so the form
-              // opened for it closes once it is saved.
-              onSaved={() => setOverriding(false)}
+              onDone={closeForm}
             />
           </div>
         ) : null}

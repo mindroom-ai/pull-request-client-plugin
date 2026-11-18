@@ -766,8 +766,11 @@ describe('PullRequestPanel', () => {
       expect(await view.findByText('No comments yet.')).toBeTruthy();
       expect(view.getByLabelText('GitHub token')).toBeTruthy();
       await click(view.getByRole('button', { name: 'Retry' }));
-      await waitUntil(() => expect(view.queryByLabelText('GitHub token')).toBeNull());
+      // Once shown, the form stays, without its hint, until the person closes it.
+      await waitUntil(() => expect(view.queryByText('A token raises the limit.')).toBeNull());
       expect(retries()).toHaveLength(0);
+      await click(view.getByRole('button', { name: 'Cancel' }));
+      expect(view.queryByLabelText('GitHub token')).toBeNull();
     });
 
     it('leaves the header whole when the checks do not load', async () => {
@@ -1500,6 +1503,107 @@ describe('with the GitHub account connected in MindRoom', () => {
       await act(async () => releasePut());
       expect(await view.findByText(refused)).toBeTruthy();
       kept(view);
+    });
+
+    it('keeps the form when the save starts in the same batch as the pull request loads', async () => {
+      notifyManager.setScheduler(queueMicrotask);
+      const mindroom = githubServer(withUser);
+      mindroom.connected(false);
+      const real = mindroom.server.request.getMockImplementation()!;
+      let releasePut!: () => void;
+      const put = new Promise<void>((resolve) => (releasePut = resolve));
+      mindroom.server.request.mockImplementation(async (path, init) => {
+        if (path === '/api/github/token' && init?.method === 'PUT') await put;
+        return real(path, init);
+      });
+      roomServer.current = mindroom.server;
+      fetchMock.mockImplementation(async () => respond({ message: 'Not Found' }, 404));
+      const view = await show();
+      await type(await view.findByLabelText('GitHub token'), 'ghp_bad');
+      await click(view.getByLabelText('Save in MindRoom at mindroom.example.org'));
+      let releasePr!: (response: Response) => void;
+      const pr = new Promise<Response>((resolve) => (releasePr = resolve));
+      fetchMock.mockImplementation(() => pr);
+      const key = ['pull-requests', 'pr', 'mindroom-ai', 'mindroom-chat', 200, false];
+      await act(async () => void client.refetchQueries({ queryKey: key, exact: true }));
+      try {
+        await act(async () => {
+          view.getByRole('button', { name: 'Save' }).click();
+          releasePr(respond(pull()));
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        });
+        await view.findByText('Add pull request cards');
+        await act(async () => releasePut());
+        expect(await view.findByText(refused)).toBeTruthy();
+        kept(view);
+      } finally {
+        releasePr(respond(pull()));
+        releasePut();
+        notifyManager.setScheduler((callback) => setTimeout(callback, 0));
+      }
+    });
+
+    it('keeps the form and says the removal failed, though the status after it failed too', async () => {
+      const mindroom = githubServer(withUser);
+      await saveInMindroom(mindroom);
+      mindroom.unreadable(true);
+      const real = mindroom.server.request.getMockImplementation()!;
+      let deleting = false;
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => (release = resolve));
+      mindroom.server.request.mockImplementation(async (path, init) => {
+        if (path === '/api/github/token' && init?.method === 'DELETE') {
+          deleting = true;
+          await held;
+          throw new MindroomServerError('Internal Server Error', 500, {});
+        }
+        if (deleting && path === '/api/github/status') {
+          throw new MindroomServerError('Internal Server Error', 500, {});
+        }
+        return real(path, init);
+      });
+      roomServer.current = mindroom.server;
+      const view = await show();
+      const remove = await view.findByRole('button', { name: 'Remove token from MindRoom' });
+      await view.findByText('Add pull request cards');
+      await click(remove);
+      await act(async () => release());
+      expect(await view.findByText('MindRoom could not remove the token.')).toBeTruthy();
+      expect(view.getByRole('button', { name: 'Cancel' })).toBeTruthy();
+      expect(view.getAllByLabelText('GitHub token')).toHaveLength(1);
+    });
+
+    it('stops saying MindRoom cannot read the token once it is removed from the form', async () => {
+      const mindroom = githubServer(withUser);
+      await saveInMindroom(mindroom);
+      mindroom.unreadable(true);
+      roomServer.current = mindroom.server;
+      const view = await show();
+      await view.findByText('Add pull request cards');
+      await saveBad(view);
+      expect(await view.findByText(refused)).toBeTruthy();
+      await click(view.getByRole('button', { name: 'Remove token from MindRoom' }));
+      expect(await view.findByText('Token removed from MindRoom.')).toBeTruthy();
+      // The removal it started succeeded: the form goes, and with it what it said.
+      await waitUntil(() => expect(view.queryByText(UNREADABLE)).toBeNull());
+      expect(view.queryByLabelText('GitHub token')).toBeNull();
+    });
+
+    it('keeps an untouched form once the pull request loads, until Cancel', async () => {
+      let release!: (value: Response) => void;
+      const held = new Promise<Response>((resolve) => (release = resolve));
+      fetchMock.mockImplementation(async () => respond({ message: 'Not Found' }, 404));
+      roomServer.current = githubServer(withUser, { connected: false }).server;
+      const view = await show();
+      expect(await view.findByLabelText('GitHub token')).toBeTruthy();
+      fetchMock.mockImplementation(() => held);
+      const key = ['pull-requests', 'pr', 'mindroom-ai', 'mindroom-chat', 200, false];
+      await act(async () => void client.refetchQueries({ queryKey: key, exact: true }));
+      await act(async () => release(respond(pull())));
+      expect(await view.findByText('Add pull request cards')).toBeTruthy();
+      expect(view.getAllByLabelText('GitHub token')).toHaveLength(1);
+      await click(view.getByRole('button', { name: 'Cancel' }));
+      expect(view.queryByLabelText('GitHub token')).toBeNull();
     });
 
     it('keeps the form a failed part asked for, and says the token was refused', async () => {

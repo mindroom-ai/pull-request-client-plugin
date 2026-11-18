@@ -585,21 +585,31 @@ export function RemovedTokenNote({
 }
 
 /** Removes the token saved in MindRoom, while the requests through MindRoom go with it. */
-export function RemoveServerToken() {
+/**
+ * Removes the token saved in MindRoom, while the requests through MindRoom go with it. With
+ * `onRemoved`, its owner is told how the removal ended and says a failure itself.
+ */
+export function RemoveServerToken({ onRemoved }: { onRemoved?: (done: boolean) => void }) {
   const lifted = useContext(RemovedTokenContext);
   const own = useRemovedToken();
   // Outside the panel it says itself that the token was removed, where it was.
   return lifted ? (
-    <RemoveButton note={lifted} />
+    <RemoveButton note={lifted} onRemoved={onRemoved} />
   ) : (
     <>
-      <RemoveButton note={own} />
+      <RemoveButton note={own} onRemoved={onRemoved} />
       <RemovedTokenNote note={own} />
     </>
   );
 }
 
-function RemoveButton({ note }: { note: RemovedToken }) {
+function RemoveButton({
+  note,
+  onRemoved,
+}: {
+  note: RemovedToken;
+  onRemoved?: (done: boolean) => void;
+}) {
   const t = usePluginTranslation('pull-requests');
   const { via, connection, appConnected, unreadable } = useGitHubAccess();
   const serverToken = useServerToken();
@@ -621,6 +631,7 @@ function RemoveButton({ note }: { note: RemovedToken }) {
     const active = document.activeElement;
     const focus = [null, document.body, button.current, note.placed.current].includes(active);
     note.setRemoved(done ? { origin: serverToken.origin, focus } : undefined);
+    onRemoved?.(done);
   };
   return (
     <>
@@ -641,7 +652,7 @@ function RemoveButton({ note }: { note: RemovedToken }) {
           <span id={fallsBack}>{t('token.removeFallsBack')}</span>
         </>
       ) : null}
-      {failed ? <span role="alert"> {t('token.removeFailed')}</span> : null}
+      {failed && !onRemoved ? <span role="alert"> {t('token.removeFailed')}</span> : null}
     </>
   );
 }
@@ -761,8 +772,7 @@ export function TokenForm({
   reason,
   inputRef,
   onCancel,
-  onSaved,
-  onHold,
+  onDone,
 }: {
   /**
    * Why it shows; `override`, to use a token instead of MindRoom's connection, has no hint;
@@ -772,10 +782,8 @@ export function TokenForm({
   inputRef?: Ref<HTMLInputElement>;
   /** Closes the form without saving, for one the person opened; without it, none shows. */
   onCancel?: () => void;
-  /** Once a token is saved, in the browser or in MindRoom. */
-  onSaved?: () => void;
-  /** Whether a change it started runs, or failed and says so until retried or dismissed. */
-  onHold?: (held: boolean) => void;
+  /** Once a token is saved from it, in the browser or in MindRoom, or removed from it. */
+  onDone?: () => void;
 }) {
   const t = usePluginTranslation('pull-requests');
   const { token, setToken } = useGitHubToken();
@@ -789,6 +797,8 @@ export function TokenForm({
   if (chosen !== undefined && chosen !== serverToken?.origin) setChosen(undefined);
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState<SaveProblem>();
+  // Said here, as Remove may go with the status the failed removal leaves.
+  const [removeFailed, setRemoveFailed] = useState(false);
   const field = useRef<HTMLInputElement | null>(null);
   const setField = useCallback(
     (element: HTMLInputElement | null) => {
@@ -800,18 +810,16 @@ export function TokenForm({
   );
   const inMindroom = serverToken !== undefined && chosen === serverToken.origin;
   const writing = serverToken?.writing === true;
-  const held = saving || writing || problem !== undefined;
-  useEffect(() => onHold?.(held), [held, onHold]);
-  useEffect(() => () => onHold?.(false), [onHold]);
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     const trimmed = value.trim();
     if (trimmed === '' || serverToken?.busy()) return;
     setProblem(undefined);
+    setRemoveFailed(false);
     if (!inMindroom) {
       setValue('');
       setToken(trimmed);
-      onSaved?.();
+      onDone?.();
       return;
     }
     setSaving(true);
@@ -824,7 +832,11 @@ export function TokenForm({
       return;
     }
     setValue('');
-    onSaved?.();
+    onDone?.();
+  };
+  const removed = (done: boolean) => {
+    setRemoveFailed(!done);
+    if (done) onDone?.();
   };
   return (
     <form className="mrpr-token" onSubmit={(event) => void submit(event)}>
@@ -835,7 +847,8 @@ export function TokenForm({
       ) : null}
       {reason === 'unreadable' ? (
         <p className="mrpr-status">
-          <span role="alert">{t('token.hint.unreadable')}</span> <RemoveServerToken />
+          <span role="alert">{t('token.hint.unreadable')}</span>{' '}
+          <RemoveServerToken onRemoved={removed} />
         </p>
       ) : reason === 'override' ? null : (
         <p className="mrpr-status">{t(`token.hint.${reason}`)}</p>
@@ -860,11 +873,7 @@ export function TokenForm({
             type="button"
             // The form stays while it saves: what comes of it is said here.
             aria-disabled={saving || undefined}
-            onClick={() => {
-              if (saving) return;
-              setProblem(undefined);
-              onCancel();
-            }}
+            onClick={() => (saving ? undefined : onCancel())}
           >
             {t('token.cancel')}
           </button>
@@ -889,6 +898,11 @@ export function TokenForm({
             </label>
           ))}
         </div>
+      ) : null}
+      {removeFailed ? (
+        <p className="mrpr-status" role="alert">
+          {t('token.removeFailed')}
+        </p>
       ) : null}
       {problem ? (
         <p className="mrpr-status" role="alert">
