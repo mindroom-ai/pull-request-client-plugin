@@ -69,12 +69,13 @@ function PullRequestsMenu({
   }, [anchor]);
   const count = pullRequests.length;
   const queries = usePullRequests(pullRequests, ANSWERED_ONLY);
+  // A refetch GitHub refused keeps the answer before beside the error: that one counts no more.
   const answered = queries.flatMap((query) =>
-    query.data ? [resolvePullRequestState(query.data).key] : []
+    query.status === 'success' ? [resolvePullRequestState(query.data).key] : []
   );
   const combined = combinedPullRequestState(answered);
   // Until every answer is in, only an open one already settles it: the tone never changes once shown.
-  const loading = queries.some((query) => query.data === undefined && query.status === 'pending');
+  const loading = queries.some((query) => query.status === 'pending');
   const state = loading && combined !== 'open' ? undefined : combined;
   const presentation = state && PULL_REQUEST_STATE_PRESENTATION[state];
   const label =

@@ -20,9 +20,10 @@ const page = vi.hoisted(() => ({
   panel: undefined as { isOpen: boolean; open: ReturnType<typeof vi.fn> } | undefined,
 }));
 // The room has no MindRoom server unless a test gives one: the stand-in client knows no room.
+const roomServer = vi.hoisted(() => ({ current: undefined as unknown }));
 vi.mock('@mindroom/client-sdk/server', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@mindroom/client-sdk/server')>()),
-  useMindroomServerStatus: () => ({ server: undefined, pending: false }),
+  useMindroomServerStatus: () => ({ server: roomServer.current, pending: false }),
 }));
 vi.mock('@mindroom/client-sdk/core', async (importOriginal) => {
   const core = await importOriginal<typeof import('@mindroom/client-sdk/core')>();
@@ -92,6 +93,7 @@ beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   localStorage.clear();
   client.clear();
+  roomServer.current = undefined;
   page.panel = { isOpen: false, open: vi.fn() };
   setShownPullRequest(ROOM_ID, undefined);
   fetchMock.mockReset();
@@ -178,6 +180,22 @@ describe('ThreadPullRequestsButton', () => {
         }[state]
       }`
     );
+  });
+
+  it('leaves out a pull request whose refetch GitHub refused, also one that showed before', async () => {
+    localStorage.setItem(TOKEN_KEY, 'ghp_test');
+    serve({ 1: pull('open'), 2: pull('merged') });
+    const { view } = await show([{ number: 1 }, { number: 2 }]);
+    await vi.waitFor(() => expect(tone(view)).toBe('mrpr-tone-open'));
+    // Number 1 is gone now: its query keeps the open pull request beside the error.
+    serve({ 2: pull('merged') });
+    await act(async () => client.invalidateQueries());
+    await vi.waitFor(() => expect(tone(view)).toBe('mrpr-tone-merged'));
+    expect(trigger(view).getAttribute('aria-label')).toBe('Pull requests (2): Merged');
+    serve({});
+    await act(async () => client.invalidateQueries());
+    await vi.waitFor(() => expect(tone(view)).toBeUndefined());
+    expect(trigger(view).getAttribute('aria-label')).toBe('Pull requests (2)');
   });
 
   it('names one pull request with its state', async () => {
