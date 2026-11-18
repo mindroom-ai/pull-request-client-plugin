@@ -1144,6 +1144,25 @@ describe('with the GitHub account connected in MindRoom', () => {
     }
   );
 
+  it('names the token saved in MindRoom, not the App, when GitHub refuses a write with it', async () => {
+    const mindroom = githubServer(async (url, init) =>
+      init?.method === 'PUT'
+        ? respond({ message: 'Resource not accessible by personal access token' }, 403)
+        : withUser(url, init)
+    );
+    await saveInMindroom(mindroom);
+    roomServer.current = mindroom.server;
+    const view = await show();
+    await click(await view.findByRole('button', { name: 'Merge' }));
+    await click(await view.findByRole('button', { name: 'Confirm merge?' }));
+    await waitUntil(() =>
+      expect(view.getByRole('status').textContent).toContain(
+        'GitHub refused it. The token saved in MindRoom may not have write access to this repository (Pull requests and Contents: Read and write). Resource not accessible by personal access token'
+      )
+    );
+    expect(mindroom.storedToken()).toBe('ghp_good');
+  });
+
   it('says GitHub refused the token saved in MindRoom, not the App, and keeps it', async () => {
     const mindroom = githubServer(async (url, init) =>
       init?.method === 'PUT' ? respond({ message: 'Bad credentials' }, 401) : withUser(url, init)
