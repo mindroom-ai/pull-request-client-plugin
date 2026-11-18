@@ -395,6 +395,22 @@ describe('ThreadPullRequestsButton', () => {
     expect(view.queryByRole('menu')).not.toBeNull();
   });
 
+  it('keeps the focus on its row when an answer reorders the rows', async () => {
+    withToken();
+    serve({ 1: pull('open'), 2: pull('merged') }, 1);
+    const { view } = await show([{ number: 1 }, { number: 2 }]);
+    await openMenu(view);
+    const number = (row: HTMLElement) => row.querySelector('.mrpr-truncate')?.textContent;
+    // Number 1 is not answered yet: it comes after the merged one.
+    await vi.waitFor(() => expect(rows(view).map(number)).toEqual(['mindroom-chat #2', 'mindroom-chat #1']));
+    const merged = rows(view)[0]!;
+    merged.focus();
+    await act(async () => held.release());
+    await vi.waitFor(() => expect(rows(view).map(number)).toEqual(['mindroom-chat #1', 'mindroom-chat #2']));
+    expect(rows(view)[1]).toBe(merged);
+    expect(document.activeElement).toBe(merged);
+  });
+
   it('marks the row of the pull request the open panel shows, in any letter case', async () => {
     page.panel = { isOpen: true, open: vi.fn() };
     setShownPullRequest(ROOM_ID, { owner: 'MindRoom-AI', repo: 'MindRoom-Chat', number: 2 });
