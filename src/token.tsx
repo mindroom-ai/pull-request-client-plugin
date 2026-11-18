@@ -604,9 +604,11 @@ export function RemoveServerToken({ onRemoved }: { onRemoved?: (done: boolean) =
 
 /**
  * Removing the token saved in MindRoom, offered (`shown`) while the requests through MindRoom go
- * with it or MindRoom cannot read it. `remove(control)` resolves to whether it was removed
- * (undefined when another change is under way, which it leaves alone), and then gives the note the focus when it is where the person left it: on `control` (the button that
- * removed it), on the page once that went, or where the panel put it in its place.
+ * with it or MindRoom cannot read it. `remove(control)` resolves to whether it was removed (`done`)
+ * and whether the focus was lost meanwhile (`lost`): still on `control` (the button that removed
+ * it), on the page once that went, or where the panel put it in its place, not where the person
+ * moved it; undefined when another change is under way, which it leaves alone. Once removed, the
+ * note takes a lost focus.
  */
 function useRemoval(note: RemovedToken) {
   const { via, connection, appConnected, unreadable } = useGitHubAccess();
@@ -615,7 +617,9 @@ function useRemoval(note: RemovedToken) {
   // Also the token MindRoom cannot read, which removing there mends.
   const shown =
     ((via === 'server' && connection === 'token') || unreadable) && serverToken !== undefined;
-  const remove = async (control: Element | null): Promise<boolean | undefined> => {
+  const remove = async (
+    control: Element | null
+  ): Promise<{ done: boolean; lost: boolean } | undefined> => {
     if (!serverToken || serverToken.busy()) return undefined;
     setFailed(false);
     note.setRemoved(undefined);
@@ -624,9 +628,9 @@ function useRemoval(note: RemovedToken) {
     // The focus follows from the button, or from where it fell once the button went, but not
     // from where the person moved it meanwhile.
     const active = document.activeElement;
-    const focus = [null, document.body, control, note.placed.current].includes(active);
-    note.setRemoved(done ? { origin: serverToken.origin, focus } : undefined);
-    return done;
+    const lost = [null, document.body, control, note.placed.current].includes(active);
+    note.setRemoved(done ? { origin: serverToken.origin, focus: lost } : undefined);
+    return { done, lost };
   };
   return { shown, appConnected, writing: serverToken?.writing === true, failed, remove };
 }
@@ -661,8 +665,8 @@ function RemoveButton({
         aria-disabled={writing || undefined}
         aria-describedby={appConnected ? fallsBack : undefined}
         onClick={() =>
-          void remove(button.current).then((done) => {
-            if (done !== undefined) onRemoved?.(done);
+          void remove(button.current).then((ended) => {
+            if (ended) onRemoved?.(ended.done);
           })
         }
       >

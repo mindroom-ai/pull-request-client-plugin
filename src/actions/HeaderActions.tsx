@@ -428,9 +428,13 @@ export function HeaderActions({
                             }
                             disabled={removal.writing}
                             onSelect={() => {
-                              // The entry goes with the menu: the panel's note takes the focus.
+                              // The entry goes with the menu: the panel's note takes the focus,
+                              // or, when the removal fails, the menu's button, as its other
+                              // entries give it back.
                               setAnchor(undefined);
-                              void removal.remove(null);
+                              void removal.remove(null).then((ended) => {
+                                if (ended && !ended.done && ended.lost) moreRef.current?.focus();
+                              });
                             }}
                           />
                         ) : null}

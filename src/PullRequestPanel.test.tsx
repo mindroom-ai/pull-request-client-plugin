@@ -1028,6 +1028,36 @@ describe('with the GitHub account connected in MindRoom', () => {
     );
     expect(mindroom.storedToken()).toBe('ghp_good');
     expect(view.queryByText('Token removed from MindRoom.')).toBeNull();
+    // The entry went with the menu: the focus goes back to the button that opened it.
+    const more = view.getByRole('button', { name: 'More actions' });
+    await waitUntil(() => expect(document.activeElement).toBe(more));
+  });
+
+  it('leaves the focus where the person moved it while a removal from the menu fails', async () => {
+    const mindroom = githubServer(withUser);
+    await saveInMindroom(mindroom);
+    let fail!: () => void;
+    const held = new Promise<void>((resolve) => (fail = resolve));
+    const real = mindroom.server.request.getMockImplementation()!;
+    mindroom.server.request.mockImplementation(async (path, init) => {
+      if (path === '/api/github/token' && init?.method === 'DELETE') {
+        await held;
+        throw new MindroomServerError('Forbidden', 403, {});
+      }
+      return real(path, init);
+    });
+    roomServer.current = mindroom.server;
+    const view = await show();
+    await choose(view, 'Remove token from MindRoom');
+    const elsewhere = document.body.appendChild(document.createElement('button'));
+    try {
+      elsewhere.focus();
+      await act(async () => fail());
+      expect(await view.findByRole('alert')).toBeTruthy();
+      expect(document.activeElement).toBe(elsewhere);
+    } finally {
+      elsewhere.remove();
+    }
   });
 
   describe('while GitHub still checks whether it merges', () => {
