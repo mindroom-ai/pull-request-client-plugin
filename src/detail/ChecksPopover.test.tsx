@@ -169,6 +169,17 @@ describe('ChecksStatusLine', () => {
     expect(button.querySelector('.mrpr-checks-short')?.textContent).toBe('1/3');
   });
 
+  it('marks checks that were all skipped with the muted skipped icon, not a passing one', async () => {
+    fetchMock.mockImplementation(async (url) =>
+      respond(url.includes('/check-runs') ? runs(['skipped', 'neutral']) : { statuses: [] })
+    );
+    const view = await show();
+    const button = await view.findByRole('button', { name: /Open checks: 0 passed/ });
+    const icon = button.querySelector('svg');
+    expect(icon?.classList.contains('mrpr-tone-muted')).toBe(true);
+    expect(icon?.classList.contains('mrpr-tone-success')).toBe(false);
+  });
+
   it('says so when GitHub has more check runs than it sent', async () => {
     fetchMock.mockImplementation(async (url) =>
       respond(

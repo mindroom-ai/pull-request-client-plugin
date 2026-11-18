@@ -216,6 +216,7 @@ const CHECKS_STATE_PRESENTATION = {
   passing: { Icon: CircleCheck, toneClassName: 'mrpr-tone-success' },
   failing: { Icon: CircleX, toneClassName: 'mrpr-tone-failure' },
   pending: { Icon: CircleDot, toneClassName: 'mrpr-tone-warning' },
+  skipped: { Icon: CircleSlash, toneClassName: 'mrpr-tone-muted' },
 } as const satisfies Record<Exclude<ChecksState, 'none'>, unknown>;
 
 /** The icon and tone of the checks taken together; the words are `checksState.<state>`. */

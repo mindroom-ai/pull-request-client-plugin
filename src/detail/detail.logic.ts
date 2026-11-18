@@ -121,9 +121,12 @@ export function joinReviewers(outcomes: ReviewOutcome[], requested: Actor[]): Re
   ];
 }
 
-export type ChecksState = 'none' | 'passing' | 'failing' | 'pending';
+export type ChecksState = 'none' | 'passing' | 'failing' | 'pending' | 'skipped';
 
-/** The checks taken together: failing over pending over passing. */
+/**
+ * The checks taken together: failing over pending over passing; `skipped` once all ended skipped
+ * or neutral, with none failed and none passed, which nothing calls passing.
+ */
 export function checksState(checks: PullRequestCheck[]): ChecksState {
   if (checks.length === 0) return 'none';
   if (checks.some((check) => check.status === 'failure' || check.status === 'cancelled')) {
@@ -132,7 +135,7 @@ export function checksState(checks: PullRequestCheck[]): ChecksState {
   if (checks.some((check) => check.status === 'pending' || check.status === 'action-required')) {
     return 'pending';
   }
-  return 'passing';
+  return checks.some((check) => check.status === 'success') ? 'passing' : 'skipped';
 }
 
 export function isWorkflowApprovalCheck(check: Pick<PullRequestCheck, 'status' | 'url'>): boolean {

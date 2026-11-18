@@ -227,6 +227,7 @@ export const en = {
     passing: 'All checks have passed',
     failing: 'Some checks were not successful',
     pending: "Some checks haven't completed yet",
+    skipped: 'All checks were skipped or neutral',
   },
   checksPopover: {
     none: 'No checks reported',
@@ -352,6 +353,7 @@ export const en = {
       passing: 'checks passed',
       failing: 'checks failed',
       pending: 'checks running',
+      skipped: 'checks skipped',
     },
     thisWorktree: 'this worktree',
     worktree: 'Worktree',

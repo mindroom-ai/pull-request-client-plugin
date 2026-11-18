@@ -284,6 +284,9 @@ describe('checks', () => {
     expect(checksState([check('success'), check('action-required')])).toBe('pending');
     expect(checksState([check('success'), check('pending')])).toBe('pending');
     expect(checksState([check('success'), check('skipped'), check('neutral')])).toBe('passing');
+    // None failed or runs, and none passed either: nothing to call passing.
+    expect(checksState([check('skipped'), check('neutral')])).toBe('skipped');
+    expect(checksState([check('skipped'), check('pending')])).toBe('pending');
   });
 
   it('summarizes failing first, then awaiting action, then running', () => {
