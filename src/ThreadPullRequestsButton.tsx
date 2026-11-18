@@ -16,7 +16,7 @@ import { IconTooltip, Menu, PopOut } from '@mindroom/client-sdk/ui';
 import { pullRequestUrl, type PullRequestRef } from './github';
 import { useShownPullRequest } from './shownPullRequest';
 import { Details } from './ThreadDetails';
-import { useThreadPullRequests } from './threadPullRequests';
+import { useThreadPullRequests, type ThreadWorktree } from './threadPullRequests';
 import { RoomGitHub } from './token';
 
 /** Whether `a` and `b` name one pull request; GitHub's owner and repository names ignore case. */
@@ -26,10 +26,25 @@ const samePullRequest = (a: PullRequestRef, b: PullRequestRef) =>
   a.repo.toLowerCase() === b.repo.toLowerCase();
 
 export const ThreadPullRequestsButton: ThreadHeaderSlotComponent = ({ room, threadId }) => {
-  const t = usePluginTranslation('pull-requests');
   const { pullRequests, worktree } = useThreadPullRequests(room, threadId);
+  // A thread can lose its last link or its worktree while it is open: the button then goes, and
+  // with it whether its menu was open, so the next link shows it closed.
+  if (pullRequests.length === 0 && !worktree) return null;
+  return <PullRequestsMenu roomId={room.roomId} pullRequests={pullRequests} worktree={worktree} />;
+};
+
+function PullRequestsMenu({
+  roomId,
+  pullRequests,
+  worktree,
+}: {
+  roomId: string;
+  pullRequests: readonly PullRequestRef[];
+  worktree: ThreadWorktree | undefined;
+}) {
+  const t = usePluginTranslation('pull-requests');
   const panel = useRoomSidePanel('pull-requests', 'pull-request');
-  const shown = useShownPullRequest(room.roomId);
+  const shown = useShownPullRequest(roomId);
   const [anchor, setAnchor] = useState<RectCords>();
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   // Set when a choice or Escape closes the menu, which then gives the focus back to its button
@@ -40,9 +55,6 @@ export const ThreadPullRequestsButton: ThreadHeaderSlotComponent = ({ room, thre
     refocus.current = false;
     buttonRef.current?.focus();
   }, [anchor]);
-  // A thread can lose its last link or its worktree while it is open: the button then goes.
-  if (pullRequests.length === 0 && !worktree) return null;
-
   const count = pullRequests.length;
   const label = count > 0 ? t('threadPullRequests.button', { count }) : t('details.worktree');
   const current = panel?.isOpen ? shown : undefined;
@@ -153,7 +165,7 @@ export const ThreadPullRequestsButton: ThreadHeaderSlotComponent = ({ room, thre
             }}
           >
             <Menu role="menu" aria-label={label} className="mrpr-thread-menu">
-              <RoomGitHub roomId={room.roomId}>
+              <RoomGitHub roomId={roomId}>
                 <Details
                   pullRequests={pullRequests}
                   worktree={worktree}
@@ -167,4 +179,4 @@ export const ThreadPullRequestsButton: ThreadHeaderSlotComponent = ({ room, thre
       />
     </>
   );
-};
+}

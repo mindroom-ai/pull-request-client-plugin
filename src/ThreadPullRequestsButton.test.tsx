@@ -186,6 +186,16 @@ describe('ThreadPullRequestsButton', () => {
     expect(trigger(view).getAttribute('aria-expanded')).toBe('false');
   });
 
+  it('forgets an open menu when the thread loses its last link, and does not reopen with the next', async () => {
+    const { view } = await show([{ number: 1 }]);
+    await openMenu(view);
+    view.rerender(button(linkedRoom(ROOM_ID, [])));
+    expect(view.getByTestId('slot').childElementCount).toBe(0);
+    view.rerender(button(linkedRoom(ROOM_ID, [{ number: 2 }])));
+    expect(trigger(view).getAttribute('aria-expanded')).toBe('false');
+    expect(view.queryByRole('menu')).toBeNull();
+  });
+
   it('marks the row of the pull request the open panel shows, in any letter case', async () => {
     page.panel = { isOpen: true, open: vi.fn() };
     setShownPullRequest(ROOM_ID, { owner: 'MindRoom-AI', repo: 'MindRoom-Chat', number: 2 });
