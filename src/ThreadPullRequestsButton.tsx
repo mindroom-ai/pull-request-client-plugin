@@ -47,8 +47,8 @@ function PullRequestsMenu({
   const shown = useShownPullRequest(roomId);
   const [anchor, setAnchor] = useState<RectCords>();
   const buttonRef = useRef<HTMLButtonElement | null>(null);
-  // Set when a choice or Escape closes the menu, which then gives the focus back to its button
-  // once the menu's focus trap is gone. A click outside leaves the focus where it went.
+  // Set when a choice, Escape or the button closes the menu, which then gives the focus back to
+  // its button once the menu's focus trap is gone. A click outside leaves the focus where it went.
   const refocus = useRef(false);
   useEffect(() => {
     if (anchor !== undefined || !refocus.current) return;
@@ -132,9 +132,11 @@ function PullRequestsMenu({
             aria-label={label}
             aria-haspopup="menu"
             aria-expanded={anchor !== undefined}
-            onClick={(event: MouseEvent<HTMLButtonElement>) =>
-              setAnchor(anchor ? undefined : event.currentTarget.getBoundingClientRect())
-            }
+            onClick={(event: MouseEvent<HTMLButtonElement>) => {
+              // Closing, the focus may be on a row the menu takes with it: it comes back here.
+              refocus.current = anchor !== undefined;
+              setAnchor(anchor ? undefined : event.currentTarget.getBoundingClientRect());
+            }}
           >
             {count > 0 ? (
               <GitPullRequestArrow aria-hidden className="mrpr-thread-button-icon" />

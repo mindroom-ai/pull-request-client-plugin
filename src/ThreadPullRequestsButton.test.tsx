@@ -186,6 +186,16 @@ describe('ThreadPullRequestsButton', () => {
     expect(trigger(view).getAttribute('aria-expanded')).toBe('false');
   });
 
+  it('gives the focus back to its button when a press on it closes the menu from a row', async () => {
+    const { view } = await show([{ number: 1 }, { number: 2 }]);
+    await openMenu(view);
+    rows(view)[1]!.focus();
+    // The trap keeps the focus on the row through the press; the click then closes the menu.
+    await act(async () => trigger(view).click());
+    expect(view.queryByRole('menu')).toBeNull();
+    expect(document.activeElement).toBe(trigger(view));
+  });
+
   it('forgets an open menu when the thread loses its last link, and does not reopen with the next', async () => {
     const { view } = await show([{ number: 1 }]);
     await openMenu(view);
