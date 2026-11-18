@@ -1026,6 +1026,8 @@ test("the open thread's pull requests are one button in its banner, whose menu l
         hovered: style.backgroundColor,
         rim: style.borderColor,
         title: getComputedStyle(item.querySelector('.mrpr-details-title')!).color,
+        meta: style.color,
+        state: getComputedStyle(item.querySelector('.mrpr-details-state') ?? item).color,
       };
     });
     console.log(`[prmenu] hover ${scheme} ${JSON.stringify(look)}`);

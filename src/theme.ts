@@ -21,7 +21,6 @@ export function pluginRootStyle(): CSSProperties {
     '--pr-merged': '#8957e5',
     '--pr-draft': '#848d97',
     '--pr-primary': color.Primary.Main,
-    '--pr-primary-container': color.Primary.Container,
     '--pr-primary-container-line': color.Primary.ContainerLine,
     '--pr-on-primary-container': color.Primary.OnContainer,
     '--pr-font-sans': config.font.Inter,

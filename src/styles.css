@@ -1776,18 +1776,20 @@ button.mrpr-thread-menu-item,
 a.mrpr-thread-menu-item {
   cursor: pointer;
 }
-/* A pull request's item under the pointer or the keyboard: the theme's primary container, a
-   little deeper, inside a rim of its line mixed toward the primary, and the title in the
-   container's text color. The theme's container alone is nearly the menu's surface in some
-   themes (Silver, 1.04:1); with 14% and 35% of the primary, the fill is at least 1.17:1 from the
-   surface and the rim 1.98:1 in every theme the client ships, and the title keeps 6:1. Pressed,
-   it deepens again, for a tap. The worktree's item does nothing and takes none of this. */
+/* A pull request's item under the pointer or the keyboard: a rim of the primary container's
+   line mixed toward the primary (at least 1.98:1 from the menu in every theme the client ships),
+   the title in the container's text color, and the menu's surface faintly tinted with the
+   primary (8%, 12% pressed, for a tap). The tint takes contrast from the 12px text, so it goes
+   darker: the rows' text in the text's color, the tones mixed at 30% (Catppuccin Latte's draft
+   word keeps 4.5:1 pressed). The worktree's item does nothing and takes none of this. */
 button.mrpr-thread-menu-item:hover,
 a.mrpr-thread-menu-item:hover,
 button.mrpr-thread-menu-item:focus-visible,
 a.mrpr-thread-menu-item:focus-visible {
+  --mrpr-details-tone: 30%;
   border-color: color-mix(in srgb, var(--pr-primary) 35%, var(--pr-primary-container-line));
-  background: color-mix(in srgb, var(--pr-primary) 14%, var(--pr-primary-container));
+  background: color-mix(in srgb, var(--pr-primary) 8%, var(--pr-surface));
+  color: var(--pr-fg);
   outline: none;
 }
 /* The keyboard's item has its own outline, apart from its rim and the current item's ring, so
@@ -1805,8 +1807,10 @@ a.mrpr-thread-menu-item:focus-visible {
 }
 button.mrpr-thread-menu-item:active,
 a.mrpr-thread-menu-item:active {
+  --mrpr-details-tone: 30%;
   border-color: color-mix(in srgb, var(--pr-primary) 50%, var(--pr-primary-container-line));
-  background: color-mix(in srgb, var(--pr-primary) 22%, var(--pr-primary-container));
+  background: color-mix(in srgb, var(--pr-primary) 12%, var(--pr-surface));
+  color: var(--pr-fg);
 }
 button.mrpr-thread-menu-item:is(:hover, :focus-visible, :active) .mrpr-details-title,
 a.mrpr-thread-menu-item:is(:hover, :focus-visible, :active) .mrpr-details-title {
@@ -1983,6 +1987,7 @@ button.mrpr-thread-menu-item[aria-current='true'] {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  --mrpr-details-tone: 45%;
   color: color-mix(in srgb, var(--pr-fg) 84%, var(--pr-surface));
   font-size: 12px;
   line-height: 16px;
@@ -2023,17 +2028,24 @@ button.mrpr-thread-menu-item[aria-current='true'] {
   block-size: calc(0.65rem * 1.1);
   margin-block: calc((16px - 0.65rem * 1.1) / 2);
 }
-/* The words of a state or of the checks, in their tone (the parent's) mixed with the text's
-   color: GitHub's colors and the theme's are an icon's, too light or too dark for 12px text, and
-   this mix keeps 4.5:1 at least on the surface of every theme the client ships. */
+/* The words of a state or of the checks (in the parent's tone), the size and this worktree, in
+   their tone mixed with the text's color: GitHub's colors and the theme's are an icon's, too light
+   or too dark for 12px text, and this mix keeps 4.5:1 at least on the surface of every theme the
+   client ships. */
 .mrpr-details-word {
-  color: color-mix(in srgb, currentColor 45%, var(--pr-fg));
+  color: color-mix(in srgb, currentColor var(--mrpr-details-tone), var(--pr-fg));
+}
+.mrpr-details .mrpr-added {
+  color: color-mix(in srgb, var(--pr-added) var(--mrpr-details-tone), var(--pr-fg));
+}
+.mrpr-details .mrpr-removed {
+  color: color-mix(in srgb, var(--pr-removed) var(--mrpr-details-tone), var(--pr-fg));
 }
 .mrpr-details-state {
   font-weight: 600;
 }
 .mrpr-details-here {
-  color: var(--pr-primary);
+  color: color-mix(in srgb, var(--pr-primary) var(--mrpr-details-tone), var(--pr-fg));
 }
 .mrpr-details-title {
   display: -webkit-box;
