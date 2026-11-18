@@ -1183,8 +1183,10 @@ describe('with the GitHub account connected in MindRoom', () => {
     await click(view.getByRole('button', { name: 'Forget token' }));
     await waitUntil(() => expect(view.getByText('Loading pull request')).toBeTruthy());
     expect(view.queryByText('GitHub refused the saved token.')).toBeNull();
+    expect(view.queryByLabelText('GitHub token')).toBeNull();
     await act(async () => release(respond(pull())));
     expect(await view.findByText('Add pull request cards')).toBeTruthy();
+    expect(view.queryByLabelText('GitHub token')).toBeNull();
   });
 
   it('closes the form once a token saved in the browser over a refused one reads', async () => {

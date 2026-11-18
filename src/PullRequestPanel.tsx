@@ -397,6 +397,12 @@ function Panel({ roomId, request }: PanelProps) {
   // and only the form shown for this latch may close it.
   const formScope = `${serverOrigin} ${pullRequestKey}`;
   const [latch, setLatch] = useState<{ scope: string }>();
+  // Forgetting the browser's token is the person's act too, from whichever view it is.
+  const [knownToken, setKnownToken] = useState(token);
+  if (knownToken !== token) {
+    setKnownToken(token);
+    if (token === undefined) setLatch(undefined);
+  }
   const held = latch?.scope === formScope ? latch : undefined;
   if (!held && (latch || formReason)) setLatch(formReason ? { scope: formScope } : undefined);
   const shownReason = formReason ?? (held ? 'override' : undefined);
