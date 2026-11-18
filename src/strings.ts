@@ -377,6 +377,8 @@ export const en = {
     },
     note: "The token stays in this browser, where the page's scripts can read it.",
     noteMindroom: 'MindRoom keeps the token for your account and uses it on every device.',
+    // After it, while a token is stored in this browser, which would come first and hide it.
+    noteForgets: 'Saving it removes the token stored in this browser, in every room.',
     // Where the form saves it, in a room with a MindRoom server.
     where: 'Where to save the token',
     inMindroom: 'Save in MindRoom at {{host}}',

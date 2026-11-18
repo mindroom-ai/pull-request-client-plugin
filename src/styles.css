@@ -174,7 +174,7 @@
   font-size: 12px;
   cursor: pointer;
 }
-.mrpr-button:hover {
+.mrpr-button:hover:not([aria-disabled='true']) {
   background: var(--pr-hover);
 }
 
@@ -499,7 +499,7 @@
   white-space: nowrap;
   cursor: pointer;
 }
-.mrpr-link-button:hover {
+.mrpr-link-button:hover:not([aria-disabled='true']) {
   text-decoration: underline;
 }
 
@@ -837,10 +837,8 @@
 .mrpr-button-primary:hover:not([aria-disabled='true']) {
   background: color-mix(in srgb, var(--pr-primary) 26%, transparent);
 }
-.mrpr-button-primary[aria-disabled='true']:hover {
-  background: color-mix(in srgb, var(--pr-primary) 16%, transparent);
-}
-.mrpr-button-primary[aria-disabled='true'],
+.mrpr-button[aria-disabled='true'],
+.mrpr-link-button[aria-disabled='true'],
 .mrpr-dialog-actions .mrpr-button:disabled,
 .mrpr-popover-actions .mrpr-button:disabled {
   cursor: default;

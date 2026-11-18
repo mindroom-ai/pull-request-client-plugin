@@ -481,6 +481,8 @@ describe('the token saved in MindRoom', () => {
     const mindroom = githubServer(github);
     const view = await form(mindroom.server);
     await waitUntil(() => expect(accesses.reader?.connection).toBe('app'));
+    // The default comes first.
+    expect(view.getAllByRole('radio')[0]).toBe(view.getByLabelText('Only this browser'));
     expect((view.getByLabelText('Only this browser') as HTMLInputElement).checked).toBe(true);
     expect((view.getByLabelText(`Save in MindRoom at ${HOST}`) as HTMLInputElement).checked).toBe(
       false
@@ -637,9 +639,15 @@ describe('the token saved in MindRoom', () => {
     const mindroom = githubServer(github);
     const view = await form(mindroom.server);
     await waitUntil(() => expect(accesses.reader?.via).toBe('token'));
+    const forgets = 'Saving it removes the token stored in this browser, in every room.';
+    // Said only where it is saved in MindRoom, and only while this browser stores one.
+    expect(view.queryByText(forgets, { exact: false })).toBeNull();
     await chooseMindroom(view);
+    expect(view.getByText(forgets, { exact: false })).toBeTruthy();
     await save(view, 'ghp_other');
     await waitUntil(() => expect(accesses.reader?.key).toBe(keyAs('other', 1)));
+    await chooseMindroom(view);
+    expect(view.queryByText(forgets, { exact: false })).toBeNull();
     expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
     await waitUntil(() => expect(mindroom.githubRequests()).toHaveLength(1));
     await waitUntil(() => expect(view.getByTestId('reader').textContent).toBe('with the token'));
@@ -960,6 +968,18 @@ describe('the token saved in MindRoom', () => {
     await waitUntil(() =>
       expect(document.activeElement?.textContent).toBe('Token removed from MindRoom.')
     );
+    // A token saved again and gone later by itself was not removed here: nothing says so, and
+    // the focus stays where it is.
+    await mindroom.server.request('/api/github/token', {
+      method: 'PUT',
+      body: JSON.stringify({ token: 'ghp_good' }),
+    });
+    await act(() => accesses.reader?.recheck());
+    await waitUntil(() => expect(accesses.reader?.connection).toBe('token'));
+    await mindroom.server.request('/api/github/token', { method: 'DELETE' });
+    await act(() => accesses.reader?.recheck());
+    await waitUntil(() => expect(accesses.reader?.connection).toBe('app'));
+    expect(view.queryByText('Token removed from MindRoom.')).toBeNull();
   });
 
   it('says it could not remove it, and keeps the button and its focus', async () => {

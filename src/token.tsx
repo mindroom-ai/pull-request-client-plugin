@@ -424,6 +424,8 @@ export function RemoveServerToken() {
   useEffect(() => {
     if (removed && !shown) said.current?.focus();
   }, [removed, shown]);
+  // A token saved again is not the one removed: one that goes later was not removed here.
+  if (shown && removed && !serverToken.writing) setRemoved(false);
   if (!shown) {
     return removed ? (
       <span ref={said} tabIndex={-1}>
@@ -584,7 +586,7 @@ export function TokenForm({
   onSaved?: () => void;
 }) {
   const t = usePluginTranslation('pull-requests');
-  const { setToken } = useGitHubToken();
+  const { token, setToken } = useGitHubToken();
   const { via } = useGitHubAccess();
   const serverToken = useServerToken();
   const [value, setValue] = useState('');
@@ -668,7 +670,7 @@ export function TokenForm({
       </div>
       {serverToken ? (
         <div className="mrpr-token-where" role="radiogroup" aria-label={t('token.where')}>
-          {[false, true].map((only) => (
+          {[true, false].map((only) => (
             <label key={String(only)}>
               <input
                 type="radio"
@@ -688,7 +690,10 @@ export function TokenForm({
           {t(`token.problem.${problem}`)}
         </p>
       ) : null}
-      <p className="mrpr-status">{t(inMindroom ? 'token.noteMindroom' : 'token.note')}</p>
+      <p className="mrpr-status">
+        {t(inMindroom ? 'token.noteMindroom' : 'token.note')}
+        {inMindroom && token !== undefined ? ` ${t('token.noteForgets')}` : null}
+      </p>
     </form>
   );
 }
