@@ -434,7 +434,9 @@ describe('PullRequestPanel', () => {
       const writeText = vi.fn(async () => undefined);
       vi.stubGlobal('navigator', { clipboard: { writeText } });
       const view = await show();
-      await click(await view.findByRole('button', { name: 'Copy checkout command' }));
+      // Its name, which its tooltip shows too, says what it copies.
+      const COPY = 'Copy checkout command: gh pr checkout 200 -R mindroom-ai/mindroom-chat';
+      await click(await view.findByRole('button', { name: COPY }));
       expect(writeText).toHaveBeenCalledWith('gh pr checkout 200 -R mindroom-ai/mindroom-chat');
       expect(view.getByRole('button', { name: 'Copied' })).toBeTruthy();
     });
@@ -442,8 +444,8 @@ describe('PullRequestPanel', () => {
     it('leaves the checkout button as it was where there is no clipboard', async () => {
       vi.stubGlobal('navigator', {});
       const view = await show();
-      await click(await view.findByRole('button', { name: 'Copy checkout command' }));
-      expect(view.getByRole('button', { name: 'Copy checkout command' })).toBeTruthy();
+      await click(await view.findByRole('button', { name: /^Copy checkout command: / }));
+      expect(view.getByRole('button', { name: /^Copy checkout command: / })).toBeTruthy();
       expect(view.queryByRole('button', { name: 'Copied' })).toBeNull();
     });
 

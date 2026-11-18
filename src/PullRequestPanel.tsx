@@ -208,7 +208,7 @@ function CopyCheckoutButton({ command }: { command: string }) {
     const timer = setTimeout(() => setCopied(false), 1500);
     return () => clearTimeout(timer);
   }, [copied]);
-  const label = copied ? t('copied') : t('copyCheckout');
+  const label = copied ? t('copied') : t('copyCheckout', { command });
   const Icon = copied ? Check : Copy;
   return (
     <IconTooltip label={label}>

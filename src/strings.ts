@@ -59,7 +59,8 @@ export const en = {
   updated: 'updated {{time}}',
   receivesChanges: 'receives changes from',
   tab: { summary: 'Summary', timeline: 'Timeline', code: 'Code' },
-  copyCheckout: 'Copy checkout command',
+  // Names the command it copies, in its tooltip and to a screen reader.
+  copyCheckout: 'Copy checkout command: {{command}}',
   badge: { autoMerge: 'Auto-merge ({{method}})' },
   // The header's actions on a pull request: its primary control, the menu, the delete dialog
   // and the line under the header that says what runs and what failed. `pending`, `failed` and
