@@ -882,7 +882,16 @@
 .mrpr-menu-slot {
   display: contents;
 }
-.mrpr-menu-radio-group {
+/* Who the requests go as, a quiet line above the entries that change it; nothing to press. */
+.mrpr-menu-status {
+  margin: 0;
+  padding: 4px 8px;
+  color: var(--pr-muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.mrpr-menu-radio-group,
+.mrpr-menu-account {
   display: flex;
   flex-direction: column;
   gap: inherit;

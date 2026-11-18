@@ -602,6 +602,43 @@ export function RemoveServerToken({ onRemoved }: { onRemoved?: (done: boolean) =
   );
 }
 
+/**
+ * Removing the token saved in MindRoom, offered (`shown`) while the requests through MindRoom go
+ * with it or MindRoom cannot read it. `remove(control)` resolves to whether it was removed
+ * (undefined when another change is under way, which it leaves alone), and then gives the note the focus when it is where the person left it: on `control` (the button that
+ * removed it), on the page once that went, or where the panel put it in its place.
+ */
+function useRemoval(note: RemovedToken) {
+  const { via, connection, appConnected, unreadable } = useGitHubAccess();
+  const serverToken = useServerToken();
+  const [failed, setFailed] = useState(false);
+  // Also the token MindRoom cannot read, which removing there mends.
+  const shown =
+    ((via === 'server' && connection === 'token') || unreadable) && serverToken !== undefined;
+  const remove = async (control: Element | null): Promise<boolean | undefined> => {
+    if (!serverToken || serverToken.busy()) return undefined;
+    setFailed(false);
+    note.setRemoved(undefined);
+    const done = await serverToken.remove();
+    setFailed(!done);
+    // The focus follows from the button, or from where it fell once the button went, but not
+    // from where the person moved it meanwhile.
+    const active = document.activeElement;
+    const focus = [null, document.body, control, note.placed.current].includes(active);
+    note.setRemoved(done ? { origin: serverToken.origin, focus } : undefined);
+    return done;
+  };
+  return { shown, appConnected, writing: serverToken?.writing === true, failed, remove };
+}
+
+/**
+ * The panel's removal of the token saved in MindRoom, for a control of its own such as a menu's
+ * entry: the panel says that it was removed (`RemovedTokenNote`), and its owner that it failed.
+ */
+export function useServerTokenRemoval() {
+  return useRemoval(useContext(RemovedTokenContext) ?? NO_REMOVAL);
+}
+
 function RemoveButton({
   note,
   onRemoved,
@@ -610,28 +647,10 @@ function RemoveButton({
   onRemoved?: (done: boolean) => void;
 }) {
   const t = usePluginTranslation('pull-requests');
-  const { via, connection, appConnected, unreadable } = useGitHubAccess();
-  const serverToken = useServerToken();
-  const [failed, setFailed] = useState(false);
+  const { shown, appConnected, writing, failed, remove } = useRemoval(note);
   const fallsBack = useId();
   const button = useRef<HTMLButtonElement>(null);
-  // Also the token MindRoom cannot read, which removing there mends.
-  const shown =
-    ((via === 'server' && connection === 'token') || unreadable) && serverToken !== undefined;
   if (!shown) return null;
-  const remove = async () => {
-    if (serverToken.busy()) return;
-    setFailed(false);
-    note.setRemoved(undefined);
-    const done = await serverToken.remove();
-    setFailed(!done);
-    // The focus follows from the button, or from where it fell once the button went, but not
-    // from where the person moved it meanwhile.
-    const active = document.activeElement;
-    const focus = [null, document.body, button.current, note.placed.current].includes(active);
-    note.setRemoved(done ? { origin: serverToken.origin, focus } : undefined);
-    onRemoved?.(done);
-  };
   return (
     <>
       <button
@@ -639,9 +658,13 @@ function RemoveButton({
         type="button"
         className="mrpr-link-button"
         // Not disabled, which would take the focus from it while it is pressed.
-        aria-disabled={serverToken.writing || undefined}
+        aria-disabled={writing || undefined}
         aria-describedby={appConnected ? fallsBack : undefined}
-        onClick={() => void remove()}
+        onClick={() =>
+          void remove(button.current).then((done) => {
+            if (done !== undefined) onRemoved?.(done);
+          })
+        }
       >
         {t('token.remove')}
       </button>

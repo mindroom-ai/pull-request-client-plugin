@@ -55,11 +55,9 @@ import { clearShownPullRequest, setShownPullRequest } from './shownPullRequest';
 import { pluginRootStyle } from './theme';
 import {
   PanelTokenFormContext,
-  GitHubConnectedNote,
   GitHubServerContext,
   RemovedTokenNote,
   usePlaceFocus,
-  RemoveServerToken,
   RemovedTokenProvider,
   RoomGitHub,
   TokenForm,
@@ -384,7 +382,8 @@ function Panel({ roomId, request }: PanelProps) {
   const freshness =
     pr?.state === 'open' ? baseFreshness(behind.data, pr.mergeableState) : undefined;
   // Why the panel's token form shows: in the loaded view, for the token MindRoom cannot read, a
-  // part below that a token would let load, or Use a token instead; else as the error view says.
+  // part below that a token would let load, or Use a token in this browser; else as the error
+  // view says.
   const errorReason = useErrorTokenReason(error);
   const formReason: TokenFormReason | undefined = !ref
     ? undefined
@@ -529,7 +528,17 @@ function Panel({ roomId, request }: PanelProps) {
               </span>
             </div>
             <div className="mrpr-header-actions">
-              <HeaderActions pullRequestRef={ref} pullRequest={pr} actions={actions} />
+              <HeaderActions
+                pullRequestRef={ref}
+                pullRequest={pr}
+                actions={actions}
+                // Who the requests go as and what changes that sit in its menu, out of the way.
+                onUseToken={
+                  via === 'server' && !tokenForm.reason && !overriding
+                    ? () => setOverriding(true)
+                    : undefined
+                }
+              />
               <a className="mrpr-link" href={pr.url} target="_blank" rel="noopener noreferrer">
                 {t('openOnGitHub')}
               </a>
@@ -537,19 +546,6 @@ function Panel({ roomId, request }: PanelProps) {
                 <button className="mrpr-button" type="button" onClick={forget}>
                   {t('token.forget')}
                 </button>
-              ) : via === 'server' ? (
-                <span className="mrpr-status">
-                  <GitHubConnectedNote /> <RemoveServerToken />{' '}
-                  {tokenForm.reason || overriding ? null : (
-                    <button
-                      type="button"
-                      className="mrpr-link-button"
-                      onClick={() => setOverriding(true)}
-                    >
-                      {t('token.useToken')}
-                    </button>
-                  )}
-                </span>
               ) : null}
             </div>
           </div>

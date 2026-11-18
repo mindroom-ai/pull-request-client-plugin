@@ -931,6 +931,26 @@ describe('with the GitHub account connected in MindRoom', () => {
   const head = { ref: 'feature', sha: 'abc123', repo: { full_name: 'mindroom-ai/mindroom-chat' } };
   // GitHub, as MindRoom reaches it; the browser's own requests go to `fetchMock`.
   const github = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>();
+  type View = Awaited<ReturnType<typeof show>>;
+  // Who the requests go as, and what changes that, sit in the header's More actions menu, which
+  // the app's test setup draws as plain components: an entry is found by its text.
+  const toggleMore = async (view: View) =>
+    click(await view.findByRole('button', { name: 'More actions' }));
+  /** Opens the menu, finds `status` in it, and closes it again. */
+  const signedInAs = async (view: View, status: string) => {
+    await toggleMore(view);
+    expect(await view.findByText(status)).toBeTruthy();
+    await toggleMore(view);
+    expect(view.queryByText(status)).toBeNull();
+  };
+  /** Chooses the menu's entry `name`, focused first, as a keyboard reaches it. */
+  const choose = async (view: View, name: string) => {
+    await toggleMore(view);
+    const entry = (await view.findByText(name)).closest('button');
+    if (!entry) throw new Error(`No menu entry ${name}`);
+    entry.focus();
+    await click(entry);
+  };
 
   beforeEach(() => {
     github.mockReset();
@@ -952,7 +972,9 @@ describe('with the GitHub account connected in MindRoom', () => {
     const mindroom = githubServer(github);
     roomServer.current = mindroom.server;
     const view = await show();
-    expect(await view.findByText('Signed in as octo through MindRoom (GitHub App).')).toBeTruthy();
+    await signedInAs(view, 'Signed in as octo through MindRoom');
+    // Nothing of it in the panel itself: once it works, it does not ask for attention.
+    expect(view.queryByText(/through MindRoom/)).toBeNull();
     await click(await view.findByRole('button', { name: 'Merge' }));
     await click(await view.findByRole('button', { name: 'Confirm merge?' }));
     await waitUntil(() =>
@@ -967,6 +989,43 @@ describe('with the GitHub account connected in MindRoom', () => {
     expect(fetchMock).not.toHaveBeenCalled();
     expect(mindroom.statusRequests()).toBe(1);
     expect(view.queryByRole('button', { name: 'Forget token' })).toBeNull();
+  });
+
+  it('keeps who it goes as in More actions also for a viewer who cannot write', async () => {
+    const reader = { ...repository, viewerPermission: 'READ' };
+    const mindroom = githubServer(async (url, init) =>
+      url === GRAPHQL && String(init?.body).includes('viewerPermission')
+        ? respond({ data: { repository: reader } })
+        : github(url, init)
+    );
+    roomServer.current = mindroom.server;
+    const view = await show();
+    await toggleMore(view);
+    expect(await view.findByText('Signed in as octo through MindRoom')).toBeTruthy();
+    expect(view.getByText('Use a token in this browser')).toBeTruthy();
+    expect(view.getByText('Refresh')).toBeTruthy();
+    expect(view.queryByText('Close pull request')).toBeNull();
+    expect(view.queryByRole('button', { name: 'Merge' })).toBeNull();
+  });
+
+  it('says so when MindRoom cannot remove the token chosen from the menu, and keeps it', async () => {
+    const mindroom = githubServer(withUser);
+    await saveInMindroom(mindroom);
+    const real = mindroom.server.request.getMockImplementation()!;
+    mindroom.server.request.mockImplementation(async (path, init) => {
+      if (path === '/api/github/token' && init?.method === 'DELETE') {
+        throw new MindroomServerError('Forbidden', 403, {});
+      }
+      return real(path, init);
+    });
+    roomServer.current = mindroom.server;
+    const view = await show();
+    await choose(view, 'Remove token from MindRoom');
+    expect((await view.findByRole('alert')).textContent).toBe(
+      'MindRoom could not remove the token.'
+    );
+    expect(mindroom.storedToken()).toBe('ghp_good');
+    expect(view.queryByText('Token removed from MindRoom.')).toBeNull();
   });
 
   describe('while GitHub still checks whether it merges', () => {
@@ -1121,7 +1180,7 @@ describe('with the GitHub account connected in MindRoom', () => {
       )
     );
     // A token of the person's own can do it instead, from the browser.
-    await click(view.getByRole('button', { name: 'Use a token instead' }));
+    await choose(view, 'Use a token in this browser');
     const field = view.getByLabelText('GitHub token');
     expect(document.activeElement).toBe(field);
     fetchMock.mockImplementation(github);
@@ -1136,7 +1195,9 @@ describe('with the GitHub account connected in MindRoom', () => {
     await click(view.getByRole('button', { name: 'Save' }));
     await waitUntil(() => expect(view.getByRole('button', { name: 'Forget token' })).toBeTruthy());
     expect(view.queryByText(/through MindRoom/)).toBeNull();
-    expect(view.queryByRole('button', { name: 'Use a token instead' })).toBeNull();
+    await toggleMore(view);
+    expect(view.queryByText(/through MindRoom/)).toBeNull();
+    expect(view.queryByText('Use a token in this browser')).toBeNull();
     await waitUntil(() => expect(fetchMock).toHaveBeenCalled());
     const [, init] = fetchMock.mock.calls.at(-1)!;
     expect(new Headers(init?.headers).get('authorization')).toBe('Bearer ghp_mine');
@@ -1146,12 +1207,13 @@ describe('with the GitHub account connected in MindRoom', () => {
     const mindroom = githubServer(github);
     roomServer.current = mindroom.server;
     const view = await show();
-    await click(await view.findByRole('button', { name: 'Use a token instead' }));
+    await choose(view, 'Use a token in this browser');
     expect(view.getByLabelText('GitHub token')).toBeTruthy();
     await click(view.getByRole('button', { name: 'Cancel' }));
     expect(view.queryByLabelText('GitHub token')).toBeNull();
-    expect(view.getByRole('button', { name: 'Use a token instead' })).toBeTruthy();
-    expect(view.getByText(/through MindRoom/)).toBeTruthy();
+    await toggleMore(view);
+    expect(view.getByText('Use a token in this browser')).toBeTruthy();
+    expect(view.getByText('Signed in as octo through MindRoom')).toBeTruthy();
   });
 
   it('says MindRoom must connect GitHub again when GitHub refuses its account', async () => {
@@ -1268,15 +1330,15 @@ describe('with the GitHub account connected in MindRoom', () => {
     const mindroom = githubServer(withUser);
     roomServer.current = mindroom.server;
     const view = await show();
-    await click(await view.findByRole('button', { name: 'Use a token instead' }));
+    await choose(view, 'Use a token in this browser');
     await type(view.getByLabelText('GitHub token'), 'ghp_good');
     await click(view.getByLabelText('Save in MindRoom at mindroom.example.org'));
     view.getByRole('button', { name: 'Save' }).focus();
     await click(view.getByRole('button', { name: 'Save' }));
-    expect(await view.findByText('Signed in as pat-login through MindRoom (token).')).toBeTruthy();
-    expect(view.queryByLabelText('GitHub token')).toBeNull();
+    await waitUntil(() => expect(view.queryByLabelText('GitHub token')).toBeNull());
     // The focus goes from Save, gone with the form, to the pull request's title.
     await waitUntil(() => expect(document.activeElement?.className).toBe('mrpr-panel-title'));
+    await signedInAs(view, 'Signed in as pat-login through MindRoom');
     expect(mindroom.storedToken()).toBe('ghp_good');
     expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
     expect(document.body.innerHTML).not.toContain('ghp_good');
@@ -1296,7 +1358,7 @@ describe('with the GitHub account connected in MindRoom', () => {
     const mindroom = githubServer(withUser);
     roomServer.current = mindroom.server;
     const view = await show();
-    await click(await view.findByRole('button', { name: 'Use a token instead' }));
+    await choose(view, 'Use a token in this browser');
     await type(view.getByLabelText('GitHub token'), 'ghp_refused');
     await click(view.getByLabelText('Save in MindRoom at mindroom.example.org'));
     await click(view.getByRole('button', { name: 'Save' }));
@@ -1304,7 +1366,8 @@ describe('with the GitHub account connected in MindRoom', () => {
       expect(view.getByRole('alert').textContent).toBe('GitHub refused this token.')
     );
     expect((view.getByLabelText('GitHub token') as HTMLInputElement).value).toBe('ghp_refused');
-    expect(view.getByText('Signed in as octo through MindRoom (GitHub App).')).toBeTruthy();
+    // The form opened for it says whose connection the token replaces.
+    expect(view.getByText(/^Signed in as octo through MindRoom \(GitHub App\)\./)).toBeTruthy();
   });
 
   it('shows the error, not what the removed token read, once the App cannot read the pull request', async () => {
@@ -1317,19 +1380,17 @@ describe('with the GitHub account connected in MindRoom', () => {
     await saveInMindroom(mindroom);
     roomServer.current = mindroom.server;
     const view = await show();
-    const title = (await view.findByText('Signed in as pat-login through MindRoom (token).'))
-      .closest('.mrpr-panel')
-      ?.querySelector('.mrpr-panel-title')?.textContent;
+    await signedInAs(view, 'Signed in as pat-login through MindRoom');
+    const title = view.container.querySelector('.mrpr-panel-title')?.textContent;
     expect(title).toBeTruthy();
-    view.getByRole('button', { name: 'Remove token from MindRoom' }).focus();
-    await click(view.getByRole('button', { name: 'Remove token from MindRoom' }));
+    await choose(view, 'Remove token from MindRoom');
     expect(
       await view.findByText(
         'GitHub did not find this pull request. The GitHub App connected in MindRoom may not be installed on this repository.'
       )
     ).toBeTruthy();
     expect(view.queryByText(title as string)).toBeNull();
-    // The focus goes from the button, gone with the header, to what says the token is removed.
+    // The focus goes from the entry, gone with the menu, to what says the token is removed.
     expect(view.getByLabelText('GitHub token')).toBeTruthy();
     await waitUntil(() =>
       expect(document.activeElement).toBe(view.getByText('Token removed from MindRoom.'))
@@ -1344,9 +1405,8 @@ describe('with the GitHub account connected in MindRoom', () => {
     fetchMock.mockImplementation(async () => respond({ message: 'Not Found' }, 404));
     roomServer.current = mindroom.server;
     const view = await show();
-    expect(await view.findByText('Signed in as pat-login through MindRoom (token).')).toBeTruthy();
-    view.getByRole('button', { name: 'Remove token from MindRoom' }).focus();
-    await click(view.getByRole('button', { name: 'Remove token from MindRoom' }));
+    await signedInAs(view, 'Signed in as pat-login through MindRoom');
+    await choose(view, 'Remove token from MindRoom');
     await waitUntil(() => expect(fetchMock).toHaveBeenCalled());
     expect(await view.findByText(/GitHub did not find this pull request/)).toBeTruthy();
     const note = view.getByText('Token removed from MindRoom.');
@@ -1356,7 +1416,7 @@ describe('with the GitHub account connected in MindRoom', () => {
     await type(view.getByLabelText('GitHub token'), 'ghp_good');
     await click(view.getByLabelText('Save in MindRoom at mindroom.example.org'));
     await click(view.getByRole('button', { name: 'Save' }));
-    expect(await view.findByText('Signed in as pat-login through MindRoom (token).')).toBeTruthy();
+    await signedInAs(view, 'Signed in as pat-login through MindRoom');
     expect(view.queryByText('Token removed from MindRoom.')).toBeNull();
   });
 
@@ -1372,9 +1432,7 @@ describe('with the GitHub account connected in MindRoom', () => {
     });
     roomServer.current = mindroom.server;
     const view = await show();
-    const remove = await view.findByRole('button', { name: 'Remove token from MindRoom' });
-    remove.focus();
-    await click(remove);
+    await choose(view, 'Remove token from MindRoom');
     const elsewhere = document.body.appendChild(document.createElement('button'));
     try {
       elsewhere.focus();
@@ -1400,16 +1458,18 @@ describe('with the GitHub account connected in MindRoom', () => {
     roomServer.current = mindroom.server;
     const view = await show();
     // Saved from the form opened for it, which goes: the panel puts the focus on the title.
-    await click(await view.findByRole('button', { name: 'Use a token instead' }));
+    await choose(view, 'Use a token in this browser');
     await type(view.getByLabelText('GitHub token'), 'ghp_good');
     await click(view.getByLabelText('Save in MindRoom at mindroom.example.org'));
     view.getByRole('button', { name: 'Save' }).focus();
     await click(view.getByRole('button', { name: 'Save' }));
     const title = () => view.container.querySelector<HTMLElement>('.mrpr-panel-title');
     await waitUntil(() => expect(document.activeElement).toBe(title()));
-    const remove = await view.findByRole('button', { name: 'Remove token from MindRoom' });
-    remove.focus();
-    await click(remove);
+    await choose(view, 'Remove token from MindRoom');
+    // The entry went with the menu, and the panel put the focus on the title in its place; the
+    // person moves it on, and back.
+    await waitUntil(() => expect(document.activeElement).toBe(title()));
+    view.getByRole('button', { name: 'More actions' }).focus();
     title()?.focus();
     await act(async () => proceed());
     await view.findByText('Token removed from MindRoom.');
@@ -1423,9 +1483,7 @@ describe('with the GitHub account connected in MindRoom', () => {
     fetchMock.mockImplementation(async () => respond({ message: 'Not Found' }, 404));
     roomServer.current = mindroom.server;
     const view = await show();
-    const remove = await view.findByRole('button', { name: 'Remove token from MindRoom' });
-    remove.focus();
-    await click(remove);
+    await choose(view, 'Remove token from MindRoom');
     const note = await view.findByText('Token removed from MindRoom.');
     await waitUntil(() => expect(document.activeElement).toBe(note));
     await type(view.getByLabelText('GitHub token'), 'ghp_bad');
@@ -1458,7 +1516,7 @@ describe('with the GitHub account connected in MindRoom', () => {
     await type(view.getByLabelText('GitHub token'), 'ghp_good');
     await click(inMindroom);
     await click(view.getByRole('button', { name: 'Save' }));
-    expect(await view.findByText('Signed in as pat-login through MindRoom (token).')).toBeTruthy();
+    await signedInAs(view, 'Signed in as pat-login through MindRoom');
     expect(view.queryByText(UNREADABLE)).toBeNull();
     expect(view.queryByLabelText('GitHub token')).toBeNull();
   });
@@ -1742,7 +1800,7 @@ describe('with the GitHub account connected in MindRoom', () => {
       });
       roomServer.current = mindroom.server;
       const view = await show();
-      await click(await view.findByRole('button', { name: 'Use a token instead' }));
+      await choose(view, 'Use a token in this browser');
       await saveBad(view, 'ghp_good');
       const failed = 'MindRoom could not save the token. Try again.';
       expect(await view.findByText(failed)).toBeTruthy();
@@ -1855,7 +1913,7 @@ describe('with the GitHub account connected in MindRoom', () => {
     await saveInMindroom(mindroom);
     roomServer.current = mindroom.server;
     const view = await show();
-    expect(await view.findByText('Signed in as pat-login through MindRoom (token).')).toBeTruthy();
+    await signedInAs(view, 'Signed in as pat-login through MindRoom');
     mindroom.unreadable(true);
     await click(await view.findByRole('button', { name: 'Merge' }));
     await click(await view.findByRole('button', { name: 'Confirm merge?' }));
@@ -1884,11 +1942,21 @@ describe('with the GitHub account connected in MindRoom', () => {
     await saveInMindroom(mindroom);
     roomServer.current = mindroom.server;
     const view = await show();
-    expect(await view.findByText('Signed in as pat-login through MindRoom (token).')).toBeTruthy();
-    await click(view.getByRole('button', { name: 'Remove token from MindRoom' }));
-    expect(await view.findByText('Signed in as octo through MindRoom (GitHub App).')).toBeTruthy();
-    expect(view.queryByRole('button', { name: 'Remove token from MindRoom' })).toBeNull();
-    expect(mindroom.storedToken()).toBeUndefined();
+    await toggleMore(view);
+    expect(await view.findByText('Signed in as pat-login through MindRoom')).toBeTruthy();
+    // What removing it changes, under the entry.
+    expect(view.getByText('Then MindRoom uses your GitHub App connection.')).toBeTruthy();
+    const entry = view.getByText('Remove token from MindRoom').closest('button')!;
+    entry.focus();
+    await click(entry);
+    await waitUntil(() => expect(mindroom.storedToken()).toBeUndefined());
+    // Said at the panel's top, and focused: the entry went with the menu.
+    await waitUntil(() =>
+      expect(document.activeElement).toBe(view.getByText('Token removed from MindRoom.'))
+    );
+    await toggleMore(view);
+    expect(await view.findByText('Signed in as octo through MindRoom')).toBeTruthy();
+    expect(view.queryByText('Remove token from MindRoom')).toBeNull();
   });
 
   it.each([
@@ -1911,15 +1979,13 @@ describe('with the GitHub account connected in MindRoom', () => {
       expect(await view.findByText(said)).toBeTruthy();
       view.getByRole('button', { name: 'Remove token from MindRoom' }).focus();
       await click(view.getByRole('button', { name: 'Remove token from MindRoom' }));
-      expect(
-        await view.findByText('Signed in as octo through MindRoom (GitHub App).')
-      ).toBeTruthy();
-      expect(view.queryByText(said)).toBeNull();
       // The focus goes from the button, gone with the error, to what says the token is removed.
       await waitUntil(() =>
         expect(document.activeElement).toBe(view.getByText('Token removed from MindRoom.'))
       );
+      expect(view.queryByText(said)).toBeNull();
       expect(mindroom.storedToken()).toBeUndefined();
+      await signedInAs(view, 'Signed in as octo through MindRoom');
     }
   );
 

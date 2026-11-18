@@ -405,8 +405,12 @@ export const en = {
     removeFailed: 'MindRoom could not remove the token.',
     removed: 'Token removed from MindRoom.',
     overrides: 'A token saved here is used instead.',
-    useToken: 'Use a token instead',
-    // Closes the form opened by Use a token instead, keeping MindRoom's connection.
+    // In the header's More actions menu, while the requests go through MindRoom: who they go as,
+    // then the entry that opens the form to use a token from this browser instead.
+    menuStatus: 'Signed in as {{login}} through MindRoom',
+    menuStatusNoLogin: 'Signed in through MindRoom',
+    useToken: 'Use a token in this browser',
+    // Closes the form opened by Use a token in this browser, keeping MindRoom's connection.
     cancel: 'Cancel',
   },
 };

@@ -2,6 +2,8 @@
 // The header's actions on a pull request: its one primary control, the menu of the rest, the
 // dialog that asks before a branch is deleted, and the line under the header that says what runs
 // and what came of it. A viewer who cannot write to the repository, or has no token, sees none.
+// While the requests go through MindRoom, the menu also says as whom and holds what changes that
+// (a token in this browser instead, removing the token saved there), for writers or not.
 import { useEffect, useId, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import FocusTrap from 'focus-trap-react';
 import {
@@ -40,7 +42,7 @@ import {
   useMergeableRecheck,
 } from '../queries';
 import { pluginRootStyle } from '../theme';
-import { useGitHubAccess } from '../token';
+import { useGitHubAccess, useServerTokenRemoval } from '../token';
 import { mayDeleteBranch, menuActions, primaryControl, showsOutcome } from './actions.logic';
 import { useInlineConfirm } from './useInlineConfirm';
 import type { ActionResult, usePullRequestActions } from './usePullRequestActions';
@@ -90,14 +92,21 @@ export function HeaderActions({
   pullRequestRef,
   pullRequest: pr,
   actions,
+  onUseToken,
 }: {
   pullRequestRef: PullRequestRef;
   pullRequest: PullRequest;
   actions: Actions;
+  /** Opens the panel's form to use a token in this browser; without it the menu does not offer it. */
+  onUseToken?: () => void;
 }) {
   const t = usePluginTranslation('pull-requests');
   const { repo, method, chooseMethod, pending, result, perform, dismissResult } = actions;
   const canWrite = repo?.canWrite === true;
+  const { via, login } = useGitHubAccess();
+  const signedIn = via === 'server';
+  const removal = useServerTokenRemoval();
+  const statusId = useId();
   // The same query as the checks line, so it costs no request of its own where that one shows.
   const checks = useChecks(pullRequestRef, pr.headSha, canWrite);
   // While GitHub still computes whether it merges, the pull request is read again for that.
@@ -145,25 +154,29 @@ export function HeaderActions({
     }
   }, [busy]);
 
-  if (!repo || !canWrite) return null;
+  const writable = canWrite ? repo : undefined;
+  if (!writable && !signedIn) return null;
 
   // The two controls that can have the focus when an action starts stay focusable while it
   // runs: `disabled` would drop the focus to the page, so they are off by ARIA and ignore the
   // click instead.
   const off = busy ? { 'aria-disabled': true } : undefined;
-  const primary = primaryControl(
-    pr,
-    repo,
-    checks.data ? checksState(checks.data.items) : undefined,
-    checking
-  );
-  const listed = menuActions(pr, repo, primary, headBranch.data);
+  const primary =
+    writable &&
+    primaryControl(
+      pr,
+      writable,
+      checks.data ? checksState(checks.data.items) : undefined,
+      checking
+    );
+  const listed = writable && primary ? menuActions(pr, writable, primary, headBranch.data) : [];
+  const methods = writable?.mergeMethods ?? [];
   const showsMethods =
     pr.state === 'open' &&
     !pr.draft &&
     primary !== 'conflicts' &&
     primary !== 'checking' &&
-    repo.mergeMethods.length > 1;
+    methods.length > 1;
   // The action the primary control starts, which shows that it runs itself.
   const primaryAction: PullRequestAction | null =
     primary === 'merge' || primary === 'enable-auto-merge' || primary === 'ready' ? primary : null;
@@ -341,7 +354,7 @@ export function HeaderActions({
                         aria-label={t('actions.methodGroup')}
                         className="mrpr-menu-radio-group"
                       >
-                        {repo.mergeMethods.map((option) => (
+                        {methods.map((option) => (
                           <MenuEntry
                             key={option}
                             role="menuitemradio"
@@ -378,18 +391,67 @@ export function HeaderActions({
                     onSelect={() => choose(refresh)}
                   />
                 </MenuGroup>
+                {signedIn ? (
+                  <>
+                    <Line variant="Surface" size="300" />
+                    <MenuGroup>
+                      {/* Who the requests go as, which only labels the entries that change it. */}
+                      <div role="group" aria-labelledby={statusId} className="mrpr-menu-account">
+                        <p id={statusId} className="mrpr-menu-status">
+                          {login ? t('token.menuStatus', { login }) : t('token.menuStatusNoLogin')}
+                        </p>
+                        {onUseToken ? (
+                          <MenuEntry
+                            role="menuitem"
+                            label={t('token.useToken')}
+                            icon={Icons.Lock}
+                            onSelect={() => {
+                              // The form takes the focus once it shows.
+                              setAnchor(undefined);
+                              onUseToken();
+                            }}
+                          />
+                        ) : null}
+                        {removal.shown ? (
+                          <MenuEntry
+                            role="menuitem"
+                            label={t('token.remove')}
+                            icon={Icons.Delete}
+                            critical
+                            description={
+                              removal.appConnected ? t('token.removeFallsBack') : undefined
+                            }
+                            disabled={removal.writing}
+                            onSelect={() => {
+                              // The entry goes with the menu: the panel's note takes the focus.
+                              setAnchor(undefined);
+                              void removal.remove(null);
+                            }}
+                          />
+                        ) : null}
+                      </div>
+                    </MenuGroup>
+                  </>
+                ) : null}
               </div>
             </Menu>
           </FocusTrap>
         }
       />
-      <ResultLine
-        pending={pending}
-        pendingShown={pending !== primaryAction}
-        result={result}
-        resultAnnounced={isOnlyAnnounced(result, pr)}
-        onDismiss={dismissResult}
-      />
+      {removal.failed ? (
+        <span role="alert" className="mrpr-status">
+          {t('token.removeFailed')}
+        </span>
+      ) : null}
+      {writable ? (
+        <ResultLine
+          pending={pending}
+          pendingShown={pending !== primaryAction}
+          result={result}
+          resultAnnounced={isOnlyAnnounced(result, pr)}
+          onDismiss={dismissResult}
+        />
+      ) : null}
       {deleting === url ? (
         <DeleteBranchDialog
           branch={pr.headRef}
