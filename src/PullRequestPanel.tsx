@@ -345,6 +345,15 @@ function Panel({ roomId, request }: PanelProps) {
   // The commit the Code tab shows, chosen there or from the Timeline. It belongs to the pull
   // request it was chosen in: another one opens on All commits.
   const pullRequestKey = ref ? pullRequestUrl(ref) : '';
+  // What GitHub answered last, shown while the pull request is read again: a read again from an
+  // error forgets it, and its view, the token form with what was typed among it, would go.
+  const lastError = useRef<{ key: string; error: unknown }>();
+  if (query.isError) lastError.current = { key: pullRequestKey, error: query.error };
+  const error = query.isError
+    ? query.error
+    : query.isFetching && lastError.current?.key === pullRequestKey
+    ? lastError.current.error
+    : undefined;
   const [commitScope, setCommitScope] = useState<{ pullRequestKey: string; sha?: string }>({
     pullRequestKey,
   });
@@ -379,11 +388,17 @@ function Panel({ roomId, request }: PanelProps) {
         <p className="mrpr-status mrpr-panel-note">{t('emptyPanel')}</p>
       ) : !pr || !state ? (
         <div className="mrpr-panel-note">
-          {query.isError ? (
-            <GitHubErrorState error={query.error} onRetry={() => void query.refetch()} />
-          ) : (
+          {error === undefined ? (
             <p className="mrpr-status">{t('loading')}</p>
+          ) : (
+            <GitHubErrorState
+              error={error}
+              onRetry={() => void query.refetch()}
+              tokenForm={false}
+            />
           )}
+          {/* Its own place, so that it stays while the pull request loads, fails and loads. */}
+          {unreadable ? <TokenForm reason="unreadable" /> : null}
         </div>
       ) : (
         <PanelTokenFormContext.Provider value={tokenForm.context}>

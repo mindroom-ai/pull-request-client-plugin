@@ -36,10 +36,13 @@ export function GitHubErrorState({
   error,
   onRetry,
   compact = false,
+  tokenForm = true,
 }: {
   error: unknown;
   onRetry: () => void;
   compact?: boolean;
+  /** Without its own token form for the token MindRoom cannot read: the panel shows that one. */
+  tokenForm?: boolean;
 }) {
   const t = usePluginTranslation('pull-requests');
   const { token, forget } = useGitHubToken();
@@ -75,23 +78,19 @@ export function GitHubErrorState({
       </div>
     );
   }
-  // What GitHub answered without it says little: the token MindRoom cannot read is what to mend,
-  // and asking again would get the same.
-  if (unreadable) {
-    return (
-      <div>
-        <TokenForm reason="unreadable" />
-      </div>
-    );
-  }
+  // The token MindRoom cannot read is what to mend, beside a read that failed of itself, which
+  // may work again; any other answer without it says little, and asking again gets the same.
+  const mend = unreadable && tokenForm ? <TokenForm reason="unreadable" /> : null;
   if (kind === 'failed') {
     return (
       <div>
         <p className="mrpr-status">{message}</p>
         {retry}
+        {mend}
       </div>
     );
   }
+  if (unreadable) return mend && <div>{mend}</div>;
   // MindRoom's connection has a token's limit: another token would not raise it.
   if (kind === 'rateLimited' && via !== undefined) {
     return (

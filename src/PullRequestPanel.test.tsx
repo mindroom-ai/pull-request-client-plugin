@@ -1394,6 +1394,63 @@ describe('with the GitHub account connected in MindRoom', () => {
     expect(view.queryByLabelText('GitHub token')).toBeNull();
   });
 
+  it('offers to mend the token MindRoom cannot read while the pull request still loads without it', async () => {
+    const mindroom = githubServer(withUser);
+    await saveInMindroom(mindroom);
+    mindroom.unreadable(true);
+    let release!: (value: Response) => void;
+    fetchMock.mockReturnValue(new Promise<Response>((resolve) => (release = resolve)));
+    roomServer.current = mindroom.server;
+    const view = await show();
+    await waitUntil(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(await view.findByText(UNREADABLE)).toBeTruthy();
+    expect(view.getByText('Loading pull request')).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Remove token from MindRoom' })).toBeTruthy();
+    // The form stays as the read ends, with what was typed in it.
+    await type(view.getByLabelText('GitHub token'), 'ghp_typed');
+    await act(async () => release(respond({ message: 'Not Found' }, 404)));
+    await waitUntil(() => expect(view.queryByText('Loading pull request')).toBeNull());
+    expect((view.getByLabelText('GitHub token') as HTMLInputElement).value).toBe('ghp_typed');
+    expect(view.getAllByLabelText('GitHub token')).toHaveLength(1);
+  });
+
+  it.each([
+    ['MindRoom cannot read the token saved there', true],
+    ['GitHub hides the pull request', false],
+  ])(
+    'keeps the form, and what was typed, when MindRoom refuses a new token while %s',
+    async (_, unreadable) => {
+      const mindroom = githubServer(withUser);
+      if (unreadable) await saveInMindroom(mindroom);
+      mindroom.connected(false);
+      mindroom.unreadable(unreadable);
+      fetchMock.mockImplementation(async () => respond({ message: 'Not Found' }, 404));
+      roomServer.current = mindroom.server;
+      const view = await show();
+      await view.findByLabelText('GitHub token');
+      await type(view.getByLabelText('GitHub token'), 'ghp_bad');
+      await click(view.getByLabelText('Save in MindRoom at mindroom.example.org'));
+      await click(view.getByRole('button', { name: 'Save' }));
+      expect(await view.findByText('GitHub refused this token.')).toBeTruthy();
+      expect((view.getByLabelText('GitHub token') as HTMLInputElement).value).toBe('ghp_bad');
+    }
+  );
+
+  it('keeps a failed read, its message and Try again, beside the token MindRoom cannot read', async () => {
+    const mindroom = githubServer(withUser);
+    await saveInMindroom(mindroom);
+    mindroom.unreadable(true);
+    fetchMock.mockImplementation(async () => respond({ message: 'Server Error' }, 500));
+    roomServer.current = mindroom.server;
+    const view = await show();
+    // After the two tries again a failed read gets.
+    const failed = await view.findByText('GitHub answered with status 500.', {}, { timeout: 5000 });
+    expect(failed).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Try again' })).toBeTruthy();
+    expect(view.getByText(UNREADABLE)).toBeTruthy();
+    expect(view.getAllByLabelText('GitHub token')).toHaveLength(1);
+  });
+
   it('offers to remove the token MindRoom cannot read where the pull request does not read without it', async () => {
     const mindroom = githubServer(withUser);
     await saveInMindroom(mindroom);
