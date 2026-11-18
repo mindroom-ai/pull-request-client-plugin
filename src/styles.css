@@ -1387,12 +1387,17 @@
   min-block-size: 24px;
   color: var(--pr-muted);
 }
+/* As tall as its label at least, centred the same way, so a one-line value sits on its line. */
 .mrpr-meta-row-value {
   display: flex;
   min-inline-size: 0;
+  min-block-size: 24px;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
+}
+.mrpr-meta-row-value .mrpr-status {
+  margin: 0;
 }
 .mrpr-reviewers,
 .mrpr-labels {
