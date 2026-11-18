@@ -12,4 +12,15 @@ describe('pluginRootStyle', () => {
       '--pr-draft': '#848d97',
     });
   });
+
+  it("gives a highlighted row the theme's primary container, its line and its text", () => {
+    const style = pluginRootStyle() as Record<string, unknown>;
+    for (const name of [
+      '--pr-primary-container',
+      '--pr-primary-container-line',
+      '--pr-on-primary-container',
+    ]) {
+      expect(style[name]).toMatch(/^var\(--/);
+    }
+  });
 });

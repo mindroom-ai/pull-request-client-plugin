@@ -1006,6 +1006,37 @@ test("the open thread's pull requests are one button in its banner, whose menu l
   await expectMenuInWindow(page);
   await shotBothThemes(page, 'menu-open');
 
+  // The pointer on an item highlights it, in a fill and a rim the menu's surface does not have.
+  await items.nth(1).hover();
+  for (const scheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme: scheme });
+    await expect(page.locator('html')).toHaveAttribute('data-theme-kind', scheme);
+    const look = await items.nth(1).evaluate((item) => {
+      const menu = item.closest('[role="menu"]') as HTMLElement;
+      // The plain hover tint the items had before, for comparison.
+      const probe = document.createElement('div');
+      probe.style.background = 'var(--pr-hover)';
+      item.parentElement?.append(probe);
+      const plain = getComputedStyle(probe).backgroundColor;
+      probe.remove();
+      const style = getComputedStyle(item);
+      return {
+        menu: getComputedStyle(menu).backgroundColor,
+        plain,
+        hovered: style.backgroundColor,
+        rim: style.borderColor,
+        title: getComputedStyle(item.querySelector('.mrpr-details-title')!).color,
+      };
+    });
+    console.log(`[prmenu] hover ${scheme} ${JSON.stringify(look)}`);
+    expect(look.hovered).not.toBe(look.menu);
+    expect(look.hovered).not.toBe('rgba(0, 0, 0, 0)');
+    expect(look.rim).not.toBe('rgba(0, 0, 0, 0)');
+    await shot(page, `menu-hover-${scheme}`, { keepPointer: true });
+  }
+  await page.emulateMedia({ colorScheme: 'light' });
+  await expect(page.locator('html')).toHaveAttribute('data-theme-kind', 'light');
+
   // The arrow keys move between its items; Escape closes it and gives the button the focus.
   await page.keyboard.press('ArrowDown');
   await expect(items.nth(0)).toBeFocused();
