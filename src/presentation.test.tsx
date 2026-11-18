@@ -3,6 +3,7 @@ import { renderPluginComponent } from '@mindroom/client-sdk/testing';
 import { describe, expect, it } from 'vitest';
 import plugin from './index';
 import {
+  combinedPullRequestState,
   PullRequestDiffStat,
   resolvePullRequestState,
   PullRequestActorLabel,
@@ -32,6 +33,27 @@ describe('resolvePullRequestState', () => {
   });
   it('names a merged pull request, draft or not', () => {
     expect(resolvePullRequestState({ state: 'merged', draft: true }).label).toBe('Merged');
+  });
+});
+
+describe('combinedPullRequestState', () => {
+  // T3 Code's thread badge: all draft is draft, any open is open, all merged is merged, else closed.
+  it.each([
+    [['open', 'open'], 'open'],
+    [['open', 'merged'], 'open'],
+    [['draft', 'draft'], 'draft'],
+    [['draft', 'merged'], 'open'],
+    [['draft', 'open'], 'open'],
+    [['merged', 'merged'], 'merged'],
+    [['merged', 'closed'], 'closed'],
+    [['closed', 'closed'], 'closed'],
+    [['open'], 'open'],
+    [['draft'], 'draft'],
+    [['merged'], 'merged'],
+    [['closed'], 'closed'],
+    [[], undefined],
+  ] as const)('%j is %s', (states, expected) => {
+    expect(combinedPullRequestState(states)).toBe(expected);
   });
 });
 
