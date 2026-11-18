@@ -1606,6 +1606,62 @@ describe('with the GitHub account connected in MindRoom', () => {
       expect(view.queryByLabelText('GitHub token')).toBeNull();
     });
 
+    const panelFor = (number: number) => (
+      <QueryClientProvider client={client}>
+        <PullRequestPanel roomId="!room:example.org" request={{ ...REQUEST, number }} />
+      </QueryClientProvider>
+    );
+
+    it("a removal finishing for an earlier pull request leaves this one's form", async () => {
+      const mindroom = githubServer(withUser);
+      await saveInMindroom(mindroom);
+      mindroom.connected(false);
+      mindroom.unreadable(true);
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => (release = resolve));
+      const real = mindroom.server.request.getMockImplementation()!;
+      mindroom.server.request.mockImplementation(async (path, init) => {
+        if (path === '/api/github/token' && init?.method === 'DELETE') await held;
+        return real(path, init);
+      });
+      roomServer.current = mindroom.server;
+      const view = await show();
+      try {
+        await click(await view.findByRole('button', { name: 'Remove token from MindRoom' }));
+        view.rerender(panelFor(201));
+        const input = (await view.findByLabelText('GitHub token')) as HTMLInputElement;
+        await type(input, 'ghp_draft');
+        await act(async () => release());
+        await view.findByText('Token removed from MindRoom.');
+        expect(view.getByLabelText('GitHub token')).toBe(input);
+        expect(input.value).toBe('ghp_draft');
+      } finally {
+        release();
+      }
+    });
+
+    it('releases the form when the pull request changes, even to one without a reason', async () => {
+      roomServer.current = githubServer(withUser, { connected: false }).server;
+      fetchMock.mockImplementation(async () => respond({}, 404));
+      const view = await show();
+      await view.findByLabelText('GitHub token');
+      const key = ['pull-requests', 'pr', 'mindroom-ai', 'mindroom-chat', 200, false];
+      fetchMock.mockImplementation(async (url) =>
+        /\/pulls\/\d+$/.test(url) ? respond(pull()) : respond([])
+      );
+      await act(async () => void client.refetchQueries({ queryKey: key, exact: true }));
+      await view.findByText('Add pull request cards');
+      expect(view.getByLabelText('GitHub token')).toBeTruthy();
+      view.rerender(panelFor(201));
+      await view.findByText('Add pull request cards');
+      await new Promise((r) => setTimeout(r, 50));
+      expect(view.queryByLabelText('GitHub token')).toBeNull();
+      view.rerender(panelFor(200));
+      await view.findByText('Add pull request cards');
+      await new Promise((r) => setTimeout(r, 50));
+      expect(view.queryByLabelText('GitHub token')).toBeNull();
+    });
+
     it('keeps the form a failed part asked for, and says the token was refused', async () => {
       const mindroom = githubServer(withUser);
       mindroom.connected(false);

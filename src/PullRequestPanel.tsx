@@ -393,14 +393,19 @@ function Panel({ roomId, request }: PanelProps) {
     ? 'unreadable'
     : tokenForm.reason ?? (overriding && via === 'server' ? 'override' : undefined);
   // Latched for the scope from the render it first shows in; a reason gone since leaves it
-  // without a hint (`override`).
+  // without a hint (`override`). Each latch is its own value: one of another scope is released,
+  // and only the form shown for this latch may close it.
   const formScope = `${serverOrigin} ${pullRequestKey}`;
-  const [latched, setLatched] = useState<string>();
-  if (formReason && latched !== formScope) setLatched(formScope);
-  const shownReason = formReason ?? (latched === formScope ? 'override' : undefined);
-  const closeForm = () => {
+  const [latch, setLatch] = useState<{ scope: string }>();
+  const held = latch?.scope === formScope ? latch : undefined;
+  if (!held && (latch || formReason)) setLatch(formReason ? { scope: formScope } : undefined);
+  const shownReason = formReason ?? (held ? 'override' : undefined);
+  const currentLatch = useRef(held);
+  currentLatch.current = held;
+  const closeForm = (mine: typeof held) => () => {
+    if (currentLatch.current !== mine) return;
     setOverriding(false);
-    setLatched(undefined);
+    setLatch(undefined);
   };
   const forkOwner =
     pr?.headRepo && pr.headRepo !== pr.baseRepo ? pr.headRepo.split('/')[0] : undefined;
@@ -554,9 +559,11 @@ function Panel({ roomId, request }: PanelProps) {
               // Only one opened to use a token instead, or latched with nothing to show it for,
               // closes: a failure keeps the other.
               onCancel={
-                (shownReason === 'override' && overriding) || !formReason ? closeForm : undefined
+                (shownReason === 'override' && overriding) || !formReason
+                  ? closeForm(held)
+                  : undefined
               }
-              onDone={closeForm}
+              onDone={closeForm(held)}
             />
           </div>
         ) : null}
