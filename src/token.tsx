@@ -9,6 +9,7 @@ import {
   useState,
   useSyncExternalStore,
   type FormEvent,
+  type MutableRefObject,
   type ReactNode,
   type Ref,
 } from 'react';
@@ -378,21 +379,38 @@ export function RemoveServerToken() {
   const serverToken = useServerToken();
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [removed, setRemoved] = useState(false);
   const fallsBack = useId();
-  if (via !== 'server' || connection !== 'token' || !serverToken) return null;
+  const said = useRef<HTMLSpanElement>(null);
+  const shown = via === 'server' && connection === 'token' && serverToken !== undefined;
+  // The button goes once the token is removed: focus goes to what says so, not to the page.
+  useEffect(() => {
+    if (removed && !shown) said.current?.focus();
+  }, [removed, shown]);
+  if (!shown) {
+    return removed ? (
+      <span ref={said} tabIndex={-1}>
+        {t('token.removed')}
+      </span>
+    ) : null;
+  }
   const remove = async () => {
+    if (busy) return;
     setBusy(true);
     setFailed(false);
-    const removed = await serverToken.remove();
+    setRemoved(false);
+    const done = await serverToken.remove();
     setBusy(false);
-    setFailed(!removed);
+    setFailed(!done);
+    setRemoved(done);
   };
   return (
     <>
       <button
         type="button"
         className="mrpr-link-button"
-        disabled={busy}
+        // Not disabled, which would take the focus from it while it is pressed.
+        aria-disabled={busy || undefined}
         aria-describedby={appConnected ? fallsBack : undefined}
         onClick={() => void remove()}
       >
@@ -537,6 +555,15 @@ export function TokenForm({
   if (chosen !== undefined && chosen !== serverToken?.origin) setChosen(undefined);
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState<SaveProblem>();
+  const field = useRef<HTMLInputElement | null>(null);
+  const setField = useCallback(
+    (element: HTMLInputElement | null) => {
+      field.current = element;
+      if (typeof inputRef === 'function') inputRef(element);
+      else if (inputRef) (inputRef as MutableRefObject<HTMLInputElement | null>).current = element;
+    },
+    [inputRef]
+  );
   const inMindroom = serverToken !== undefined && chosen === serverToken.origin;
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -553,8 +580,11 @@ export function TokenForm({
     const failure = await serverToken.save(trimmed);
     setSaving(false);
     setProblem(failure);
-    // The field keeps the token until MindRoom saved it, so that the person can try again.
-    if (failure !== undefined) return;
+    // The field keeps the token until MindRoom saved it, so that the person can try again there.
+    if (failure !== undefined) {
+      field.current?.focus();
+      return;
+    }
     setValue('');
     onSaved?.();
   };
@@ -568,7 +598,7 @@ export function TokenForm({
       {reason === 'override' ? null : <p className="mrpr-status">{t(`token.hint.${reason}`)}</p>}
       <div className="mrpr-token-row">
         <input
-          ref={inputRef}
+          ref={setField}
           className="mrpr-input"
           type="password"
           autoComplete="off"
@@ -576,7 +606,8 @@ export function TokenForm({
           value={value}
           onChange={(event) => setValue(event.target.value)}
         />
-        <button className="mrpr-button" type="submit" disabled={saving}>
+        {/* Not disabled while saving, which would take the focus from it. */}
+        <button className="mrpr-button" type="submit" aria-disabled={saving || undefined}>
           {t('token.save')}
         </button>
         {onCancel ? (
@@ -584,6 +615,9 @@ export function TokenForm({
             {t('token.cancel')}
           </button>
         ) : null}
+        <span className="mrpr-status" aria-live="polite">
+          {saving ? t('token.saving') : null}
+        </span>
       </div>
       {serverToken ? (
         <div className="mrpr-token-where" role="radiogroup" aria-label={t('token.where')}>

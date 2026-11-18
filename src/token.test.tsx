@@ -782,11 +782,76 @@ describe('the token saved in MindRoom', () => {
     const fallsBack = view.getByText('Then MindRoom uses your GitHub App connection.');
     expect(remove.getAttribute('aria-describedby')).toBe(fallsBack.id);
     expect(remove.title).toBe('');
+    remove.focus();
     await click(remove);
     await waitUntil(() => expect(view.getByTestId('reader').textContent).toBe('with the App'));
     expect(accesses.reader).toMatchObject({ connection: 'app', key: `server:${ORIGIN}:octo` });
     expect(mindroom.tokenRequests()).toEqual(['PUT', 'DELETE']);
     expect(mindroom.statusRequests()).toBe(1);
     expect(view.queryByRole('button', { name: 'Remove token from MindRoom' })).toBeNull();
+    // Focus goes from the button, gone now, to what says it was removed.
+    await waitUntil(() =>
+      expect(document.activeElement?.textContent).toBe('Token removed from MindRoom.')
+    );
+  });
+
+  it('says it could not remove it, and keeps the button and its focus', async () => {
+    const mindroom = githubServer(github);
+    await mindroom.server.request('/api/github/token', {
+      method: 'PUT',
+      body: JSON.stringify({ token: 'ghp_good' }),
+    });
+    answerToken(mindroom, () => Promise.reject(new MindroomServerError('Bad Gateway', 502)));
+    const view = await show(
+      mindroom.server,
+      <>
+        <RemoveServerToken />
+        <NamedReader name="reader" />
+      </>
+    );
+    await waitUntil(() => expect(accesses.reader?.connection).toBe('token'));
+    const remove = view.getByRole('button', { name: 'Remove token from MindRoom' });
+    remove.focus();
+    await click(remove);
+    await waitUntil(() =>
+      expect(view.getByRole('alert').textContent).toBe(' MindRoom could not remove the token.')
+    );
+    expect(accesses.reader?.connection).toBe('token');
+    expect(document.activeElement).toBe(remove);
+  });
+
+  it('says it is saving, keeps focus on Save meanwhile, and gives it to the field when it fails', async () => {
+    const mindroom = githubServer(github);
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const routes = mindroom.server.request.getMockImplementation()!;
+    mindroom.server.request.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/api/github/token') await held;
+      return routes(path, init);
+    });
+    const view = await form(mindroom.server);
+    await waitUntil(() => expect(accesses.reader?.connection).toBe('app'));
+    await chooseMindroom(view);
+    await type(field(view), 'ghp_refused');
+    const button = view.getByRole('button', { name: 'Save' }) as HTMLButtonElement;
+    button.focus();
+    await click(button);
+    const saying = view.getByText('Saving...');
+    expect(saying.closest('[aria-live="polite"]')).not.toBeNull();
+    expect(button.disabled).toBe(false);
+    expect(button.getAttribute('aria-disabled')).toBe('true');
+    expect(document.activeElement).toBe(button);
+    // Saved once, however often it is pressed meanwhile.
+    await click(button);
+    expect(mindroom.tokenRequests()).toEqual(['PUT']);
+    release();
+    await waitUntil(() =>
+      expect(view.getByRole('alert').textContent).toBe('GitHub refused this token.')
+    );
+    expect(view.queryByText('Saving...')).toBeNull();
+    expect(button.getAttribute('aria-disabled')).toBeNull();
+    expect(document.activeElement).toBe(field(view));
   });
 });

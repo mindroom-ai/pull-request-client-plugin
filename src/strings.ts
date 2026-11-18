@@ -367,6 +367,7 @@ export const en = {
   token: {
     label: 'GitHub token',
     save: 'Save',
+    saving: 'Saving...',
     forget: 'Forget token',
     add: 'Add a GitHub token',
     hint: {
@@ -395,6 +396,7 @@ export const en = {
     remove: 'Remove token from MindRoom',
     removeFallsBack: 'Then MindRoom uses your GitHub App connection.',
     removeFailed: 'MindRoom could not remove the token.',
+    removed: 'Token removed from MindRoom.',
     overrides: 'A token saved here is used instead.',
     useToken: 'Use a token instead',
     // Closes the form opened by Use a token instead, keeping MindRoom's connection.
