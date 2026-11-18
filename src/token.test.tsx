@@ -332,6 +332,33 @@ describe('a change of the connection', () => {
     expect(bobs.filter((title) => title !== 'read as bob')).toEqual([]);
   });
 
+  it('stays with the login a newer status named once a request sent as the one before says not connected', async () => {
+    let login = 'alice';
+    const server = serverAs(() => login, 0);
+    // Alice's read, which MindRoom answers last: she is no longer connected.
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const routes = server.request.getMockImplementation()!;
+    let first = true;
+    server.request.mockImplementation(async (path: string) => {
+      if (path === '/api/github/status' || !first) return routes(path);
+      first = false;
+      await held;
+      throw new MindroomServerError('Conflict', 409, { error: 'github_not_connected' });
+    });
+    const view = await rooms(room('served', server));
+    await waitUntil(() => expect(first).toBe(false));
+    login = 'bob';
+    await act(() => accesses.served?.recheck());
+    await waitUntil(() => expect(view.getByTestId('served').textContent).toBe('read as bob'));
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(accesses.served).toMatchObject({ via: 'server', key: keyAs('bob', 1) });
+    expect(view.getByTestId('served').textContent).toBe('read as bob');
+  });
+
   it('gives a read only the access its key names', async () => {
     const server = serverAs(() => 'alice');
     await rooms(room('served', server));
@@ -930,6 +957,108 @@ describe('the token saved in MindRoom', () => {
     });
     expect(client.getQueryData([...PULL, keyAs('bob', 1)])).toBeUndefined();
   });
+
+  // Each way the connection MindRoom names can change: what it is before, what changes it, and
+  // what it is after.
+  const changes: [string, 'app' | 'token', (run: ChangeRun) => Promise<unknown>, object][] = [
+    [
+      'a status read',
+      'app',
+      async ({ status }) => {
+        status.login = 'bob';
+        await act(() => accesses.reader?.recheck());
+      },
+      { connected: true, via: 'app', login: 'bob' },
+    ],
+    [
+      'a token saved',
+      'app',
+      async ({ view }) => {
+        await chooseMindroom(view);
+        await save(view, 'ghp_other');
+      },
+      { connected: true, via: 'token', login: 'other' },
+    ],
+    [
+      'a token removed',
+      'token',
+      ({ view }) => click(view.getByRole('button', { name: 'Remove token from MindRoom' })),
+      { connected: true, via: 'app', login: 'octo' },
+    ],
+    [
+      'a request answered that GitHub is not connected',
+      'app',
+      async ({ mindroom }) => {
+        mindroom.connected(false);
+        await act(() => client.refetchQueries({ queryKey: PULL }));
+      },
+      { connected: false },
+    ],
+  ];
+  type ChangeRun = {
+    view: Awaited<ReturnType<typeof show>>;
+    mindroom: ReturnType<typeof githubServer>;
+    status: { login: string };
+  };
+
+  it.each(changes)(
+    'ignores a status and a 409 asked before %s once that changed the connection',
+    async (_, start, change, after) => {
+      vi.stubGlobal('fetch', vi.fn(github));
+      const status = { connected: true, via: 'app', login: 'octo' };
+      const mindroom = githubServer(github, status);
+      if (start === 'token') {
+        await mindroom.server.request('/api/github/token', {
+          method: 'PUT',
+          body: JSON.stringify({ token: 'ghp_other' }),
+        });
+      }
+      const view = await show(
+        mindroom.server,
+        <>
+          <TokenForm reason="override" />
+          <RemoveServerToken />
+          <NamedReader name="reader" />
+        </>
+      );
+      await waitUntil(() => expect(accesses.reader?.connection).toBe(start));
+      await waitUntil(() => expect(view.getByTestId('reader').textContent).not.toBe(''));
+      // A status and a read asked now, which MindRoom answers last: another account, and that
+      // GitHub is not connected.
+      const release: (() => void)[] = [];
+      const held = ['/api/github/status', '/api/github/request'].map(
+        (path) => [path, new Promise<void>((resolve) => release.push(resolve))] as const
+      );
+      const late = new Map(held);
+      const routes = mindroom.server.request.getMockImplementation()!;
+      mindroom.server.request.mockImplementation(async (path: string, init?: RequestInit) => {
+        const answered = late.get(path);
+        if (!late.delete(path)) return routes(path, init);
+        await answered;
+        if (path === '/api/github/status') return { connected: true, via: 'app', login: 'late' };
+        throw new MindroomServerError('Conflict', 409, { error: 'github_not_connected' });
+      });
+      void accesses.reader?.recheck();
+      void client.refetchQueries({ queryKey: PULL });
+      await waitUntil(() => expect(late.size).toBe(0));
+      await change({ view, mindroom, status });
+      const statusNow = () => client.getQueryData(['pull-requests-github-status', ORIGIN]);
+      await waitUntil(() => expect(statusNow()).toMatchObject(after));
+      await waitUntil(() => expect(accesses.reader?.pending).toBe(false));
+      const key = accesses.reader?.key;
+      // Every status kept from here on, also one that the next undoes.
+      const kept: unknown[] = [];
+      client.getQueryCache().subscribe(({ query }) => {
+        if (query.queryKey[0] === 'pull-requests-github-status') kept.push(query.state.data);
+      });
+      for (const answer of release) {
+        answer();
+        await new Promise((resolve) => setTimeout(resolve, 30));
+      }
+      expect(kept).toEqual(kept.map(() => expect.objectContaining(after)));
+      expect(accesses.reader?.key).toBe(key);
+    }
+  );
 
   it('gives a save that MindRoom never answers half a minute, then asks the status, as long at most', async () => {
     const mindroom = githubServer(github);

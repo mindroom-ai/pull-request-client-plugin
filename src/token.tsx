@@ -164,9 +164,13 @@ function readAgain(queryClient: QueryClient, refetch?: AccessKey) {
  * The credential a server uses for the person: `generation` counts each one it may have changed
  * to, and goes in the keys, so that no two credentials share what was read, also of one login;
  * `writing` while a token is being saved in or removed from it, when nobody knows which one a
- * request would go with, so none starts. `fence` counts those changes and never goes back, as
- * the generation does once the server refused one: what the server answers to a status or a
- * request sent before a change says nothing of now, whatever came of the change.
+ * request would go with, so none starts.
+ *
+ * Invariant: `fence` only ever goes up, and it goes up at every event after which an older answer
+ * must not apply: the start of a token being saved or removed, and every status kept that names
+ * another connection (`setStatus`), whoever it came from. An answer to a status or a request is
+ * applied only while the fence is the one read when that request started. The generation is no
+ * fence: it goes back once the server refused a change.
  */
 type Credential = { generation: number; fence: number; writing: boolean };
 const FIRST: Credential = { generation: 0, fence: 0, writing: false };
@@ -189,9 +193,11 @@ function setStatus(queryClient: QueryClient, origin: string, status: ServerStatu
   queryClient.setQueryData(statusKey(origin), status);
   if (!before || identity(before) === identity(status)) return;
   const credential = credentialOf(queryClient, origin);
-  if (!credential.writing) {
-    setCredential(queryClient, origin, { ...credential, generation: credential.generation + 1 });
-  }
+  setCredential(queryClient, origin, {
+    ...credential,
+    fence: credential.fence + 1,
+    generation: credential.generation + (credential.writing ? 0 : 1),
+  });
   readAgain(queryClient);
 }
 
@@ -211,8 +217,8 @@ function statusOf(answer: unknown): ServerStatus {
 }
 
 /**
- * The query of a server's status. Its answer is kept as the server's (`setStatus`), unless a token
- * was saved in or removed from the server since it was asked: that says nothing of now.
+ * The query of a server's status. Its answer is kept as the server's (`setStatus`), unless the
+ * fence moved since it was asked: that says nothing of now.
  */
 const statusQuery = (
   queryClient: QueryClient,
@@ -258,7 +264,7 @@ function viaServer(
   return {
     server,
     account,
-    // Not for a request sent before a token was saved or removed there: that says nothing of now.
+    // Not for a request sent before the fence moved: that says nothing of now.
     disconnected: () => {
       if (fence === credentialOf(queryClient, server.origin).fence) {
         setStatus(queryClient, server.origin, NOT_CONNECTED);
@@ -361,9 +367,8 @@ function useServerToken() {
      */
     const change = async (send: () => Promise<ServerStatus>): Promise<unknown> => {
       const before = credentialOf(queryClient, origin);
-      const fence = before.fence + 1;
       let generation = before.generation + 1;
-      setCredential(queryClient, origin, { generation, fence, writing: true });
+      setCredential(queryClient, origin, { generation, fence: before.fence + 1, writing: true });
       void queryClient.cancelQueries({ queryKey: statusKey(origin) });
       void queryClient.cancelQueries({
         queryKey: ['pull-requests'],
@@ -387,6 +392,7 @@ function useServerToken() {
         }
         return error ?? new Error('failed');
       } finally {
+        const { fence } = credentialOf(queryClient, origin);
         setCredential(queryClient, origin, { generation, fence, writing: false });
       }
     };
