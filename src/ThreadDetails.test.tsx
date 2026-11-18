@@ -32,6 +32,10 @@ const REPOSITORY = 'mindroom-ai/mindroom-chat';
 // As on a chip, the details name the repository without its owner.
 const NUMBER = (number: number) => `mindroom-chat #${number}`;
 
+// One instant for every pull request: the details list equal activity in link order, and a clock
+// tick between two `pull()` calls would otherwise reorder them.
+const UPDATED_AT = new Date(Date.now() - 2 * 3_600_000).toISOString();
+
 const pull = (over: Record<string, unknown> = {}) => ({
   title: 'Store sessions in Redis',
   state: 'open',
@@ -43,7 +47,7 @@ const pull = (over: Record<string, unknown> = {}) => ({
   additions: 120,
   deletions: 30,
   changed_files: 5,
-  updated_at: new Date(Date.now() - 2 * 3_600_000).toISOString(),
+  updated_at: UPDATED_AT,
   ...over,
 });
 
