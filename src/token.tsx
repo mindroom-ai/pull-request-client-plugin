@@ -319,6 +319,15 @@ const NO_REDIRECT: RequestRedirect = 'error';
  */
 type SaveProblem = 'rejected' | 'invalid' | 'unsupported' | 'failed';
 
+/** The HTTP status and the error code with which the server refused a request, 0 without one. */
+function refusalOf(error: unknown): { status: number; code: unknown } {
+  if (!(error instanceof MindroomServerError)) return { status: 0, code: undefined };
+  const { status, body } = error;
+  const code =
+    typeof body === 'object' && body !== null ? (body as { error?: unknown }).error : undefined;
+  return { status, code };
+}
+
 /**
  * The token the person saves in the room's MindRoom server, which MindRoom uses before the GitHub
  * App, on every device; undefined in a room without one.
@@ -338,7 +347,7 @@ function useServerToken() {
      * again, from `send`'s answer or, once that failed, asked anew.
      */
     const change = async (send: () => Promise<ServerStatus>): Promise<unknown> => {
-      const generation = credentialOf(queryClient, origin).generation + 1;
+      let generation = credentialOf(queryClient, origin).generation + 1;
       setCredential(queryClient, origin, { generation, writing: true });
       void queryClient.cancelQueries({ queryKey: statusKey(origin) });
       void queryClient.cancelQueries({
@@ -349,11 +358,18 @@ function useServerToken() {
         setStatus(queryClient, origin, await send());
         return undefined;
       } catch (error) {
-        // Whether the server took the change is not known: without its status, nothing goes
-        // through it as an account it may no longer use.
-        await askStatus(queryClient, server).catch(() =>
-          setStatus(queryClient, origin, NOT_CONNECTED)
-        );
+        const { status, code } = refusalOf(error);
+        if ((status >= 400 && status < 500) || code === 'github_unreachable') {
+          // MindRoom answered that it changed nothing: its credential, and so the keys, are
+          // the ones before.
+          generation -= 1;
+        } else {
+          // Whether it took the change is not known: without its status, nothing goes through
+          // it as an account it may no longer use.
+          await askStatus(queryClient, server).catch(() =>
+            setStatus(queryClient, origin, NOT_CONNECTED)
+          );
+        }
         return error ?? new Error('failed');
       } finally {
         setCredential(queryClient, origin, { generation, writing: false });
@@ -389,12 +405,7 @@ function useServerToken() {
           if (storedToken() !== undefined) forget();
           return undefined;
         }
-        const status = error instanceof MindroomServerError ? error.status : 0;
-        const body = error instanceof MindroomServerError ? error.body : undefined;
-        const code =
-          typeof body === 'object' && body !== null
-            ? (body as { error?: unknown }).error
-            : undefined;
+        const { status, code } = refusalOf(error);
         if (status === 400 && code === 'github_token_rejected') return 'rejected';
         if (status === 404 || status === 405) return 'unsupported';
         return status === 422 ? 'invalid' : 'failed';

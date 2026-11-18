@@ -561,7 +561,14 @@ describe('the token saved in MindRoom', () => {
       await save(view, token);
       await waitUntil(() => expect(view.getByRole('alert').textContent).toBe(said));
       expect(mindroom.storedToken()).toBeUndefined();
-      expect(accesses.reader?.connection).toBe('app');
+      // MindRoom answered that it changed nothing: the App reads on under its key, as before.
+      expect(accesses.reader).toMatchObject({
+        connection: 'app',
+        key: keyAs('octo'),
+        pending: false,
+      });
+      expect(view.getByTestId('reader').textContent).toBe('with the App');
+      expect(mindroom.statusRequests()).toBe(1);
       expect(field(view).value).toBe(token);
       expect(kept(token)).toBe(false);
     }

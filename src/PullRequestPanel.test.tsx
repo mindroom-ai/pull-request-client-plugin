@@ -1089,9 +1089,12 @@ describe('with the GitHub account connected in MindRoom', () => {
     await click(await view.findByRole('button', { name: 'Use a token instead' }));
     await type(view.getByLabelText('GitHub token'), 'ghp_good');
     await click(view.getByLabelText('Save in MindRoom at mindroom.example.org'));
+    view.getByRole('button', { name: 'Save' }).focus();
     await click(view.getByRole('button', { name: 'Save' }));
     expect(await view.findByText('Signed in as pat-login through MindRoom (token).')).toBeTruthy();
     expect(view.queryByLabelText('GitHub token')).toBeNull();
+    // The focus goes from Save, gone with the form, to the pull request's title.
+    await waitUntil(() => expect(document.activeElement?.className).toBe('mrpr-panel-title'));
     expect(mindroom.storedToken()).toBe('ghp_good');
     expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
     expect(document.body.innerHTML).not.toContain('ghp_good');
@@ -1105,6 +1108,47 @@ describe('with the GitHub account connected in MindRoom', () => {
       ).toBe(true)
     );
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps the form opened to use a token, what it says and the token, when MindRoom refuses to save it', async () => {
+    const mindroom = githubServer(withUser);
+    roomServer.current = mindroom.server;
+    const view = await show();
+    await click(await view.findByRole('button', { name: 'Use a token instead' }));
+    await type(view.getByLabelText('GitHub token'), 'ghp_refused');
+    await click(view.getByLabelText('Save in MindRoom at mindroom.example.org'));
+    await click(view.getByRole('button', { name: 'Save' }));
+    await waitUntil(() =>
+      expect(view.getByRole('alert').textContent).toBe('GitHub refused this token.')
+    );
+    expect((view.getByLabelText('GitHub token') as HTMLInputElement).value).toBe('ghp_refused');
+    expect(view.getByText('Signed in as octo through MindRoom (GitHub App).')).toBeTruthy();
+  });
+
+  it('shows the error, not what the removed token read, once the App cannot read the pull request', async () => {
+    // The App is not installed on the repository, which the token could read.
+    const mindroom = githubServer(async (url, init) =>
+      url !== 'https://api.github.com/user' && !new Headers(init?.headers).has('authorization')
+        ? respond({ message: 'Not Found' }, 404)
+        : withUser(url, init)
+    );
+    await saveInMindroom(mindroom);
+    roomServer.current = mindroom.server;
+    const view = await show();
+    const title = (await view.findByText('Signed in as pat-login through MindRoom (token).'))
+      .closest('.mrpr-panel')
+      ?.querySelector('.mrpr-panel-title')?.textContent;
+    expect(title).toBeTruthy();
+    view.getByRole('button', { name: 'Remove token from MindRoom' }).focus();
+    await click(view.getByRole('button', { name: 'Remove token from MindRoom' }));
+    expect(
+      await view.findByText(
+        'GitHub did not find this pull request. The GitHub App connected in MindRoom may not be installed on this repository.'
+      )
+    ).toBeTruthy();
+    expect(view.queryByText(title as string)).toBeNull();
+    // The focus goes from the button, gone with the header, to the token form.
+    expect(document.activeElement).toBe(view.getByLabelText('GitHub token'));
   });
 
   it('names the token saved in MindRoom, and removes it from there, back to the App', async () => {
@@ -1137,11 +1181,14 @@ describe('with the GitHub account connected in MindRoom', () => {
       roomServer.current = mindroom.server;
       const view = await show();
       expect(await view.findByText(said)).toBeTruthy();
+      view.getByRole('button', { name: 'Remove token from MindRoom' }).focus();
       await click(view.getByRole('button', { name: 'Remove token from MindRoom' }));
       expect(
         await view.findByText('Signed in as octo through MindRoom (GitHub App).')
       ).toBeTruthy();
       expect(view.queryByText(said)).toBeNull();
+      // The focus goes from the button, gone with the error, to the pull request's title.
+      await waitUntil(() => expect(document.activeElement?.className).toBe('mrpr-panel-title'));
       expect(mindroom.storedToken()).toBeUndefined();
     }
   );

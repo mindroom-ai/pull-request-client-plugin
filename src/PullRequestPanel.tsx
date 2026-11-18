@@ -323,6 +323,15 @@ function Panel({ roomId, request }: PanelProps) {
     if (via !== 'server') setOverriding(false);
     else if (overriding) focusTokenForm();
   }, [focusTokenForm, overriding, via]);
+  // A control that goes while it has the focus (Remove token from MindRoom once removed, the
+  // form once it saved) would leave the focus on the page: it goes to the panel's title, or to
+  // the token field while no pull request shows. Nothing blurs when its element goes.
+  const root = useRef<HTMLDivElement>(null);
+  const focused = useRef(false);
+  useEffect(() => {
+    if (!focused.current || document.activeElement !== document.body) return;
+    root.current?.querySelector<HTMLElement>('.mrpr-panel-title, .mrpr-token input')?.focus();
+  });
   const [tab, setTab] = useState<Tab>('summary');
   // The Timeline tab's order, which the tab bar's toggle sets.
   const [order, setOrder] = useState<Order>('newest');
@@ -347,7 +356,17 @@ function Panel({ roomId, request }: PanelProps) {
     pr?.headRepo && pr.headRepo !== pr.baseRepo ? pr.headRepo.split('/')[0] : undefined;
 
   return (
-    <div className="mrpr-root mrpr-panel" style={pluginRootStyle()}>
+    <div
+      ref={root}
+      className="mrpr-root mrpr-panel"
+      style={pluginRootStyle()}
+      onFocus={() => {
+        focused.current = true;
+      }}
+      onBlur={() => {
+        focused.current = false;
+      }}
+    >
       {!ref ? (
         <p className="mrpr-status mrpr-panel-note">{t('emptyPanel')}</p>
       ) : !pr || !state ? (
@@ -392,7 +411,9 @@ function Panel({ roomId, request }: PanelProps) {
                 ) : null}
               </span>
             </div>
-            <p className="mrpr-panel-title">{pr.title}</p>
+            <p className="mrpr-panel-title" tabIndex={-1}>
+              {pr.title}
+            </p>
             <div className="mrpr-panel-meta">
               <PullRequestMetaLine>
                 <PullRequestActorLabel key="author" actor={pr.author} profileUrl={pr.author?.url} />
