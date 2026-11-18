@@ -19,6 +19,7 @@ import {
   combinedPullRequestState,
   PULL_REQUEST_STATE_PRESENTATION,
   resolvePullRequestState,
+  type PullRequestStateKey,
 } from './presentation';
 import { usePullRequests } from './queries';
 import { useShownPullRequest } from './shownPullRequest';
@@ -38,22 +39,50 @@ export const ThreadPullRequestsButton: ThreadHeaderSlotComponent = ({ room, thre
   // A thread can lose its last link or its worktree while it is open: the button then goes, and
   // with it whether its menu was open, so the next link shows it closed.
   if (pullRequests.length === 0 && !worktree) return null;
+  const props = { roomId: room.roomId, pullRequests, worktree };
+  // A thread with only a worktree has no state to read: its button asks nothing.
   return (
     <RoomGitHub roomId={room.roomId}>
-      <PullRequestsMenu roomId={room.roomId} pullRequests={pullRequests} worktree={worktree} />
+      {pullRequests.length > 0 ? (
+        <PullRequestsMenuInState {...props} />
+      ) : (
+        <PullRequestsMenu {...props} state={undefined} />
+      )}
     </RoomGitHub>
   );
 };
+
+type MenuProps = {
+  roomId: string;
+  pullRequests: readonly PullRequestRef[];
+  worktree: ThreadWorktree | undefined;
+};
+
+/**
+ * The state of the pull requests `pullRequests` together, once it is known: until every answer is
+ * in, only an open one already settles it, so the tone never changes once shown.
+ */
+function useCombinedState(pullRequests: readonly PullRequestRef[]) {
+  const queries = usePullRequests(pullRequests, ANSWERED_ONLY);
+  // A refetch GitHub refused keeps the answer before beside the error: that one counts no more.
+  const answered = queries.flatMap((query) =>
+    query.status === 'success' ? [resolvePullRequestState(query.data).key] : []
+  );
+  const combined = combinedPullRequestState(answered);
+  const loading = queries.some((query) => query.status === 'pending');
+  return loading && combined !== 'open' ? undefined : combined;
+}
+
+function PullRequestsMenuInState(props: MenuProps) {
+  return <PullRequestsMenu {...props} state={useCombinedState(props.pullRequests)} />;
+}
 
 function PullRequestsMenu({
   roomId,
   pullRequests,
   worktree,
-}: {
-  roomId: string;
-  pullRequests: readonly PullRequestRef[];
-  worktree: ThreadWorktree | undefined;
-}) {
+  state,
+}: MenuProps & { state: PullRequestStateKey | undefined }) {
   const t = usePluginTranslation('pull-requests');
   const panel = useRoomSidePanel('pull-requests', 'pull-request');
   const shown = useShownPullRequest(roomId);
@@ -68,15 +97,6 @@ function PullRequestsMenu({
     buttonRef.current?.focus();
   }, [anchor]);
   const count = pullRequests.length;
-  const queries = usePullRequests(pullRequests, ANSWERED_ONLY);
-  // A refetch GitHub refused keeps the answer before beside the error: that one counts no more.
-  const answered = queries.flatMap((query) =>
-    query.status === 'success' ? [resolvePullRequestState(query.data).key] : []
-  );
-  const combined = combinedPullRequestState(answered);
-  // Until every answer is in, only an open one already settles it: the tone never changes once shown.
-  const loading = queries.some((query) => query.status === 'pending');
-  const state = loading && combined !== 'open' ? undefined : combined;
   const presentation = state && PULL_REQUEST_STATE_PRESENTATION[state];
   const label =
     count === 0

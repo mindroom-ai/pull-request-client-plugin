@@ -62,7 +62,7 @@ export function resolvePullRequestState(input: {
   return PULL_REQUEST_STATE_PRESENTATION[key];
 }
 
-type PullRequestStateKey = PullRequestStatePresentation['key'];
+export type PullRequestStateKey = PullRequestStatePresentation['key'];
 
 /**
  * The state of several pull requests together, as T3 Code's thread badge has it

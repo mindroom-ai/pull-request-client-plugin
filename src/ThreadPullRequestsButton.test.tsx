@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import plugin from './index';
 import { setShownPullRequest } from './shownPullRequest';
 import { trapOptions } from './testing/focusTrapStandIn';
+import { githubServer } from './testing/mindroomServer';
 import { linkedRoom, type TestLink, type TestWorktree } from './testing/linkedRoom';
 import { ThreadPullRequestsButton } from './ThreadPullRequestsButton';
 
@@ -230,10 +231,15 @@ describe('ThreadPullRequestsButton', () => {
     await vi.waitFor(() => expect(tone(again.view)).toBe('mrpr-tone-open'));
   });
 
-  it('keeps the branch icon, without a tone, for a thread with only a worktree', async () => {
+  it('keeps the branch icon, without a tone, for a thread with only a worktree, and asks nothing', async () => {
+    const mindroom = githubServer(fetchMock);
+    roomServer.current = mindroom.server;
     const { view } = await show([], [WORKTREE]);
     expect(icon(view).classList).toContain('lucide-git-branch');
     expect(tone(view)).toBeUndefined();
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 10)));
+    // Not even whether the room's MindRoom server has GitHub connected.
+    expect(mindroom.server.request).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
