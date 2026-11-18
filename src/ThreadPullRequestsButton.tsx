@@ -41,23 +41,11 @@ export const ThreadPullRequestsButton: ThreadHeaderSlotComponent = ({ room, thre
   // A thread can lose its last link or its worktree while it is open: the button then goes, and
   // with it whether its menu was open, so the next link shows it closed.
   if (pullRequests.length === 0 && !worktree) return null;
-  const props = { roomId: room.roomId, pullRequests, worktree };
-  // A thread with only a worktree has no state to read: its button asks nothing.
   return (
     <RoomGitHub roomId={room.roomId}>
-      {pullRequests.length > 0 ? (
-        <PullRequestsMenuInState {...props} />
-      ) : (
-        <PullRequestsMenu {...props} state={undefined} />
-      )}
+      <PullRequestsMenu roomId={room.roomId} pullRequests={pullRequests} worktree={worktree} />
     </RoomGitHub>
   );
-};
-
-type MenuProps = {
-  roomId: string;
-  pullRequests: readonly PullRequestRef[];
-  worktree: ThreadWorktree | undefined;
 };
 
 /**
@@ -85,16 +73,33 @@ function useCombinedState(pullRequests: readonly PullRequestRef[]) {
   return loading && combined !== 'open' ? undefined : combined;
 }
 
-function PullRequestsMenuInState(props: MenuProps) {
-  return <PullRequestsMenu {...props} state={useCombinedState(props.pullRequests)} />;
+/** Reports `useCombinedState` to `onState`, and undefined once it goes. */
+function CombinedState({
+  pullRequests,
+  onState,
+}: {
+  pullRequests: readonly PullRequestRef[];
+  onState: (state: PullRequestStateKey | undefined) => void;
+}) {
+  const state = useCombinedState(pullRequests);
+  useEffect(() => onState(state), [onState, state]);
+  useEffect(() => () => onState(undefined), [onState]);
+  return null;
 }
 
 function PullRequestsMenu({
   roomId,
   pullRequests,
   worktree,
-  state,
-}: MenuProps & { state: PullRequestStateKey | undefined }) {
+}: {
+  roomId: string;
+  pullRequests: readonly PullRequestRef[];
+  worktree: ThreadWorktree | undefined;
+}) {
+  // Read beside the button, only with pull requests: a thread with only a worktree asks nothing,
+  // and gaining or losing its first link keeps the button and its menu as they are.
+  const [read, setState] = useState<PullRequestStateKey>();
+  const state = pullRequests.length > 0 ? read : undefined;
   const t = usePluginTranslation('pull-requests');
   const panel = useRoomSidePanel('pull-requests', 'pull-request');
   const shown = useShownPullRequest(roomId);
@@ -185,6 +190,9 @@ function PullRequestsMenu({
 
   return (
     <>
+      {pullRequests.length > 0 ? (
+        <CombinedState pullRequests={pullRequests} onState={setState} />
+      ) : null}
       <IconTooltip label={label} hidden={anchor !== undefined}>
         {(triggerRef) => (
           // As the banner draws its own buttons: folds' button without a fill (styles.css sizes it).

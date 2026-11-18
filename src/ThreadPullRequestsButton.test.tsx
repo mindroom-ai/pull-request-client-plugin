@@ -380,6 +380,21 @@ describe('ThreadPullRequestsButton', () => {
     expect(view.queryByRole('menu')).toBeNull();
   });
 
+  it('keeps its button and open menu when a thread with only a worktree gains or loses its first link', async () => {
+    const { view } = await show([], [WORKTREE]);
+    const before = trigger(view);
+    before.focus();
+    await openMenu(view);
+    view.rerender(button(linkedRoom(ROOM_ID, [{ number: 1 }], [WORKTREE])));
+    expect(trigger(view)).toBe(before);
+    expect(document.activeElement).toBe(before);
+    expect(view.queryByRole('menu')).not.toBeNull();
+    view.rerender(button(linkedRoom(ROOM_ID, [], [WORKTREE])));
+    expect(trigger(view)).toBe(before);
+    expect(document.activeElement).toBe(before);
+    expect(view.queryByRole('menu')).not.toBeNull();
+  });
+
   it('marks the row of the pull request the open panel shows, in any letter case', async () => {
     page.panel = { isOpen: true, open: vi.fn() };
     setShownPullRequest(ROOM_ID, { owner: 'MindRoom-AI', repo: 'MindRoom-Chat', number: 2 });
