@@ -1790,6 +1790,19 @@ a.mrpr-thread-menu-item:focus-visible {
   background: color-mix(in srgb, var(--pr-primary) 14%, var(--pr-primary-container));
   outline: none;
 }
+/* The keyboard's item has its own outline, apart from its rim and the current item's ring, so
+   it shows where the pointer rests on another item, and in forced colors. */
+button.mrpr-thread-menu-item:focus-visible,
+a.mrpr-thread-menu-item:focus-visible {
+  outline: 2px solid var(--pr-primary);
+  outline-offset: 2px;
+}
+@media (forced-colors: active) {
+  button.mrpr-thread-menu-item:focus-visible,
+  a.mrpr-thread-menu-item:focus-visible {
+    outline-color: Highlight;
+  }
+}
 button.mrpr-thread-menu-item:active,
 a.mrpr-thread-menu-item:active {
   border-color: color-mix(in srgb, var(--pr-primary) 50%, var(--pr-primary-container-line));

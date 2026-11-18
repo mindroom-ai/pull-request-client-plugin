@@ -1042,7 +1042,25 @@ test("the open thread's pull requests are one button in its banner, whose menu l
   await expect(items.nth(0)).toBeFocused();
   await page.keyboard.press('ArrowDown');
   await expect(items.nth(1)).toBeFocused();
+  // With the pointer on another item, the focused one stands apart by its outline.
+  await items.nth(0).hover();
+  await expect(items.nth(1)).toBeFocused();
+  const outlines = await items.evaluateAll((all) =>
+    all.slice(0, 2).map((item) => {
+      const style = getComputedStyle(item);
+      return style.outlineStyle === 'none' ? 'none' : `${style.outlineStyle} ${style.outlineWidth}`;
+    })
+  );
+  expect(outlines).toEqual(['none', 'solid 2px']);
+  await shot(page, 'menu-focus-and-hover', { keepPointer: true });
   await page.keyboard.press('Escape');
+  await expect(prMenu(page)).toHaveCount(0);
+  await expect(button).toBeFocused();
+  // A press on the button closes it from a focused item and gives the button the focus.
+  await openPrMenu(page);
+  await page.keyboard.press('ArrowDown');
+  await expect(items.nth(0)).toBeFocused();
+  await button.click();
   await expect(prMenu(page)).toHaveCount(0);
   await expect(button).toBeFocused();
   // A click outside closes it too.
