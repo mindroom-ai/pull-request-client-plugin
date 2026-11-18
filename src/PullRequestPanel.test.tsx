@@ -1187,6 +1187,23 @@ describe('with the GitHub account connected in MindRoom', () => {
     expect(await view.findByText('Add pull request cards')).toBeTruthy();
   });
 
+  it('closes the form once a token saved in the browser over a refused one reads', async () => {
+    localStorage.setItem(TOKEN_KEY, 'ghp_old');
+    fetchMock.mockImplementation(async (url, init) => {
+      await new Promise((r) => setTimeout(r, 20));
+      const auth = new Headers(init?.headers).get('authorization');
+      if (auth && !auth.includes('ghp_good')) return respond({ message: 'Bad credentials' }, 401);
+      return url.endsWith('/pulls/200') ? respond(pull()) : respond([]);
+    });
+    const view = await show();
+    expect(await view.findByText('GitHub refused the saved token.')).toBeTruthy();
+    await type(view.getByLabelText('GitHub token'), 'ghp_good');
+    await click(view.getByRole('button', { name: 'Save' }));
+    expect(await view.findByText('Add pull request cards')).toBeTruthy();
+    await new Promise((r) => setTimeout(r, 100));
+    expect(view.queryByLabelText('GitHub token')).toBeNull();
+  });
+
   it('reads with the token stored in the browser first, and asks MindRoom nothing', async () => {
     localStorage.setItem(TOKEN_KEY, 'tok');
     const mindroom = githubServer(github);

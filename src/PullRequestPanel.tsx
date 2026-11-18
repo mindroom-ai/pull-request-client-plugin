@@ -404,6 +404,8 @@ function Panel({ roomId, request }: PanelProps) {
   currentLatch.current = held;
   const closeForm = (mine: typeof held) => () => {
     if (currentLatch.current !== mine) return;
+    // The kept error is of the token replaced, so it says nothing of the new one.
+    lastError.current = undefined;
     setOverriding(false);
     setLatch(undefined);
   };
