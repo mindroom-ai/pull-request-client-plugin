@@ -194,7 +194,17 @@ export function HeaderActions({
       <span className="mrpr-badge mrpr-badge-error">{t('actions.conflicts')}</span>
     );
   } else if (primary === 'checking') {
-    primaryControlElement = <span className="mrpr-status">{t('actions.checking')}</span>;
+    // The button Merge is, off while GitHub computes: one focused keeps the focus.
+    primaryControlElement = (
+      <button
+        type="button"
+        className="mrpr-button mrpr-button-primary"
+        aria-disabled
+        aria-live="polite"
+      >
+        {t('actions.checking')}
+      </button>
+    );
   } else if (primary === 'ready') {
     primaryControlElement = (
       <button
@@ -214,6 +224,8 @@ export function HeaderActions({
       <button
         type="button"
         className="mrpr-button mrpr-button-primary"
+        // Says what it became, Checking whether it can merge... among them.
+        aria-live="polite"
         {...off}
         {...armable}
         onClick={busy ? undefined : onClick}

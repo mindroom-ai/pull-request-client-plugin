@@ -1013,7 +1013,12 @@ describe('with the GitHub account connected in MindRoom', () => {
       answering([null, null, true]);
       roomServer.current = githubServer(github).server;
       const view = await show();
-      await settle(() => expect(view.getByText(CHECKING)).toBeTruthy());
+      await settle(() => expect(view.getByRole('button', { name: CHECKING })).toBeTruthy());
+      // The control Merge becomes, off meanwhile: focused, it keeps the focus.
+      const control = view.getByRole('button', { name: CHECKING });
+      expect(control.getAttribute('aria-disabled')).toBe('true');
+      expect(control.getAttribute('aria-live')).toBe('polite');
+      control.focus();
       expect(view.queryByRole('button', { name: 'Merge' })).toBeNull();
       expect(pullReads()).toBe(1);
       await later(999);
@@ -1027,6 +1032,7 @@ describe('with the GitHub account connected in MindRoom', () => {
       await settle(() => expect(view.getByRole('button', { name: 'Merge' })).toBeTruthy());
       expect(pullReads()).toBe(3);
       expect(view.queryByText(CHECKING)).toBeNull();
+      expect(document.activeElement).toBe(view.getByRole('button', { name: 'Merge' }));
     });
 
     it('stops after three reads again, and offers Merge as GitHub answers then', async () => {
