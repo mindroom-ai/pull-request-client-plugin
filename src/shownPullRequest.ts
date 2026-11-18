@@ -1,5 +1,5 @@
-// Which pull request each room's side panel shows: the panel records it, and the strip under the
-// room header reads it to mark that pull request's chip.
+// Which pull request each room's side panel shows: the panel records it, and the open thread's
+// pull requests menu reads it to mark that pull request's item.
 import { useSyncExternalStore } from 'react';
 import type { PullRequestRef } from './github';
 

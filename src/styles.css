@@ -1732,20 +1732,84 @@ button.mrpr-chip:focus-visible {
   text-overflow: ellipsis;
 }
 
-/* The open thread's pull requests under the room header, lined up with the header's content (16px
-   in from its start, 8px on a phone). */
-.mrpr-thread-strip {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  padding-block: 0 8px;
-  padding-inline: 16px 8px;
+/* The open thread's pull requests button, in its banner: sized as the banner's own buttons (2rem
+   tall, folds' 0.5rem radius, a 1.125rem icon), a little wider for the count beside the icon. */
+.mrpr-thread-button.mrpr-thread-button {
+  box-sizing: border-box;
+  flex-shrink: 0;
+  gap: 0.25rem;
+  min-inline-size: 2rem;
+  block-size: 2rem;
+  padding-block: 0;
+  padding-inline: 0.4375rem;
+  border-radius: 0.5rem;
+  font: inherit;
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
 }
-@media (max-width: 750px) {
-  .mrpr-thread-strip {
-    padding-inline: 8px;
-  }
+.mrpr-thread-button-icon {
+  flex: none;
+  inline-size: 1.125rem;
+  block-size: 1.125rem;
+}
+.mrpr-thread-button-count {
+  padding-inline-end: 0.125rem;
+}
+
+/* Its menu: the details rows, each pull request an item, scrolling inside the menu when they
+   outgrow 70% of the window's height. */
+.mrpr-thread-menu.mrpr-thread-menu {
+  display: flex;
+  inline-size: min(22rem, calc(100vw - 1rem));
+  max-block-size: min(36rem, 70dvh);
+  flex-direction: column;
+}
+.mrpr-thread-menu-rows.mrpr-thread-menu-rows {
+  box-sizing: border-box;
+  min-block-size: 0;
+  gap: 0.125rem;
+  padding: 0.25rem;
+  overflow-y: auto;
+}
+.mrpr-thread-menu-item {
+  display: block;
+  box-sizing: border-box;
+  inline-size: 100%;
+  padding-block: 0.5rem;
+  padding-inline: 0.625rem;
+  border: 1px solid transparent;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  text-decoration: none;
+}
+button.mrpr-thread-menu-item,
+a.mrpr-thread-menu-item {
+  cursor: pointer;
+}
+button.mrpr-thread-menu-item:hover,
+a.mrpr-thread-menu-item:hover,
+.mrpr-thread-menu-item:focus-visible {
+  background: var(--pr-hover);
+}
+/* The worktree, under a line, as in the details. */
+.mrpr-thread-menu-worktree.mrpr-thread-menu-worktree {
+  margin-block-start: 0.25rem;
+  border-block-start-color: var(--pr-border);
+  border-radius: 0;
+}
+/* The pull request the open panel shows, marked as the strip marked its chip. */
+.mrpr-thread-menu-item[aria-current='true'] {
+  border-color: var(--pr-primary);
+  box-shadow: 0 0 0 1px var(--pr-primary);
+}
+.mrpr-thread-menu-item > .mrpr-details-pull-request,
+.mrpr-thread-menu-item > .mrpr-details-worktree {
+  padding-block-start: 0;
+  border-block-start: 0;
 }
 
 /* A chip's hover card: fixed by its chip, placed and capped in height by usePlacement, hidden

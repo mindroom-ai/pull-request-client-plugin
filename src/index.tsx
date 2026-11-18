@@ -6,7 +6,7 @@ import { PullRequestCard } from './PullRequestCard';
 import { en } from './strings';
 import { ThreadCardPullRequests } from './ThreadCardPullRequests';
 import { ThreadDetails } from './ThreadDetails';
-import { ThreadPullRequestStrip } from './ThreadPullRequestStrip';
+import { ThreadPullRequestsButton } from './ThreadPullRequestsButton';
 import { threadHasDetails } from './threadPullRequests';
 import './styles.css';
 
@@ -34,7 +34,7 @@ const plugin: ClientPlugin = {
   // Each chip opens its own hover card, so the card's details card stays closed over the chips.
   threadCardBadges: [{ Component: ThreadCardPullRequests, hoverCard: true }],
   threadDetails: [{ shows: threadHasDetails, Component: ThreadDetails }],
-  roomHeaderSlot: [ThreadPullRequestStrip],
+  threadHeaderSlot: [ThreadPullRequestsButton],
   translations: { en },
 };
 

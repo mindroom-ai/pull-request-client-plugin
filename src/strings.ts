@@ -320,13 +320,14 @@ export const en = {
     noReviews: 'No reviews yet',
     openInPanel: 'Click to open in the side panel',
   },
-  // A thread's pull requests: the count of those its card leaves out, and the name of the row of
-  // their chips under the room header.
+  // A thread's pull requests: the count of those its card leaves out, and the name and tooltip of
+  // the button in the open thread's banner that lists them.
   threadPullRequests: {
     more: '+{{count}}',
     moreLabel_one: '{{count}} more pull request',
     moreLabel_other: '{{count}} more pull requests',
-    strip: 'Pull requests of this thread',
+    button_one: 'Pull request',
+    button_other: 'Pull requests ({{count}})',
   },
   // The name and tooltip of a thread's worktree, by whether it has a repository and a branch.
   branch: {

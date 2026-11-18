@@ -2,7 +2,9 @@
 // its menu: each of its pull requests, also those past the two its card shows, then its worktree.
 // The app draws them as read-only rows, so nothing here is a control or takes the focus. A pull
 // request asks GitHub through the chips' own queries, so its chip's answer is already there. A pull
-// request on the worktree's branch says so, and the worktree then leaves its branch out.
+// request on the worktree's branch says so, and the worktree then leaves its branch out. The open
+// thread's pull requests menu draws the same rows, each pull request as one of its items.
+import { Fragment, type ReactNode } from 'react';
 import { usePluginTranslation, type ThreadDetailProps } from '@mindroom/client-sdk/core';
 import { Folder, GitBranch, GitPullRequestArrow } from 'lucide-react';
 import { pullRequestUrl, type PullRequest, type PullRequestRef } from './github';
@@ -38,28 +40,43 @@ export function ThreadDetails({ room, threadId }: ThreadDetailProps) {
   );
 }
 
-// Inside `RoomGitHub`, so the heads are read with the room's access, as each chip reads them.
-function Details({
+/**
+ * The rows, inside `RoomGitHub`, so the heads are read with the room's access, as each chip reads
+ * them. `item` wraps each pull request's and the worktree's rows (`pullRequest` undefined), as the
+ * menu's items; `className` joins the root's.
+ */
+export function Details({
   pullRequests,
   worktree,
+  item = (_pullRequest, rows) => rows,
+  className,
 }: {
   pullRequests: readonly PullRequestRef[];
   worktree: ThreadWorktree | undefined;
+  item?: (pullRequest: PullRequestRef | undefined, rows: ReactNode) => ReactNode;
+  className?: string;
 }) {
   // The same queries as each pull request's below, so they ask GitHub nothing more.
   const heads = usePullRequests(pullRequests, ANSWERED_ONLY).map((query) => query.data?.headRef);
   return (
-    <div className="mrpr-root mrpr-details" style={pluginRootStyle()}>
+    <div
+      className={className ? `mrpr-root mrpr-details ${className}` : 'mrpr-root mrpr-details'}
+      style={pluginRootStyle()}
+    >
       {pullRequests.map((pullRequest) => (
-        <PullRequestDetails
-          key={pullRequestUrl(pullRequest)}
-          pullRequest={pullRequest}
-          worktreeBranch={worktree?.branch}
-        />
+        <Fragment key={pullRequestUrl(pullRequest)}>
+          {item(
+            pullRequest,
+            <PullRequestDetails pullRequest={pullRequest} worktreeBranch={worktree?.branch} />
+          )}
+        </Fragment>
       ))}
-      {worktree ? (
-        <WorktreeDetails worktree={worktree} showBranch={!heads.includes(worktree.branch)} />
-      ) : null}
+      {worktree
+        ? item(
+            undefined,
+            <WorktreeDetails worktree={worktree} showBranch={!heads.includes(worktree.branch)} />
+          )
+        : null}
     </div>
   );
 }

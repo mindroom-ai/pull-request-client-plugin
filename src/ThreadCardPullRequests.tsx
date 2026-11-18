@@ -1,7 +1,7 @@
 // A thread's pull requests on its card in the Compact view: two chips (one on a phone) and the
 // count of the rest, or, for a thread without any, the branch of its worktree. The app draws this
-// inside the card's button, so nothing here is a control or takes the focus; the strip under the
-// room header has the same pull requests as buttons.
+// inside the card's button, so nothing here is a control or takes the focus; the open thread's
+// pull requests menu has the same pull requests as items.
 import type { MouseEvent } from 'react';
 import type { Room } from 'matrix-js-sdk';
 import {

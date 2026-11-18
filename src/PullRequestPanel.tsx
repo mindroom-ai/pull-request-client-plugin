@@ -306,7 +306,7 @@ export default function PullRequestPanel(props: PanelProps) {
 function Panel({ roomId, request }: PanelProps) {
   const t = usePluginTranslation('pull-requests');
   const ref = useMemo(() => readRequest(request), [request]);
-  // The strip under the room header marks the chip of the pull request the panel shows.
+  // The open thread's pull requests menu marks the item of the pull request the panel shows.
   useEffect(() => {
     setShownPullRequest(roomId, ref);
     return () => clearShownPullRequest(roomId, ref);
