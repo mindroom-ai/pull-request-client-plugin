@@ -237,6 +237,8 @@ export const en = {
     label: 'Checks',
   },
   checksLine: {
+    // The checks line where the tab bar has no room for the summary: passed over all.
+    short: '{{passed}}/{{total}}',
     none: 'No checks',
     loading: 'Loading checks',
     unavailable: 'Checks unavailable',

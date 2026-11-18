@@ -1114,6 +1114,25 @@
   font-size: 12px;
   cursor: pointer;
 }
+/* The summary stays on one line: passed over all where the tab bar is too narrow for it (a phone,
+   a narrow panel), cut with an ellipsis as a last resort. */
+.mrpr-checks-button > span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.mrpr-checks-short {
+  display: none;
+  font-variant-numeric: tabular-nums;
+}
+@container mrpr-tabbar (max-width: 440px) {
+  .mrpr-checks-full {
+    display: none;
+  }
+  .mrpr-checks-short {
+    display: inline;
+  }
+}
 .mrpr-checks-button:hover {
   background: var(--pr-hover);
   color: var(--pr-fg);
@@ -1344,6 +1363,7 @@
 .mrpr-tabbar {
   justify-content: space-between;
   gap: 8px;
+  container: mrpr-tabbar / inline-size;
 }
 .mrpr-tabbar-end {
   display: flex;

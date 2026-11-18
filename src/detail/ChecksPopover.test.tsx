@@ -155,6 +155,20 @@ describe('ChecksStatusLine', () => {
     expect(button.getAttribute('aria-expanded')).toBe('false');
   });
 
+  it('shows the passed over all as its short form, with the whole summary as its tooltip', async () => {
+    fetchMock.mockImplementation(async (url) =>
+      respond(
+        url.includes('/check-runs') ? runs(['success', 'skipped', 'skipped']) : { statuses: [] }
+      )
+    );
+    const view = await show();
+    const button = await view.findByRole('button', { name: 'Open checks: 1 passed, 2 skipped' });
+    expect(button.getAttribute('title')).toBe('1 passed, 2 skipped');
+    // Both forms are there; the tab bar's width picks the one that shows (styles.css).
+    expect(button.querySelector('.mrpr-checks-full')?.textContent).toBe('1 passed, 2 skipped');
+    expect(button.querySelector('.mrpr-checks-short')?.textContent).toBe('1/3');
+  });
+
   it('says so when GitHub has more check runs than it sent', async () => {
     fetchMock.mockImplementation(async (url) =>
       respond(

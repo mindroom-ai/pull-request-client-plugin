@@ -50,6 +50,7 @@ export function ChecksStatusLine({
   const { key, ...values } = summarizeChecks(checks);
   const summary = t(`checks.${key}`, values);
   const presentation = pullRequestChecksStatePresentation(state);
+  const passed = checks.filter((check) => check.status === 'success').length;
   return (
     <>
       <button
@@ -58,12 +59,20 @@ export function ChecksStatusLine({
         aria-haspopup="dialog"
         aria-expanded={anchor !== undefined}
         aria-label={t('checksPopover.open', { summary })}
+        title={summary}
         onClick={(event: MouseEvent<HTMLButtonElement>) =>
           setAnchor(anchor ? undefined : event.currentTarget.getBoundingClientRect())
         }
       >
         <presentation.Icon aria-hidden className={`mrpr-icon ${presentation.toneClassName}`} />
-        <span>{summary}</span>
+        {/* One line: the summary where the tab bar has room for it, else passed over all, its
+            icon the worst state (styles.css). The name and tooltip say it whole. */}
+        <span aria-hidden className="mrpr-checks-full">
+          {summary}
+        </span>
+        <span aria-hidden className="mrpr-checks-short">
+          {t('checksLine.short', { passed, total: checks.length })}
+        </span>
       </button>
       <PopOut
         anchor={anchor}
