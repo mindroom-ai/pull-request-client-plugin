@@ -12,6 +12,8 @@ export function pluginRootStyle(): CSSProperties {
     '--pr-muted': color.SurfaceVariant.OnContainer,
     '--pr-border': color.Surface.ContainerLine,
     '--pr-surface': color.Surface.Container,
+    // The side panel's own background, which the app's panel frame draws behind it.
+    '--pr-panel': color.Background.Container,
     '--pr-hover': color.Surface.ContainerHover,
     '--pr-added': color.Success.Main,
     '--pr-removed': color.Critical.Main,

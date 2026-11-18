@@ -1436,7 +1436,9 @@
   gap: 8px;
   margin-inline: -16px;
   padding-inline: 16px;
-  background: var(--pr-surface);
+  /* The panel's own background, so a heading shows no band of its own; opaque, as it stays over
+     what scrolls under it. */
+  background: var(--pr-panel);
 }
 .mrpr-section-toggle {
   display: inline-flex;
