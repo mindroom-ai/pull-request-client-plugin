@@ -156,9 +156,15 @@ function readAgain(queryClient: QueryClient, refetch?: AccessKey) {
   void queryClient.invalidateQueries({ queryKey, refetchType: 'none' });
   if (refetch === undefined) return;
   const kept = { queryKey, predicate: (query: Query) => accessOf(query.queryKey) === refetch };
-  void queryClient
-    .cancelQueries(kept)
-    .then(() => queryClient.refetchQueries({ ...kept, type: 'active' }));
+  // What shows now; a part that shows it later reads it itself, as the key is invalidated.
+  const shown = new Set(queryClient.getQueryCache().findAll({ ...kept, type: 'active' }));
+  void queryClient.cancelQueries(kept).then(() =>
+    queryClient.refetchQueries(
+      { queryKey, type: 'active', predicate: (query) => shown.has(query) },
+      // A read started since goes with the access now: it is the read again.
+      { cancelRefetch: false }
+    )
+  );
 }
 
 /**
