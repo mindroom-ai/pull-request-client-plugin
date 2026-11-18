@@ -1004,7 +1004,7 @@ test("Page Zoom scales the panel's text, its diffs and its file tree", async ({ 
   expect(unanswered).toEqual([]);
 });
 
-// Enough files that the tree scrolls, in two folders.
+// Enough files that the tree scrolls far past the rows it draws first, in two folders.
 const TREE_FILES = [
   {
     filename: 'docs/sessions.md',
@@ -1013,7 +1013,7 @@ const TREE_FILES = [
     deletions: 0,
     patch: '@@ -0,0 +1 @@\n+# Sessions',
   },
-  ...Array.from({ length: 24 }, (_, index) => ({
+  ...Array.from({ length: 60 }, (_, index) => ({
     filename: `src/session/part-${String(index + 1).padStart(2, '0')}.ts`,
     status: 'added',
     additions: 1,
@@ -1059,8 +1059,9 @@ test('a pinch zoom keeps the file tree as it was: folded folders, selection, foc
   await docs.click();
   await expect(docs).toHaveAttribute('aria-expanded', 'false');
   // Scrolled down to a file the tree draws only there, which a click selects and focuses.
-  await scrollTree(14 * 24);
-  const file = tree.getByRole('treeitem', { name: 'part-15.ts' });
+  // Its row is the 52nd, past the 10 the tree shows and the 10 more it draws after them.
+  await scrollTree(49 * 24);
+  const file = tree.getByRole('treeitem', { name: 'part-50.ts' });
   // With the focus on a row scrolled away, Pierre's first click only moves the focus.
   await expect(async () => {
     await file.click();
@@ -1115,16 +1116,24 @@ test('a pinch zoom keeps the file tree as it was: folded folders, selection, foc
   await expect(docs).toHaveAttribute('aria-expanded', 'false');
   await expect(tree.getByRole('treeitem', { name: 'sessions.md' })).toHaveCount(0);
 
-  // Scrolled away from the focused file, a pinch back to 100 % keeps the tree where it was
-  // scrolled, and the focus on the file.
-  await scrollTree(3 * 36);
+  // Scrolled up from the focused file, below the rows shown but among those drawn, a pinch back
+  // to 100 % keeps the tree where it was scrolled, and the focus on the file.
+  await scrollTree(35 * 36);
+  await expect(file).not.toBeInViewport();
   await expect(file).toBeFocused();
   await pinch(100);
   await expect(page.locator('html')).toHaveCSS('font-size', '16px');
   await expect.poll(treesMade).toBe(2);
-  await expect(tree.getByRole('treeitem', { name: 'part-02.ts' })).toHaveCSS('height', '24px');
-  await expect.poll(() => scrolledRows(24)).toBe(3);
+  await expect(tree.getByRole('treeitem', { name: 'part-40.ts' })).toHaveCSS('height', '24px');
+  await expect.poll(() => scrolledRows(24)).toBe(35);
   await expect(file).toBeFocused();
+
+  // The header's button keeps the focus too.
+  const fold = panel(page).locator('.mrpr-tree-header button');
+  await fold.focus();
+  await pinch(-100);
+  await expect.poll(treesMade).toBe(3);
+  await expect(fold).toBeFocused();
   expect(unanswered).toEqual([]);
 });
 

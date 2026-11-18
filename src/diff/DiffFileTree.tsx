@@ -120,8 +120,8 @@ interface TreeView {
 interface CarriedTree extends TreeView {
   /** How far it was scrolled, in rows. */
   readonly scrolledRows: number;
-  /** Whether the keyboard's focus was in it. */
-  readonly focused: boolean;
+  /** Where the keyboard's focus was in it: on a row or on the header's button. */
+  readonly focused: 'row' | 'header' | null;
 }
 
 function collapsedDirectoriesOf(model: TreeModel, directoryPaths: readonly string[]): string[] {
@@ -279,7 +279,11 @@ function SizedDiffFileTree({
         collapsedDirectories: collapsedDirectoriesOf(model, collectDirectoryPaths(paths)),
         focusedPath: model.getFocusedPath(),
         scrolledRows: (scrollElementOf(tree)?.scrollTop ?? 0) / model.getItemHeight(),
-        focused: tree?.querySelector('file-tree-container')?.matches(':focus-within') ?? false,
+        focused: tree?.querySelector('file-tree-container')?.matches(':focus-within')
+          ? 'row'
+          : tree?.querySelector('.mrpr-tree-header')?.contains(document.activeElement)
+          ? 'header'
+          : null,
       };
     },
     [carried, model]
@@ -314,15 +318,25 @@ function SizedDiffFileTree({
         queueMicrotask(() => {
           syncingSelectionRef.current = false;
         });
+        if (before.focused === 'header') {
+          treeRef.current?.querySelector<HTMLElement>('.mrpr-tree-header button')?.focus();
+        }
         // Once Pierre has drawn the rows, at the row it showed first, and with the focus.
         requestAnimationFrame(() => {
           const scroller = scrollElementOf(treeRef.current);
           if (scroller) scroller.scrollTop = before.scrolledRows * itemHeight;
-          if (!before.focused || before.focusedPath === null) return;
-          scroller
-            ?.querySelector<HTMLElement>(`[data-item-path="${CSS.escape(before.focusedPath)}"]`)
+          const { focusedPath } = before;
+          if (before.focused !== 'row' || focusedPath === null) return;
+          // Pierre draws the rows of that scroll on its scroll event, a frame or a few later.
+          const focusRow = (frames: number) => {
+            const row = scroller?.querySelector<HTMLElement>(
+              `[data-item-path="${CSS.escape(focusedPath)}"]`
+            );
             // Where it was scrolled, also away from the focused row.
-            ?.focus({ preventScroll: true });
+            if (row) row.focus({ preventScroll: true });
+            else if (frames > 0) requestAnimationFrame(() => focusRow(frames - 1));
+          };
+          focusRow(10);
         });
       }
     } else if (mounted.paths.every((path, index) => modelPaths[index] === path)) {

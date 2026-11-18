@@ -931,13 +931,13 @@
   .mrpr-button-primary,
   .mrpr-dialog-actions .mrpr-button,
   .mrpr-popover-actions .mrpr-button {
-    min-block-size: 2.75rem;
+    min-block-size: max(44px, 2.75rem);
     padding-inline: 0.875rem;
   }
   .mrpr-header-more,
   .mrpr-action-result-dismiss {
-    min-inline-size: 2.75rem;
-    min-block-size: 2.75rem;
+    min-inline-size: max(44px, 2.75rem);
+    min-block-size: max(44px, 2.75rem);
   }
 }
 

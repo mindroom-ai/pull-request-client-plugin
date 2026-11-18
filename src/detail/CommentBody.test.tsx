@@ -109,7 +109,7 @@ describe('CommentBody', () => {
     expect(view.queryByText('Show full comment')).toBeNull();
   });
 
-  it('clamps a tall body at 240 px until Show full comment expands it', async () => {
+  it('clamps a tall body at 15rem until Show full comment expands it', async () => {
     heights(500);
     const view = await render(<CommentBody body="Tall" images={NO_IMAGES} />);
     const clip = view.container.querySelector('.mrpr-comment-clip') as HTMLElement;
@@ -121,5 +121,23 @@ describe('CommentBody', () => {
     expect(view.getByText('Show less').getAttribute('aria-expanded')).toBe('true');
     await act(async () => view.getByText('Show less').click());
     expect(clip.className).toContain('mrpr-comment-clamped');
+  });
+
+  it("measures the clamp in the root's font size, which the page zoom scales", async () => {
+    heights(300);
+    document.documentElement.style.fontSize = '24px';
+    try {
+      // 15rem is 360 px at 150 %: nothing is hidden.
+      const view = await render(<CommentBody body="Tall" images={NO_IMAGES} />);
+      expect(view.queryByText('Show full comment')).toBeNull();
+      // 240 px at 100 %: the same body is cut.
+      await act(async () => {
+        document.documentElement.style.fontSize = '16px';
+        await Promise.resolve();
+      });
+      expect(view.getByText('Show full comment')).toBeTruthy();
+    } finally {
+      document.documentElement.style.fontSize = '';
+    }
   });
 });

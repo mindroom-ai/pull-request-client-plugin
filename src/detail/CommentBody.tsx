@@ -1,16 +1,18 @@
 // Ported from T3 Code (https://github.com/pingdotgg/t3code, apps/web/src/components/pullRequest/PullRequestCommentBody.tsx at 8ab427c6), MIT, Copyright (c) 2026 T3 Tools Inc. See NOTICE.
 // A comment's Markdown, drawn by the app's renderer as a thread draws it (a wide table scrolls in
-// its own box), clamped at 240 px with a button that shows it whole. A body of only HTML comments
+// its own box), clamped at 15rem with a button that shows it whole. A body of only HTML comments
 // (a bot's markers) draws nothing. Its images load only from GitHub: an attachment from its stable
 // address (signed when that fails), another image via camo.
 import { useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { usePluginTranslation } from '@mindroom/client-sdk/core';
 import { MarkdownContent, useMarkdownHtml } from '@mindroom/client-sdk/ui';
 import { imageResolver, type ImageSources } from '../images';
+import { useRootFontSize } from '../rootFontSize';
 import { visibleBody } from './detail.logic';
 import { useSignedImageFallback } from './imageFallback';
 
-const CLAMP = 240;
+/** The clamp's height in rem, as styles.css has it. */
+const CLAMP_REM = 15;
 
 export function CommentBody({ body, images }: { body: string; images: ImageSources }) {
   const t = usePluginTranslation('pull-requests');
@@ -24,17 +26,18 @@ export function CommentBody({ body, images }: { body: string; images: ImageSourc
   const [overflowing, setOverflowing] = useState(false);
   const clip = useRef<HTMLDivElement>(null);
   const id = useId();
+  const clamp = CLAMP_REM * useRootFontSize();
 
   useLayoutEffect(() => {
     const element = clip.current;
     if (!element) return;
-    const measure = () => setOverflowing(element.scrollHeight > CLAMP);
+    const measure = () => setOverflowing(element.scrollHeight > clamp);
     measure();
     if (typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(measure);
     for (const child of Array.from(element.children)) observer.observe(child);
     return () => observer.disconnect();
-  }, [html, visible]);
+  }, [clamp, html, visible]);
 
   if (visible === null) return null;
   return (
