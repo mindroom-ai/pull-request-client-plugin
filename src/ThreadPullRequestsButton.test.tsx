@@ -6,6 +6,8 @@ import { renderPluginComponent } from '@mindroom/client-sdk/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import plugin from './index';
 import { setShownPullRequest } from './shownPullRequest';
+import type { PullRequest } from './github';
+import { pullRequestKey } from './queries';
 import { trapOptions } from './testing/focusTrapStandIn';
 import { githubServer } from './testing/mindroomServer';
 import { linkedRoom, type TestLink, type TestWorktree } from './testing/linkedRoom';
@@ -62,6 +64,13 @@ const serve = (pulls: Record<number, unknown>, hold?: number) =>
   });
 // Where `usePluginStorage` keeps the GitHub token of the test's account.
 const TOKEN_KEY = 'mindroom.plugin:%40plugin-tester%3Aexample.org/pull-requests/githubToken';
+const withToken = () => localStorage.setItem(TOKEN_KEY, 'ghp_test');
+/** What another surface read anonymously of pull request `number`, as it keeps it. */
+const readAnonymously = (number: number, state: PullRequest['state']) =>
+  client.setQueryData(
+    [...pullRequestKey({ owner: 'mindroom-ai', repo: 'mindroom-chat', number }), false],
+    { state, draft: false } as PullRequest
+  );
 const icon = (view: View) => trigger(view).querySelector('svg')!;
 const tone = (view: View) =>
   [...icon(view).classList].find((name) => name.startsWith('mrpr-tone-'));
@@ -167,6 +176,7 @@ describe('ThreadPullRequestsButton', () => {
     // A pull request GitHub refused counts for nothing.
     [{ 1: pull('merged') }, 'merged', 'Pull requests (2): Merged'],
   ])('takes the tone and icon of its pull requests together: %#', async (pulls, state, label) => {
+    withToken();
     serve(pulls);
     const { view } = await show([{ number: 1 }, { number: 2 }]);
     await vi.waitFor(() => expect(tone(view)).toBe(`mrpr-tone-${state}`));
@@ -181,6 +191,25 @@ describe('ThreadPullRequestsButton', () => {
         }[state]
       }`
     );
+  });
+
+  it('asks GitHub nothing without a token, and takes only the answers other surfaces read', async () => {
+    serve({ 1: pull('open'), 2: pull('merged') });
+    const first = await show([{ number: 1 }, { number: 2 }]);
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 10)));
+    expect(tone(first.view)).toBeUndefined();
+    expect(fetchMock).not.toHaveBeenCalled();
+    first.view.unmount();
+    // A chip read one: still neutral, as the other might be open.
+    readAnonymously(2, 'merged');
+    const second = await show([{ number: 1 }, { number: 2 }]);
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 10)));
+    expect(tone(second.view)).toBeUndefined();
+    second.view.unmount();
+    readAnonymously(1, 'merged');
+    const { view } = await show([{ number: 1 }, { number: 2 }]);
+    await vi.waitFor(() => expect(tone(view)).toBe('mrpr-tone-merged'));
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('leaves out a pull request whose refetch GitHub refused, also one that showed before', async () => {
@@ -200,6 +229,7 @@ describe('ThreadPullRequestsButton', () => {
   });
 
   it('names one pull request with its state', async () => {
+    withToken();
     serve({ 1: pull('merged') });
     const { view } = await show([{ number: 1 }]);
     await vi.waitFor(() => expect(tone(view)).toBe('mrpr-tone-merged'));
@@ -207,6 +237,7 @@ describe('ThreadPullRequestsButton', () => {
   });
 
   it('stays neutral while every pull request is refused', async () => {
+    withToken();
     const { view } = await show([{ number: 1 }, { number: 2 }]);
     await vi.waitFor(() => expect(pullRequestRequests()).toHaveLength(2));
     await act(async () => new Promise((resolve) => setTimeout(resolve, 10)));
@@ -215,6 +246,7 @@ describe('ThreadPullRequestsButton', () => {
   });
 
   it('stays neutral while one still loads, unless those answered already make it open', async () => {
+    withToken();
     serve({ 1: pull('merged'), 2: pull('open') }, 2);
     const { view } = await show([{ number: 1 }, { number: 2 }]);
     await vi.waitFor(() => expect(pullRequestRequests()).toHaveLength(2));

@@ -2,8 +2,10 @@
 // menu of them, as T3 Code's thread details do. Each item is the pull request's details row and
 // opens it in the side panel (the one the open panel shows is current), or on GitHub where the page
 // has no panel; the thread's worktree comes last, as an item that does nothing. The button's icon
-// and tone are its pull requests' state together, as T3 Code's thread badge: it asks GitHub for
-// each pull request no surface has loaded yet (none for checks), once, refusals included.
+// and tone are its pull requests' state together, as T3 Code's thread badge. With a token or the
+// GitHub account connected in MindRoom it asks GitHub for each pull request no surface has loaded
+// yet (none for checks), once, refusals included; without either it asks nothing and goes by what
+// the chips and the menu's rows read.
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import FocusTrap from 'focus-trap-react';
 import { IconButton, type RectCords } from 'folds';
@@ -26,7 +28,7 @@ import { useShownPullRequest } from './shownPullRequest';
 import { ANSWERED_ONLY, Details } from './ThreadDetails';
 import { useThreadPullRequests, type ThreadWorktree } from './threadPullRequests';
 import { pluginRootStyle } from './theme';
-import { RoomGitHub } from './token';
+import { RoomGitHub, useGitHubAccess } from './token';
 
 /** Whether `a` and `b` name one pull request; GitHub's owner and repository names ignore case. */
 const samePullRequest = (a: PullRequestRef, b: PullRequestRef) =>
@@ -63,7 +65,13 @@ type MenuProps = {
  * in, only an open one already settles it, so the tone never changes once shown.
  */
 function useCombinedState(pullRequests: readonly PullRequestRef[]) {
-  const queries = usePullRequests(pullRequests, ANSWERED_ONLY);
+  // Without a token or MindRoom, GitHub allows 60 requests an hour: the button then asks for
+  // nothing and goes by what the chips and the menu's rows read.
+  const anonymous = useGitHubAccess().via === undefined;
+  const queries = usePullRequests(pullRequests, {
+    ...ANSWERED_ONLY,
+    ...(anonymous && { enabled: false }),
+  });
   // A refetch GitHub refused keeps the answer before beside the error: that one counts no more.
   const answered = queries.flatMap((query) =>
     query.status === 'success' ? [resolvePullRequestState(query.data).key] : []
