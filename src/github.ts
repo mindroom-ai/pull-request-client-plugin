@@ -121,6 +121,8 @@ export type GitHubViaServer = {
   account: string;
   /** Told when the server answers that the account is no longer connected. */
   disconnected(): void;
+  /** Told when the server answers that it cannot read the token saved there. */
+  unreadable(): void;
 };
 
 /** How a request reaches GitHub as someone: the token stored in the browser, or MindRoom. */
@@ -154,7 +156,8 @@ type GitHubInit = {
  * One request to GitHub's API at `path`: to GitHub itself, with the token when one is given, or
  * through the MindRoom server, whose answer of GitHub's status, body and rate limit headers is made
  * a `Response` again, so that both are read the same. Rejects when no answer came, and tells the
- * server's `disconnected` when it says the account is no longer connected.
+ * server's `disconnected` when it says the account is no longer connected, `unreadable` when it
+ * cannot read the token saved there.
  */
 async function githubFetch(
   token: GitHubAuth | undefined,
@@ -186,12 +189,11 @@ async function githubFetch(
       })
     );
   } catch (error) {
-    if (
-      error instanceof MindroomServerError &&
-      error.status === 409 &&
-      record(error.body)?.error === 'github_not_connected'
-    ) {
-      token.disconnected();
+    const code = error instanceof MindroomServerError ? record(error.body)?.error : undefined;
+    if (error instanceof MindroomServerError && error.status === 409) {
+      if (code === 'github_not_connected') token.disconnected();
+    } else if (error instanceof MindroomServerError && error.status === 503) {
+      if (code === 'github_token_unreadable') token.unreadable();
     }
     throw error;
   }

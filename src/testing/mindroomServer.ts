@@ -46,7 +46,9 @@ const MALFORMED = /^$|[\s\u0000-\u001f\u007f-\u009f]|^.{513}/s;
  * body as JSON. `connected(false)` makes it answer as MindRoom does once the App connection is no
  * longer there: 409 `github_not_connected` while no token is saved either. A token saved with
  * `PUT /api/github/token` is checked with GitHub's `/user`, comes before the App, and goes with
- * each request as its `Authorization`.
+ * each request as its `Authorization`. `unreadable(true)` makes that token one MindRoom cannot
+ * read: 503 `github_token_unreadable` to the status and each request, until it is saved anew or
+ * removed.
  */
 export function githubServer(
   github: GitHub,
@@ -55,7 +57,12 @@ export function githubServer(
 ) {
   let connected = true;
   let saved: { token: string; login: string } | undefined;
+  // While the saved token cannot be read, MindRoom answers this to the status and each request.
+  let damaged = false;
+  const unreadable = () =>
+    new MindroomServerError('Service Unavailable', 503, { error: 'github_token_unreadable' });
   const statusNow = () => {
+    if (damaged) throw unreadable();
     const app = connected ? status : { connected: false };
     if (!saved) return app;
     const withApp = (app as { connected?: unknown }).connected === true;
@@ -88,6 +95,7 @@ export function githubServer(
     if (!response.ok) throw unreachable;
     const { login } = (await response.json()) as { login: string };
     saved = { token, login };
+    damaged = false;
     return { connected: true, via: 'token', login };
   };
   const request = vi.fn(async (path: string, init?: RequestInit): Promise<unknown> => {
@@ -95,15 +103,17 @@ export function githubServer(
     if (path === '/api/github/token' && init?.method === 'PUT') return saveToken(init);
     if (path === '/api/github/token' && init?.method === 'DELETE') {
       saved = undefined;
+      damaged = false;
       return statusNow();
     }
     if (path !== '/api/github/request') throw new MindroomServerError('Not Found', 404);
-    if (!connected && !saved) {
-      throw new MindroomServerError('Conflict', 409, { error: 'github_not_connected' });
-    }
     const { method, path: githubPath, body, accept } = JSON.parse(String(init?.body)) as Payload;
     if (!allowedPath(githubPath)) {
       throw new MindroomServerError('Bad Request', 400, { error: 'github_path_not_allowed' });
+    }
+    if (damaged) throw unreadable();
+    if (!connected && !saved) {
+      throw new MindroomServerError('Conflict', 409, { error: 'github_not_connected' });
     }
     const headers: Record<string, string> = { Accept: accept ?? 'application/vnd.github+json' };
     if (saved) headers.Authorization = `Bearer ${saved.token}`;
@@ -145,6 +155,10 @@ export function githubServer(
     storedToken: () => saved?.token,
     connected: (value: boolean) => {
       connected = value;
+    },
+    /** Makes the saved token one MindRoom cannot read, until another is saved or it is removed. */
+    unreadable: (value: boolean) => {
+      damaged = value;
     },
   };
 }

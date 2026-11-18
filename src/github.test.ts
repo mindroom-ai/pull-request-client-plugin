@@ -722,7 +722,7 @@ describe('commit paths', () => {
       Promise.resolve(json(url.includes('/compare/release/1.0...abc123') ? { behind_by: 2 } : {}))
     );
     const { server } = githubServer(github);
-    const via = { server, account: 'a', disconnected: vi.fn() };
+    const via = { server, account: 'a', disconnected: vi.fn(), unreadable: vi.fn() };
     expect(await fetchBehindBy(ref, 'release/1.0', 'abc123', via)).toBe(2);
     // The stand-in refuses what MindRoom refuses, such as an encoded slash.
     await expect(
@@ -1431,7 +1431,12 @@ describe('through MindRoom', () => {
   function viaServer(
     answer: (sent: Sent) => unknown,
     origin = 'https://mindroom.example.org'
-  ): GitHubViaServer & { sent: Sent[]; paths: string[]; disconnected: ReturnType<typeof vi.fn> } {
+  ): GitHubViaServer & {
+    sent: Sent[];
+    paths: string[];
+    disconnected: ReturnType<typeof vi.fn>;
+    unreadable: ReturnType<typeof vi.fn>;
+  } {
     const sent: Sent[] = [];
     const paths: string[] = [];
     const request = (path: string, init?: RequestInit) => {
@@ -1448,6 +1453,7 @@ describe('through MindRoom', () => {
       server: { origin, request: request as GitHubViaServer['server']['request'] },
       account: 'octo',
       disconnected: vi.fn(),
+      unreadable: vi.fn(),
       sent,
       paths,
     };
@@ -1572,5 +1578,21 @@ describe('through MindRoom', () => {
     });
     await expect(fetchPullRequest(ref, via)).rejects.toEqual(new GitHubError('failed', 0));
     expect(via.disconnected).not.toHaveBeenCalled();
+    expect(via.unreadable).not.toHaveBeenCalled();
+  });
+
+  it('says the server cannot read the token saved there when it answers so, to a read and a write', async () => {
+    const damaged = () => {
+      throw new MindroomServerError('Unavailable', 503, { error: 'github_token_unreadable' });
+    };
+    const read = viaServer(damaged);
+    await expect(fetchPullRequest(ref, read)).rejects.toEqual(new GitHubError('failed', 0));
+    expect(read.unreadable).toHaveBeenCalledTimes(1);
+    expect(read.disconnected).not.toHaveBeenCalled();
+    const write = viaServer(damaged);
+    await expect(
+      runPullRequestAction(writeRef, writePull, 'close', 'squash', write)
+    ).rejects.toEqual(new GitHubWriteError('failed', 0));
+    expect(write.unreadable).toHaveBeenCalledTimes(1);
   });
 });

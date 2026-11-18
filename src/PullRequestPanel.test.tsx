@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act } from 'react-dom/test-utils';
+import { MindroomServerError } from '@mindroom/client-sdk/server';
 import { renderPluginComponent } from '@mindroom/client-sdk/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PullRequestRef } from './github';
@@ -1176,6 +1177,76 @@ describe('with the GitHub account connected in MindRoom', () => {
     await click(view.getByRole('button', { name: 'Save' }));
     expect(await view.findByText('Signed in as pat-login through MindRoom (token).')).toBeTruthy();
     expect(view.queryByText('Token removed from MindRoom.')).toBeNull();
+  });
+
+  const UNREADABLE = 'MindRoom cannot read the token saved there. Save a new one or remove it.';
+
+  it('says MindRoom cannot read the token saved there, and saves a new one there', async () => {
+    const mindroom = githubServer(withUser);
+    await saveInMindroom(mindroom);
+    mindroom.unreadable(true);
+    roomServer.current = mindroom.server;
+    const view = await show();
+    expect(await view.findByText(UNREADABLE)).toBeTruthy();
+    // Meanwhile the panel reads without it, as nothing goes through MindRoom.
+    expect(await view.findByText('Add pull request cards')).toBeTruthy();
+    expect(mindroom.githubRequests()).toEqual([]);
+    const inMindroom = view.getByLabelText('Save in MindRoom at mindroom.example.org');
+    expect((inMindroom as HTMLInputElement).checked).toBe(true);
+    expect(view.getByRole('button', { name: 'Remove token from MindRoom' })).toBeTruthy();
+    await type(view.getByLabelText('GitHub token'), 'ghp_good');
+    await click(view.getByRole('button', { name: 'Save' }));
+    expect(await view.findByText('Signed in as pat-login through MindRoom (token).')).toBeTruthy();
+    expect(view.queryByText(UNREADABLE)).toBeNull();
+    expect(view.queryByLabelText('GitHub token')).toBeNull();
+  });
+
+  it('offers to remove the token MindRoom cannot read where the pull request does not read without it', async () => {
+    const mindroom = githubServer(withUser);
+    await saveInMindroom(mindroom);
+    mindroom.connected(false);
+    mindroom.unreadable(true);
+    fetchMock.mockImplementation(async () => respond({ message: 'Not Found' }, 404));
+    roomServer.current = mindroom.server;
+    const view = await show();
+    expect(await view.findByText(UNREADABLE)).toBeTruthy();
+    // Asking again would get the same answer.
+    expect(view.queryByRole('button', { name: 'Try again' })).toBeNull();
+    view.getByRole('button', { name: 'Remove token from MindRoom' }).focus();
+    await click(view.getByRole('button', { name: 'Remove token from MindRoom' }));
+    const note = await view.findByText('Token removed from MindRoom.');
+    await waitUntil(() => expect(document.activeElement).toBe(note));
+    expect(view.queryByText(UNREADABLE)).toBeNull();
+    expect(mindroom.tokenRequests()).toEqual(['PUT', 'DELETE']);
+  });
+
+  it('says MindRoom cannot read the token once a request through it answers so', async () => {
+    const mindroom = githubServer(withUser);
+    await saveInMindroom(mindroom);
+    roomServer.current = mindroom.server;
+    const view = await show();
+    expect(await view.findByText('Signed in as pat-login through MindRoom (token).')).toBeTruthy();
+    mindroom.unreadable(true);
+    await click(await view.findByRole('button', { name: 'Merge' }));
+    await click(await view.findByRole('button', { name: 'Confirm merge?' }));
+    expect(await view.findByText(UNREADABLE)).toBeTruthy();
+    expect(view.queryByText(/through MindRoom/)).toBeNull();
+  });
+
+  it('keeps reading without MindRoom, saying nothing of the token, on any other 503', async () => {
+    const mindroom = githubServer(github);
+    const real = mindroom.server.request.getMockImplementation()!;
+    mindroom.server.request.mockImplementation(async (path, init) => {
+      if (path !== '/api/github/status') return real(path, init);
+      throw new MindroomServerError('Service Unavailable', 503, {
+        error: 'github_connection_unavailable',
+      });
+    });
+    roomServer.current = mindroom.server;
+    const view = await show();
+    expect(await view.findByText('Add pull request cards')).toBeTruthy();
+    expect(view.queryByText(UNREADABLE)).toBeNull();
+    expect(view.queryByLabelText('GitHub token')).toBeNull();
   });
 
   it('names the token saved in MindRoom, and removes it from there, back to the App', async () => {

@@ -108,9 +108,15 @@ type ServerStatus = {
   via?: 'token' | 'app';
   /** While `via` is the token: whether MindRoom goes with the App once the token is removed. */
   appConnected?: boolean;
+  /**
+   * While not connected: MindRoom cannot read the token saved there (`503
+   * github_token_unreadable`), and uses nothing until another is saved or it is removed.
+   */
+  unreadable?: boolean;
 };
 
 const NOT_CONNECTED: ServerStatus = { connected: false, login: undefined };
+const UNREADABLE: ServerStatus = { connected: false, login: undefined, unreadable: true };
 
 // Not under `pull-requests`, whose queries a new token asks again: the status is the server's.
 const statusKey = (origin: string) => ['pull-requests-github-status', origin] as const;
@@ -123,7 +129,11 @@ const statusStaleTime = (status: ServerStatus | undefined) =>
 
 /** Which connection a status names, for telling when it changed. */
 const identity = (status: ServerStatus) =>
-  status.connected ? `connected:${status.via ?? ''}:${status.login ?? ''}` : 'none';
+  status.connected
+    ? `connected:${status.via ?? ''}:${status.login ?? ''}`
+    : status.unreadable
+    ? 'unreadable'
+    : 'none';
 
 /** How GitHub is reached in a key of `queries.ts`, after the pull request or the repository. */
 const accessOf = (queryKey: QueryKey) => queryKey[queryKey[1] === 'repo' ? 4 : 5];
@@ -231,9 +241,13 @@ const statusQuery = (queryClient: QueryClient, server: MindroomServer | undefine
     const { origin } = server as MindroomServer;
     const { fence } = credentialOf(queryClient, origin);
     // The limit is each request's own: the query keeps this function for whoever asks next.
-    const now = statusOf(
-      await (server as MindroomServer).request('/api/github/status', { signal: changeLimit() })
-    );
+    const now = await (server as MindroomServer)
+      .request('/api/github/status', { signal: changeLimit() })
+      .then(statusOf, (error: unknown) => {
+        // Asking again would get the same: this one is a state of its own, kept as a status.
+        if (isUnreadable(error)) return UNREADABLE;
+        throw error;
+      });
     if (fence !== credentialOf(queryClient, origin).fence) {
       return queryClient.getQueryData<ServerStatus>(statusKey(origin)) ?? now;
     }
@@ -267,6 +281,11 @@ function viaServer(
         setStatus(queryClient, server.origin, NOT_CONNECTED);
       }
     },
+    unreadable: () => {
+      if (fence === credentialOf(queryClient, server.origin).fence) {
+        setStatus(queryClient, server.origin, UNREADABLE);
+      }
+    },
   };
 }
 
@@ -283,6 +302,11 @@ export type GitHubAccess = {
   connection: 'token' | 'app' | undefined;
   /** With the token saved in MindRoom: whether the GitHub App is used once it is removed. */
   appConnected: boolean;
+  /**
+   * MindRoom cannot read the token saved there, with no token stored: nothing goes through it
+   * (`via` is undefined) until another is saved there or it is removed.
+   */
+  unreadable: boolean;
   /**
    * What the query keys carry of it, never a token: false without either, true with the token,
    * `server:<origin>:<login>:<generation>` through MindRoom (`unknown` for a login the server
@@ -342,6 +366,12 @@ function refusalOf(error: unknown): { status: number; code: unknown } {
   const code =
     typeof body === 'object' && body !== null ? (body as { error?: unknown }).error : undefined;
   return { status, code };
+}
+
+/** Whether MindRoom answered that it cannot read the token saved there. */
+function isUnreadable(error: unknown): boolean {
+  const { status, code } = refusalOf(error);
+  return status === 503 && code === 'github_token_unreadable';
 }
 
 /**
@@ -523,11 +553,13 @@ export function RemoveServerToken() {
 
 function RemoveButton({ note }: { note: RemovedToken }) {
   const t = usePluginTranslation('pull-requests');
-  const { via, connection, appConnected } = useGitHubAccess();
+  const { via, connection, appConnected, unreadable } = useGitHubAccess();
   const serverToken = useServerToken();
   const [failed, setFailed] = useState(false);
   const fallsBack = useId();
-  const shown = via === 'server' && connection === 'token' && serverToken !== undefined;
+  // Also the token MindRoom cannot read, which removing there mends.
+  const shown =
+    ((via === 'server' && connection === 'token') || unreadable) && serverToken !== undefined;
   if (!shown) return null;
   const remove = async () => {
     if (serverToken.busy()) return;
@@ -584,6 +616,8 @@ export function useGitHubAccess(): GitHubAccess {
   const login = connected ? status.data?.login : undefined;
   const connection = connected ? status.data?.via : undefined;
   const appConnected = connected && status.data?.appConnected === true;
+  const unreadable =
+    server !== undefined && token === undefined && status.data?.unreadable === true;
   const current = useCallback((): { key: AccessKey; auth: GitHubAuth | undefined } => {
     const stored = storedToken();
     if (stored !== undefined) return { key: true, auth: stored };
@@ -626,6 +660,7 @@ export function useGitHubAccess(): GitHubAccess {
       login,
       connection,
       appConnected,
+      unreadable,
       // While a token is saved or removed there, the key before: what was read stays on screen.
       key:
         token !== undefined
@@ -654,6 +689,7 @@ export function useGitHubAccess(): GitHubAccess {
       serverPending,
       status.isPending,
       token,
+      unreadable,
     ]
   );
 }
@@ -673,8 +709,11 @@ export function TokenForm({
   onCancel,
   onSaved,
 }: {
-  /** Why it shows; `override`, to use a token instead of MindRoom's connection, has no hint. */
-  reason: 'notFound' | 'rateLimited' | 'badToken' | 'override';
+  /**
+   * Why it shows; `override`, to use a token instead of MindRoom's connection, has no hint;
+   * `unreadable`, MindRoom cannot read the token saved there, also offers to remove it.
+   */
+  reason: 'notFound' | 'rateLimited' | 'badToken' | 'unreadable' | 'override';
   inputRef?: Ref<HTMLInputElement>;
   /** Closes the form without saving, for one the person opened; without it, none shows. */
   onCancel?: () => void;
@@ -688,8 +727,11 @@ export function TokenForm({
   const [value, setValue] = useState('');
   // In a room with a MindRoom server, the token is saved there only once the person chose that
   // server, by its name: the room's server may be any that an agent's account published. Another
-  // server, once the room has one, is not chosen until the person chooses it.
-  const [chosen, setChosen] = useState<string>();
+  // server, once the room has one, is not chosen until the person chooses it. A token that server
+  // cannot read is mended there, which names it already.
+  const [chosen, setChosen] = useState(() =>
+    reason === 'unreadable' ? serverToken?.origin : undefined
+  );
   if (chosen !== undefined && chosen !== serverToken?.origin) setChosen(undefined);
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState<SaveProblem>();
@@ -734,7 +776,13 @@ export function TokenForm({
           <GitHubConnectedNote /> {t('token.overrides')}
         </p>
       ) : null}
-      {reason === 'override' ? null : <p className="mrpr-status">{t(`token.hint.${reason}`)}</p>}
+      {reason === 'unreadable' ? (
+        <p className="mrpr-status">
+          <span role="alert">{t('token.hint.unreadable')}</span> <RemoveServerToken />
+        </p>
+      ) : reason === 'override' ? null : (
+        <p className="mrpr-status">{t(`token.hint.${reason}`)}</p>
+      )}
       <div className="mrpr-token-row">
         <input
           ref={setField}

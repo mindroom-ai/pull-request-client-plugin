@@ -319,7 +319,7 @@ function Panel({ roomId, request }: PanelProps) {
   }, [roomId, ref]);
   const query = usePullRequest(ref);
   const { token, forget } = useGitHubToken();
-  const { via } = useGitHubAccess();
+  const { via, unreadable } = useGitHubAccess();
   const tokenForm = usePanelTokenForm();
   // The token form a person opened to use a token instead of MindRoom's connection, which goes
   // once a token is saved.
@@ -492,14 +492,15 @@ function Panel({ roomId, request }: PanelProps) {
               ) : null}
             </div>
           </div>
-          {/* One token form for every part below that a token would let load. */}
-          {tokenForm.reason || (overriding && via === 'server') ? (
+          {/* One token form for every part below that a token would let load, and for the token
+              MindRoom cannot read, which nothing else mends. */}
+          {unreadable || tokenForm.reason || (overriding && via === 'server') ? (
             <div className="mrpr-panel-token">
               <TokenForm
-                reason={tokenForm.reason ?? 'override'}
+                reason={unreadable ? 'unreadable' : tokenForm.reason ?? 'override'}
                 inputRef={tokenForm.inputRef}
                 // Only the form opened to use a token instead closes: a failure keeps the other.
-                onCancel={tokenForm.reason ? undefined : () => setOverriding(false)}
+                onCancel={unreadable || tokenForm.reason ? undefined : () => setOverriding(false)}
                 // A token saved in MindRoom keeps the requests going through it, so the form
                 // opened for it closes once it is saved.
                 onSaved={() => setOverriding(false)}

@@ -43,7 +43,7 @@ export function GitHubErrorState({
 }) {
   const t = usePluginTranslation('pull-requests');
   const { token, forget } = useGitHubToken();
-  const { via, connection, recheck } = useGitHubAccess();
+  const { via, connection, unreadable, recheck } = useGitHubAccess();
   const focusTokenForm = usePanelTokenFormFor(compact ? error : undefined);
   const message = useGitHubErrorMessage(error);
   const hasToken = token !== undefined;
@@ -72,6 +72,15 @@ export function GitHubErrorState({
             {t('token.add')}
           </button>
         ) : null}
+      </div>
+    );
+  }
+  // What GitHub answered without it says little: the token MindRoom cannot read is what to mend,
+  // and asking again would get the same.
+  if (unreadable) {
+    return (
+      <div>
+        <TokenForm reason="unreadable" />
       </div>
     );
   }
