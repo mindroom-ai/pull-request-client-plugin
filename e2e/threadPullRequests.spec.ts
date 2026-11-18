@@ -23,7 +23,8 @@ import { touch } from '@mindroom/e2e/touch';
 // the room state events MindRoom's backend plugin writes; here the room's creator writes them. A
 // thread's card in the Compact view shows a chip per pull request, two at most (one on a phone) and
 // the count of the rest; a click on a chip opens the thread and the pull request in the side
-// panel; the open thread's banner has one button for its pull requests, whose menu lists them and
+// panel; the open thread's banner has one button for its pull requests, in the color of their state
+// together (open, merged or closed), whose menu lists them and
 // opens each in the panel, the panel's marked current; a mouse that rests on a chip on a card
 // opens its hover card beside it;
 // a link written or cleared while the room is open shows on its card at once, also after a gap in
@@ -869,7 +870,7 @@ test("a chip on a card opens the thread and its pull request; the banner's menu 
   });
 
   // In the thread's banner, one button whose menu lists its pull requests, the panel's current.
-  await expect(prButton(page)).toHaveAttribute('aria-label', 'Pull requests (2)');
+  await expect(prButton(page)).toHaveAttribute('aria-label', 'Pull requests (2): Open');
   await expect(prButton(page)).toHaveText('2');
   let items = await openPrMenu(page);
   await expect(items).toHaveCount(2);
@@ -905,6 +906,16 @@ const openProgram = async (page: Page) => {
   // The banner's title gives the button room, so on a phone it shows only its start.
   await expect(banner(page)).toContainText('Platform', { timeout: 30_000 });
   await expect(page.getByText(THREADS.program.replies[1][1], { exact: true })).toBeVisible();
+  await expect(prButton(page)).toBeVisible({ timeout: 30_000 });
+};
+
+/** Opens the thread `key` from its card in the room, as `openProgram` does. */
+const openThread = async (page: Page, key: keyof typeof THREADS) => {
+  await page.goto(`/home/${encodeURIComponent(roomId)}`);
+  const threadCard = card(page, roots[key]);
+  await threadCard.scrollIntoViewIfNeeded({ timeout: 120_000 });
+  await threadCard.getByText(THREADS[key].topic).click();
+  await expect(banner(page)).toContainText(THREADS[key].topic.split(' ')[0]!, { timeout: 30_000 });
   await expect(prButton(page)).toBeVisible({ timeout: 30_000 });
 };
 
@@ -961,7 +972,7 @@ test("the open thread's pull requests are one button in its banner, whose menu l
   await openProgram(page);
   const button = prButton(page);
   const more = banner(page).getByRole('button', { name: 'Thread options' });
-  await expect(button).toHaveAttribute('aria-label', 'Pull requests (11)');
+  await expect(button).toHaveAttribute('aria-label', 'Pull requests (11): Open');
   await expect(button).toHaveText('11');
   // No strip under the room header any more.
   await expect(page.locator('.mrpr-thread-strip')).toHaveCount(0);
@@ -1092,6 +1103,44 @@ test("the open thread's pull requests are one button in its banner, whose menu l
   await shot(page, 'menu-current', { keepPointer: true });
   await page.keyboard.press('Escape');
   await writeWorktree(roots.program, {});
+  expect(unanswered).toEqual([]);
+  expect(warnings).toEqual([]);
+});
+
+test("the banner's pull requests button has the color of its pull requests' state together", async ({
+  page,
+}) => {
+  test.setTimeout(4 * 60_000);
+  const unanswered = await stubGitHub(page);
+  const warnings = listenerWarnings(page);
+  await openRoom(page);
+  const icon = (state: keyof typeof STATE_TONE) =>
+    prButton(page).locator(`svg.${STATE_TONE[state]}`);
+  // Open while any is open: the program's eleven, some merged and one closed among them.
+  await openProgram(page);
+  await expect(icon('open')).toHaveCount(1, { timeout: 30_000 });
+  await expect(prButton(page)).toHaveAttribute('aria-label', 'Pull requests (11): Open');
+  await shot(page, 'button-open');
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await expect(page.locator('html')).toHaveAttribute('data-theme-kind', 'dark');
+  await expect(icon('open')).toHaveCount(1);
+  await shot(page, 'button-open-dark');
+  await page.emulateMedia({ colorScheme: 'light' });
+  // Closed when none is open and one was closed without merging: the release's.
+  await openThread(page, 'release');
+  await expect(icon('closed')).toHaveCount(1, { timeout: 30_000 });
+  await expect(prButton(page)).toHaveAttribute('aria-label', 'Pull requests (3): Closed');
+  await shot(page, 'button-closed');
+  // Merged when every one is: a thread with the merged changelog alone.
+  await writeLink(roots.search, PULLS.changelog);
+  try {
+    await openThread(page, 'search');
+    await expect(icon('merged')).toHaveCount(1, { timeout: 30_000 });
+    await expect(prButton(page)).toHaveAttribute('aria-label', 'Pull request: Merged');
+    await shot(page, 'button-merged');
+  } finally {
+    await writeLink(roots.search, PULLS.changelog, {});
+  }
   expect(unanswered).toEqual([]);
   expect(warnings).toEqual([]);
 });
