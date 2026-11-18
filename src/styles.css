@@ -1466,7 +1466,9 @@
   flex: 1;
   align-items: center;
   gap: 6px;
+  /* No inline padding of the button's own, so the title starts where the rows above do. */
   padding-block: 10px;
+  padding-inline: 0;
   border: 0;
   background: transparent;
   color: var(--pr-muted);
