@@ -158,9 +158,12 @@ function readAgain(queryClient: QueryClient, refetch?: AccessKey) {
     .findAll({
       queryKey,
       type: 'inactive',
-      // Also a refusal beside what was read before it, which a part asks again for no more by itself.
-      predicate: ({ state }) =>
-        state.status === 'error' && (state.data === undefined || refused(state.error)),
+      // Under the key read again also a refusal beside what was read before it, which a part asks
+      // again for no more by itself.
+      predicate: ({ queryKey, state }) =>
+        state.status === 'error' &&
+        (state.data === undefined ||
+          (refetch !== undefined && accessOf(queryKey) === refetch && refused(state.error))),
     })
     .forEach((query) => query.reset());
   void queryClient.invalidateQueries({ queryKey, refetchType: 'none' });

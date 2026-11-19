@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import plugin from './index';
 import { setShownPullRequest } from './shownPullRequest';
 import type { PullRequest } from './github';
-import { pullRequestKey } from './queries';
+import { pullRequestKey, usePullRequest } from './queries';
 import { trapOptions } from './testing/focusTrapStandIn';
 import { githubServer } from './testing/mindroomServer';
 import { linkedRoom, type TestLink, type TestWorktree } from './testing/linkedRoom';
@@ -648,6 +648,41 @@ describe('ThreadPullRequestsButton', () => {
       serve({ 1: pull('merged') });
       await act(async () => tokens.current!.setToken('ghp_working'));
       await vi.waitFor(() => expect(tone(view)).toBe('mrpr-tone-merged'));
+    });
+
+    it('keeps an anonymous refusal through a browser token set and removed, as the menu then asks nothing', async () => {
+      serve({ 1: pull('open') });
+      const tokens = { current: undefined as ReturnType<typeof useGitHubToken> | undefined };
+      const Chip = ({ shown }: { shown: boolean }) => {
+        tokens.current = useGitHubToken();
+        const ref = { owner: 'mindroom-ai', repo: 'mindroom-chat', number: 1 };
+        usePullRequest(shown ? ref : undefined);
+        return null;
+      };
+      const tree = (shown: boolean) => (
+        <QueryClientProvider client={client}>
+          <Chip shown={shown} />
+        </QueryClientProvider>
+      );
+      const chip = await renderPluginComponent(tree(true), { id: 'pull-requests', plugin });
+      const key = [
+        ...pullRequestKey({ owner: 'mindroom-ai', repo: 'mindroom-chat', number: 1 }),
+        false,
+      ];
+      await vi.waitFor(() => expect(client.getQueryData(key)).toBeDefined());
+      // Read again, refused: the query keeps the answer before beside the 404.
+      serve({});
+      await act(async () => client.invalidateQueries());
+      expect(client.getQueryState(key)?.status).toBe('error');
+      expect(pullRequestRequests()).toHaveLength(2);
+      chip.rerender(tree(false));
+      await act(async () => tokens.current!.setToken('ghp_test'));
+      await act(async () => tokens.current!.forget());
+      chip.unmount();
+      const { view } = await show([{ number: 1 }]);
+      await openMenu(view);
+      await act(async () => new Promise((resolve) => setTimeout(resolve, 10)));
+      expect(pullRequestRequests()).toHaveLength(2);
     });
 
     it('with a token, reads a stale answer again when the window is focused while the page shows', async () => {
