@@ -22,7 +22,7 @@ import { usePullRequestStatus } from './pullRequestStatus';
 import {
   answerOf,
   NO_FOCUS_REFETCH,
-  refused,
+  unlessRefused,
   usePullRequests,
   type RefetchOptions,
 } from './queries';
@@ -40,9 +40,11 @@ export const ANSWERED_ONLY = { ...NO_FOCUS_REFETCH, refetchOnMount: false, retry
 
 // How often the banner's button reads again a pull request that is still open or a draft.
 const UNSETTLED_INTERVAL = 5 * 60_000;
-// After a refusal none of these asks again by itself; a new token or a Refresh still does.
-const unlessRefused = (query: { state: { error: unknown } }) => !refused(query.state.error);
-const STALE_ON_MOUNT: RefetchOptions = { ...ANSWERED_ONLY, refetchOnMount: unlessRefused };
+const STALE_ON_MOUNT: RefetchOptions = {
+  ...ANSWERED_ONLY,
+  refetchOnMount: unlessRefused,
+  refetchOnReconnect: unlessRefused,
+};
 const FOLLOWING: RefetchOptions = {
   ...STALE_ON_MOUNT,
   refetchOnWindowFocus: unlessRefused,
@@ -122,7 +124,7 @@ export function Details({
   const refetch = inBanner ? bannerRefetch : ANSWERED_ONLY;
   // The same queries as each pull request's below, so they ask GitHub nothing more.
   const queries = usePullRequests(pullRequests, refetch);
-  const heads = queries.map((query) => query.data?.headRef);
+  const heads = queries.map((query) => (inBanner ? answerOf(query) : query.data)?.headRef);
   // A refetch GitHub refused keeps the answer before beside the error: as the banner's button, the
   // order takes it for no answer; one that failed (no answer, an error of GitHub's) keeps it.
   const answers = queries.map(answerOf);
@@ -139,6 +141,7 @@ export function Details({
               pullRequest={pullRequest}
               worktreeBranch={worktree?.branch}
               refetch={refetch}
+              inBanner={inBanner}
             />
           )}
         </Fragment>
@@ -157,14 +160,16 @@ function PullRequestDetails({
   pullRequest,
   worktreeBranch,
   refetch,
+  inBanner,
 }: {
   pullRequest: PullRequestRef;
   worktreeBranch: string | undefined;
   refetch: RefetchOptions;
+  inBanner: boolean;
 }) {
   const t = usePluginTranslation('pull-requests');
   // The very ref the chip asks with: the same queries, so a chip that loaded leaves nothing to ask.
-  const { pr, state, checks } = usePullRequestStatus(pullRequest, refetch);
+  const { pr, state, checks } = usePullRequestStatus(pullRequest, refetch, inBanner);
   const mark = checks && pullRequestChecksStatePresentation(checks);
   const StateIcon = state?.Icon ?? GitPullRequestArrow;
   return (

@@ -10,6 +10,7 @@
 // menu's rows read.
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import FocusTrap from 'focus-trap-react';
+import { useQueryClient, type Query } from '@tanstack/react-query';
 import { IconButton, type RectCords } from 'folds';
 import { GitBranch, GitPullRequestArrow } from 'lucide-react';
 import {
@@ -25,7 +26,7 @@ import {
   resolvePullRequestState,
   type PullRequestStateKey,
 } from './presentation';
-import { answerOf, usePullRequests } from './queries';
+import { answerOf, pullRequestKey, STALE_TIME, unlessRefused, usePullRequests } from './queries';
 import { useShownPullRequest } from './shownPullRequest';
 import { Details, useBannerRefetch } from './ThreadDetails';
 import { useThreadPullRequests, type ThreadWorktree } from './threadPullRequests';
@@ -63,6 +64,17 @@ function useCombinedState(pullRequests: readonly PullRequestRef[]) {
     ...useBannerRefetch(true),
     ...(anonymous && { enabled: false }),
   });
+  // TanStack hears the page shown again, not its window focused while shown: that reads here.
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    if (anonymous) return undefined;
+    const keys = pullRequests.map((ref) => JSON.stringify([...pullRequestKey(ref), access.key]));
+    const predicate = (query: Query) =>
+      keys.includes(query.queryHash) && unlessRefused(query) && query.isStaleByTime(STALE_TIME);
+    const focus = () => void queryClient.refetchQueries({ predicate }, { cancelRefetch: false });
+    window.addEventListener('focus', focus);
+    return () => window.removeEventListener('focus', focus);
+  }, [access.key, anonymous, pullRequests, queryClient]);
   // A refetch GitHub refused keeps the answer before beside the error: that one counts no more.
   // One that failed (no answer, an error of GitHub's, its rate limit) still does.
   const answered = queries.flatMap((query) => {

@@ -102,6 +102,10 @@ export class GitHubError extends Error {
   }
 }
 
+/** Whether GitHub refused what was asked (not found, or the token): asked again, it would refuse again. */
+export const refused = (error: unknown) =>
+  error instanceof GitHubError && (error.kind === 'notFound' || error.kind === 'badToken');
+
 function errorKind(response: Response, hasToken: boolean): GitHubErrorKind {
   const { status } = response;
   if (status === 404 || (status === 401 && !hasToken)) return 'notFound';

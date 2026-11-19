@@ -27,7 +27,7 @@ import {
   useMindroomServerStatus,
   type MindroomServer,
 } from '@mindroom/client-sdk/server';
-import { GitHubError, type GitHubAuth, type GitHubViaServer } from './github';
+import { GitHubError, refused, type GitHubAuth, type GitHubViaServer } from './github';
 
 const KEY = 'githubToken';
 
@@ -158,7 +158,9 @@ function readAgain(queryClient: QueryClient, refetch?: AccessKey) {
     .findAll({
       queryKey,
       type: 'inactive',
-      predicate: ({ state }) => state.status === 'error' && state.data === undefined,
+      // Also a refusal beside what was read before it, which a part asks again for no more by itself.
+      predicate: ({ state }) =>
+        state.status === 'error' && (state.data === undefined || refused(state.error)),
     })
     .forEach((query) => query.reset());
   void queryClient.invalidateQueries({ queryKey, refetchType: 'none' });

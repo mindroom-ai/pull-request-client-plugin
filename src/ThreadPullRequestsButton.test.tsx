@@ -1,5 +1,10 @@
 // @vitest-environment jsdom
-import { focusManager, QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import {
+  focusManager,
+  onlineManager,
+  QueryClient,
+  QueryClientProvider,
+} from '@tanstack/react-query';
 import type { Room } from 'matrix-js-sdk';
 import { act } from 'react-dom/test-utils';
 import { renderPluginComponent } from '@mindroom/client-sdk/testing';
@@ -12,6 +17,7 @@ import { trapOptions } from './testing/focusTrapStandIn';
 import { githubServer } from './testing/mindroomServer';
 import { linkedRoom, type TestLink, type TestWorktree } from './testing/linkedRoom';
 import { ThreadPullRequestsButton } from './ThreadPullRequestsButton';
+import { useGitHubToken } from './token';
 
 vi.mock('focus-trap-react', async () => ({
   default: (await import('./testing/focusTrapStandIn')).FocusTrapStandIn,
@@ -113,6 +119,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   focusManager.setFocused(undefined);
+  onlineManager.setOnline(true);
   vi.unstubAllGlobals();
 });
 
@@ -569,18 +576,98 @@ describe('ThreadPullRequestsButton', () => {
       await act(async () => vi.advanceTimersByTime(FIVE_MINUTES));
       await vi.waitFor(() => expect(tone(view)).toBeUndefined());
       expect(pullRequestRequests()).toHaveLength(2);
-      // Not on the next interval, nor when the page comes back, nor when the menu opens stale.
+      const asked = fetchMock.mock.calls.length;
+      // Not on the next interval, nor when the page comes back, the window is focused or the network
+      // returns, nor when
+      // the menu opens stale, whose row shows no state and asks for no checks.
       await act(async () => vi.advanceTimersByTime(FIVE_MINUTES));
       later(STALE);
       await comeBack();
+      await act(async () => {
+        window.dispatchEvent(new Event('focus'));
+        onlineManager.setOnline(false);
+        onlineManager.setOnline(true);
+      });
       await openMenu(view);
       await act(async () => new Promise((resolve) => setTimeout(resolve, 10)));
-      expect(pullRequestRequests()).toHaveLength(2);
+      expect(states(view)).toEqual([]);
+      expect(fetchMock.mock.calls.length).toBe(asked);
       // What asks again on purpose (a new token, Refresh) still does.
       serve({ 1: pull('merged') });
       await act(async () => client.invalidateQueries());
       await vi.waitFor(() => expect(tone(view)).toBe('mrpr-tone-merged'));
       expect(pullRequestRequests()).toHaveLength(3);
+    });
+
+    it('with a token, revives no answer from before a refusal when a read after it fails', async () => {
+      withToken();
+      vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
+      serve({ 1: pull('open') });
+      const { view } = await show([{ number: 1 }]);
+      await vi.waitFor(() => expect(tone(view)).toBe('mrpr-tone-open'));
+      serve({});
+      await act(async () => vi.advanceTimersByTime(FIVE_MINUTES));
+      await vi.waitFor(() => expect(tone(view)).toBeUndefined());
+      // Refresh, and GitHub fails: the open pull request from before the refusal stays gone.
+      fetchMock.mockImplementation(async () => respond({ message: 'Bad Gateway' }, 502));
+      await act(async () => client.invalidateQueries());
+      await vi.waitFor(() => expect(pullRequestRequests()).toHaveLength(5), { timeout: 6_000 });
+      await act(async () => new Promise((resolve) => setTimeout(resolve, 10)));
+      expect(tone(view)).toBeUndefined();
+      await act(async () => vi.advanceTimersByTime(2 * FIVE_MINUTES));
+      await act(async () => new Promise((resolve) => setTimeout(resolve, 10)));
+      expect(pullRequestRequests()).toHaveLength(5);
+      serve({ 1: pull('open') });
+      await act(async () => client.invalidateQueries());
+      await vi.waitFor(() => expect(tone(view)).toBe('mrpr-tone-open'));
+    }, 15_000);
+
+    it('with a token, reads again after a refused token is removed and a working one added', async () => {
+      withToken();
+      vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
+      serve({ 1: pull('open') });
+      const tokens = { current: undefined as ReturnType<typeof useGitHubToken> | undefined };
+      const TokenForm = () => {
+        tokens.current = useGitHubToken();
+        return null;
+      };
+      const view = await renderPluginComponent(
+        <QueryClientProvider client={client}>
+          <TokenForm />
+          <div data-testid="slot">
+            <ThreadPullRequestsButton room={linkedRoom(ROOM_ID, [{ number: 1 }])} threadId="$t1" />
+          </div>
+        </QueryClientProvider>,
+        { id: 'pull-requests', plugin }
+      );
+      await vi.waitFor(() => expect(tone(view)).toBe('mrpr-tone-open'));
+      fetchMock.mockImplementation(async () => respond({ message: 'Bad credentials' }, 401));
+      await act(async () => vi.advanceTimersByTime(FIVE_MINUTES));
+      await vi.waitFor(() => expect(tone(view)).toBeUndefined());
+      await act(async () => tokens.current!.forget());
+      serve({ 1: pull('merged') });
+      await act(async () => tokens.current!.setToken('ghp_working'));
+      await vi.waitFor(() => expect(tone(view)).toBe('mrpr-tone-merged'));
+    });
+
+    it('with a token, reads a stale answer again when the window is focused while the page shows', async () => {
+      withToken();
+      vi.useFakeTimers({ toFake: ['Date'] });
+      serve({ 1: pull('open') });
+      const { view } = await show([{ number: 1 }]);
+      await vi.waitFor(() => expect(tone(view)).toBe('mrpr-tone-open'));
+      serve({ 1: pull('merged') });
+      const focus = () =>
+        act(async () => {
+          window.dispatchEvent(new Event('focus'));
+        });
+      await focus();
+      await act(async () => new Promise((resolve) => setTimeout(resolve, 10)));
+      expect(pullRequestRequests()).toHaveLength(1);
+      later(STALE);
+      await focus();
+      await vi.waitFor(() => expect(tone(view)).toBe('mrpr-tone-merged'));
+      expect(pullRequestRequests()).toHaveLength(2);
     });
 
     it('without a token, asks nothing on mount, when the page comes back, on an interval or when the menu opens', async () => {

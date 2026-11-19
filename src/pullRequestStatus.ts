@@ -3,7 +3,8 @@
 import { checksState, type ChecksState } from './detail/detail.logic';
 import type { PullRequest, PullRequestCheck, PullRequestRef } from './github';
 import { resolvePullRequestState, type PullRequestStatePresentation } from './presentation';
-import { NO_FOCUS_REFETCH, useChecks, usePullRequest, type RefetchOptions } from './queries';
+import { answerOf, NO_FOCUS_REFETCH, useChecks, usePullRequest } from './queries';
+import type { RefetchOptions } from './queries';
 import { useGitHubAccess } from './token';
 
 /** A pull request, its state and its checks; each undefined until known, or when not asked for. */
@@ -19,13 +20,15 @@ export type PullRequestStatus = {
   checkList: { items: PullRequestCheck[] | undefined; failed: boolean } | undefined;
 };
 
-/** The status of the pull request `ref`; nothing is asked of GitHub while `ref` is undefined. */
+/** The status of the pull request `ref`, of its `answerOf` only with `answersOnly`; nothing is asked
+ * of GitHub while `ref` is undefined. */
 export function usePullRequestStatus(
   ref: PullRequestRef | undefined,
-  options: RefetchOptions = NO_FOCUS_REFETCH
+  options: RefetchOptions = NO_FOCUS_REFETCH,
+  answersOnly = false
 ): PullRequestStatus {
   const query = usePullRequest(ref, options);
-  const pr = query.data;
+  const pr = answersOnly ? answerOf(query) : query.data;
   const { via } = useGitHubAccess();
   // Only an open pull request, draft or not, has checks worth asking for, and only with a token or
   // MindRoom's connection: without either, GitHub allows 60 requests an hour, kept for the pull
