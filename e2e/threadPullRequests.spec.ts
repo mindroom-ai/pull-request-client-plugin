@@ -2326,8 +2326,9 @@ test("on a phone the panel's header has the controls", async ({ browser, baseURL
 const LONG_BODY = [
   '## Why',
   'A deploy drops every session held in Postgres, so each person signs in again.',
+  'The [migration plan](https://example.org/plan) lists the steps.',
   '## What changed',
-  ...Array.from({ length: 8 }, (_, index) => `- Step ${index + 1} of the move to the new store.`),
+  ...Array.from({ length: 30 }, (_, index) => `- Step ${index + 1} of the move to the new store.`),
   '## How to test',
   'Run the session tests, then restart the server and check that a session survives it.',
   '## Notes',
@@ -2393,6 +2394,17 @@ test('on a phone the header scrolls away under a bar that brings it back', async
       );
       expect(hit).toBe(name);
     }
+
+    // A link above what shows, brought into view as a collapsing comment brings itself
+    // (`block: 'nearest'`), comes below the rows that stay.
+    const plan = panel(page).getByRole('link', { name: 'migration plan' });
+    await scrollPanel(page, 5_000);
+    await expect(plan).not.toBeInViewport();
+    await plan.evaluate((link) => link.scrollIntoView({ block: 'nearest' }));
+    const tabsNow = await panel(page).locator('.mrpr-tabbar').boundingBox();
+    const planBox = await plan.boundingBox();
+    expect(planBox?.y ?? 0).toBeGreaterThanOrEqual((tabsNow?.y ?? 0) + (tabsNow?.height ?? 0) - 1);
+    await scrollPanel(page, 600);
 
     await details.click();
     await expect(title).toBeInViewport({ timeout: 10_000 });

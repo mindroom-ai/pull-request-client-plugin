@@ -725,6 +725,12 @@
   flex: none;
   overflow: visible;
 }
+/* What the focus or a collapsing comment brings into view comes below the rows that stay. */
+.mrpr-panel-scrolls
+  > .mrpr-tabpanel
+  :is(a, button, input, select, textarea, [tabindex], .mrpr-comment-clip) {
+  scroll-margin-block-start: calc(var(--mrpr-bar-size) + var(--mrpr-tabbar-size));
+}
 /* A section's heading stays under the tab bar, with the part of its padding the tab bar covers. */
 .mrpr-panel-scrolls .mrpr-section-heading {
   inset-block-start: calc(var(--mrpr-bar-size) + var(--mrpr-tabbar-size) - 0.75rem);
