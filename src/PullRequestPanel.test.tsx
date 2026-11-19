@@ -66,15 +66,19 @@ vi.mock('@mindroom/client-sdk/core', async (importOriginal) => {
   const core = await importOriginal<typeof import('@mindroom/client-sdk/core')>();
   return {
     ...core,
-    useRoomSidePanel: (pluginId: string, panelId: string) =>
-      panelControl.close
+    // The real hook runs on every render, so a test that sets or clears the spy while a panel
+    // is mounted keeps the same hooks.
+    useRoomSidePanel: (pluginId: string, panelId: string) => {
+      const room = core.useRoomSidePanel(pluginId, panelId);
+      return panelControl.close
         ? {
             isOpen: true,
             open: () => undefined,
             openBesideThread: () => undefined,
             close: panelControl.close,
           }
-        : core.useRoomSidePanel(pluginId, panelId),
+        : room;
+    },
   };
 });
 
