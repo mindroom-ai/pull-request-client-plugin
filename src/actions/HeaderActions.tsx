@@ -148,8 +148,6 @@ export function useHeaderActions({
     refocus.current = false;
     moreRef.current?.focus();
   }, [anchor]);
-  // While an action runs no other starts, so its menu does not stay open either.
-  if (pending !== null && anchor !== undefined) setAnchor(undefined);
   const busy = pending !== null;
   // An action may take the control that had the focus away with it: a merged pull request has
   // no Merge, an updated branch no warning. The focus then falls to the page, where a keyboard
@@ -191,9 +189,9 @@ export function useHeaderActions({
 
   const writable = canWrite ? repo : undefined;
 
-  // The two controls that can have the focus when an action starts stay focusable while it
-  // runs: `disabled` would drop the focus to the page, so they are off by ARIA and ignore the
-  // click instead.
+  // The primary control, which can have the focus when an action starts, stays focusable while it
+  // runs: `disabled` would drop the focus to the page, so it is off by ARIA and ignores the click
+  // instead.
   const off = busy ? { 'aria-disabled': true } : undefined;
   const primary =
     writable &&
@@ -353,9 +351,9 @@ export function useHeaderActions({
             aria-label={more}
             aria-haspopup="menu"
             aria-expanded={anchor !== undefined}
-            {...off}
+            // Open while an action runs too: what starts no action (Open on GitHub, Copy
+            // checkout command, the token's entries) stays at hand, and the rest are off.
             onClick={(event: MouseEvent<HTMLButtonElement>) => {
-              if (busy) return;
               setAnchor(anchor ? undefined : event.currentTarget.getBoundingClientRect());
             }}
           >

@@ -1119,7 +1119,8 @@ describe('with the GitHub account connected in MindRoom', () => {
     expect(view.queryByRole('button', { name: /^Show details of pull request/ })).toBeNull();
     await report(false);
     expect(view.queryByRole('button', { name: /^Show details of pull request/ })).toBeNull();
-    expect(view.container.querySelector('.mrpr-panel-scrolls')).toBeNull();
+    // The same box still scrolls the panel, the header with it.
+    expect(view.container.querySelector('.mrpr-panel-scrolls')).toBeTruthy();
   });
 
   it('says a removal from the menu failed on a line of its own, until a token is saved again', async () => {
@@ -1319,9 +1320,11 @@ describe('with the GitHub account connected in MindRoom', () => {
       await settle(() => expect(reads).toBe(2));
       await later(10_000);
       expect(reads).toBe(2);
-      expect(more.getAttribute('aria-disabled')).toBe('true');
+      // The action runs until its read is in.
+      const running = () => view.queryByText('Closing...');
+      expect(running()).toBeTruthy();
       await act(async () => release(respond(pull({ state: 'closed' }))));
-      await settle(() => expect(more.getAttribute('aria-disabled')).toBeNull());
+      await settle(() => expect(running()).toBeNull());
     });
 
     it('reads nothing again once the panel is gone', async () => {
@@ -2406,9 +2409,18 @@ describe('the dense header', () => {
   it('does not collapse while the result of an action shows', async () => {
     asWriter();
     const view = await showScrolling();
-    await click(await view.findByRole('button', { name: 'Merge' }));
+    const scroller = view.getByTestId('scroller');
+    const scrollTo = vi.fn();
+    scroller.scrollTo = scrollTo as typeof scroller.scrollTo;
+    await view.findByRole('button', { name: 'Merge' });
+    await report(false);
+    expect(view.getByRole('button', { name: bar })).toBeTruthy();
+    await click(view.getByRole('button', { name: 'Merge' }));
     await click(await view.findByRole('button', { name: 'Confirm merge?' }));
     expect(await view.findByText(/Base branch was modified/)).toBeTruthy();
+    // The panel scrolls as before, in the same box, which brings the header and its line back.
+    expect(view.container.querySelector('.mrpr-panel-scrolls')).toBeTruthy();
+    expect(scrollTo).toHaveBeenCalledWith(expect.objectContaining({ top: 0 }));
     await report(false);
     expect(view.queryByRole('button', { name: bar })).toBeNull();
     await click(view.getByRole('button', { name: 'Dismiss' }));

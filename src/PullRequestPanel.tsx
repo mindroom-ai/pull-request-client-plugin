@@ -341,8 +341,16 @@ function Header({
     onUseToken,
     onForgetToken,
   });
+  // A hold that starts while the header is out of view, as from the bar's More actions, brings it
+  // and its line back into view.
+  const wasCollapsed = useRef(collapsed);
+  wasCollapsed.current = collapsed;
   useLayoutEffect(() => {
     onHold(holds);
+    if (holds && wasCollapsed.current) {
+      const header = headerRef.current;
+      (header && scrollerOf(header))?.scrollTo({ top: 0 });
+    }
     return () => onHold(false);
   }, [holds, onHold]);
   const forkOwner =
@@ -639,10 +647,10 @@ function Panel({ roomId, request }: PanelProps) {
     setLatch(undefined);
   };
   // Summary and Timeline scroll with the header, in the room's box, the Code tab in itself. While
-  // an action runs or a line under the header says what came of one, the header stays put above
-  // the tab, so the line does too (`Header`'s `onHold`).
+  // an action runs or a line under the header says what came of one, the header does not collapse
+  // (`Header`'s `onHold`), so the line stays with it.
   const [headerHeld, setHeaderHeld] = useState(false);
-  const scrolls = tab !== 'code' && !headerHeld;
+  const scrolls = tab !== 'code';
 
   return (
     <div
@@ -690,7 +698,7 @@ function Panel({ roomId, request }: PanelProps) {
             state={state}
             actions={actions}
             freshness={freshness}
-            collapses={scrolls}
+            collapses={scrolls && !headerHeld}
             onHold={setHeaderHeld}
             // Who the requests go as and what changes that sit in its menu, out of the way.
             onUseToken={

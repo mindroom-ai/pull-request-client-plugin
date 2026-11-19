@@ -613,20 +613,24 @@ describe('HeaderActions', () => {
   const isOff = (button: HTMLElement) =>
     button.hasAttribute('disabled') || button.getAttribute('aria-disabled') === 'true';
 
-  it('disables every control while an action runs, and says what runs', async () => {
+  it('disables every action while an action runs, and says what runs', async () => {
     writeAnswer = () => hold(() => respond({}));
     const view = await show();
     await openMenu(view);
     await click(row(view, 'Convert to draft'));
     expect(writes()).toHaveLength(1);
-    const buttons = Array.from(view.getByTestId('header-row').querySelectorAll('button'));
-    expect(buttons.length).toBeGreaterThan(1);
-    expect(buttons.every(isOff)).toBe(true);
+    expect(isOff(view.getByRole('button', { name: 'Merge' }))).toBe(true);
     expect(view.getByRole('status').textContent).toBe('Converting to draft...');
-    // Neither the menu opens nor the merge arms meanwhile.
+    // The menu still opens, with what starts no action: its actions and Refresh are off.
+    expect(isOff(moreActions(view))).toBe(false);
     await click(moreActions(view));
-    expect(moreActions(view).getAttribute('aria-expanded')).toBe('false');
-    expect(view.queryByText('Refresh')).toBeNull();
+    expect(moreActions(view).getAttribute('aria-expanded')).toBe('true');
+    expect(isOff(row(view, 'Convert to draft'))).toBe(true);
+    expect(isOff(row(view, 'Refresh'))).toBe(true);
+    expect(isOff(row(view, 'Open on GitHub'))).toBe(false);
+    expect(isOff(row(view, 'Copy checkout command'))).toBe(false);
+    await click(moreActions(view));
+    // Nor does the merge arm meanwhile.
     await click(view.getByRole('button', { name: 'Merge' }));
     expect(view.queryByRole('button', { name: 'Confirm merge?' })).toBeNull();
     expect(writes()).toHaveLength(1);
@@ -643,7 +647,8 @@ describe('HeaderActions', () => {
     await click(view.getByRole('button', { name: 'Confirm merge?' }));
     const pending = view.getByRole('button', { name: 'Merging...' });
     expect(isOff(pending)).toBe(true);
-    expect(isOff(moreActions(view))).toBe(true);
+    // More actions stays open to what starts no action.
+    expect(isOff(moreActions(view))).toBe(false);
   });
 
   describe('for a screen reader and the keyboard', () => {
