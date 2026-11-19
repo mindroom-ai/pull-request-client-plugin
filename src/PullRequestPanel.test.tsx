@@ -1173,6 +1173,32 @@ describe('with the GitHub account connected in MindRoom', () => {
     }
   });
 
+  it('gives the focus from the bar to the number when a failed removal brings the header back', async () => {
+    stubObservers();
+    const mindroom = githubServer(withUser);
+    await saveInMindroom(mindroom);
+    let fail!: () => void;
+    const held = new Promise<void>((resolve) => (fail = resolve));
+    const real = mindroom.server.request.getMockImplementation()!;
+    mindroom.server.request.mockImplementation(async (path, init) => {
+      if (path === '/api/github/token' && init?.method === 'DELETE') {
+        await held;
+        throw new MindroomServerError('Forbidden', 403, {});
+      }
+      return real(path, init);
+    });
+    roomServer.current = mindroom.server;
+    const view = await show();
+    await view.findByRole('button', { name: 'More actions' });
+    await choose(view, 'Remove token from MindRoom');
+    await report(false);
+    act(() => view.getByRole('button', { name: /^Show details of pull request/ }).focus());
+    await act(async () => fail());
+    await view.findByText('MindRoom could not remove the token.');
+    expect(view.queryByRole('button', { name: /^Show details of pull request/ })).toBeNull();
+    expect(document.activeElement).toBe(view.getByRole('link', { name: '#200' }));
+  });
+
   describe('while GitHub still checks whether it merges', () => {
     const CHECKING = 'Checking whether it can merge...';
     const pullReads = () => github.mock.calls.filter(([url]) => url.endsWith('/pulls/200')).length;
@@ -2348,6 +2374,25 @@ describe('the dense header', () => {
     });
     const watching = observers.filter(({ targets }) => targets.length > 0);
     expect(watching.map(({ options }) => options?.rootMargin)).toEqual(['-60px 0px 0px 0px']);
+  });
+
+  it("stays collapsed, the focus where it was, as the top row's height changes", async () => {
+    const view = await showScrolling();
+    await view.findByText('Add pull request cards');
+    await report(false);
+    const details = view.getByRole('button', { name: bar });
+    act(() => details.focus());
+    const row = view.container.querySelector('.mrpr-bar') as Element;
+    await act(async () => {
+      for (const callback of resized) {
+        callback(
+          [{ target: row, contentRect: { height: 60 } } as unknown as ResizeObserverEntry],
+          {} as ResizeObserver
+        );
+      }
+    });
+    expect(view.getByRole('button', { name: bar })).toBe(details);
+    expect(document.activeElement).toBe(details);
   });
 
   it('does not collapse on the Code tab, which scrolls itself', async () => {

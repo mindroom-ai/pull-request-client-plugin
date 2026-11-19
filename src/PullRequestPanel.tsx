@@ -266,26 +266,30 @@ function useScrolledAway(
   useEffect(() => {
     const element = header.current;
     if (!watches || !element || typeof IntersectionObserver === 'undefined') return undefined;
-    const set = (next: boolean) =>
-      setAway((was) => {
-        if (was !== next) refocus.current = swap.current?.contains(document.activeElement) ?? false;
-        return next;
-      });
     const observer = new IntersectionObserver(
       (entries) => {
         const entry = entries[entries.length - 1];
-        if (entry) set(!entry.isIntersecting);
+        if (entry) setAway(!entry.isIntersecting);
       },
       // The top row stays over the box's top, so what is under it is out of view.
       { root: scrollerOf(element), rootMargin: `-${barSize}px 0px 0px 0px` }
     );
     observer.observe(element);
-    return () => {
-      observer.disconnect();
-      set(false);
-    };
-  }, [barSize, header, swap, watches]);
+    // The observer made again for a new height keeps what the last one saw until it reports.
+    return () => observer.disconnect();
+  }, [barSize, header, watches]);
+  // Unwatched, it starts again from the header in view.
+  useEffect(() => {
+    if (!watches) setAway(false);
+  }, [watches]);
   const collapsed = watches && away;
+  // Whether the part that changes has the focus, read as it is about to change, while the element
+  // that has it is still on the page: by scrolling, or as the header stays in place (`watches`).
+  const shown = useRef(collapsed);
+  if (shown.current !== collapsed) {
+    shown.current = collapsed;
+    refocus.current = swap.current?.contains(document.activeElement) ?? false;
+  }
   useLayoutEffect(() => {
     if (!refocus.current) return;
     refocus.current = false;
