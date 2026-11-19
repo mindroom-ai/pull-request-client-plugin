@@ -4,8 +4,10 @@
 // has no panel; the thread's worktree comes last, as an item that does nothing. The button's icon
 // and tone are its pull requests' state together, as T3 Code's thread badge. With a token or the
 // GitHub account connected in MindRoom it asks GitHub for each pull request no surface has loaded
-// yet (none for checks), once, refusals included; without either it asks nothing and goes by what
-// the chips and the menu's rows read.
+// yet (none for checks), a refusal once, and reads an answer again once it is two minutes old: when
+// the page shows again, every five minutes while the pull request is open or a draft, and when the
+// menu opens (`useBannerRefetch`); without either it asks nothing and goes by what the chips and the
+// menu's rows read.
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import FocusTrap from 'focus-trap-react';
 import { IconButton, type RectCords } from 'folds';
@@ -25,7 +27,7 @@ import {
 } from './presentation';
 import { usePullRequests } from './queries';
 import { useShownPullRequest } from './shownPullRequest';
-import { ANSWERED_ONLY, Details } from './ThreadDetails';
+import { Details, useBannerRefetch } from './ThreadDetails';
 import { useThreadPullRequests, type ThreadWorktree } from './threadPullRequests';
 import { pluginRootStyle } from './theme';
 import { RoomGitHub, useGitHubAccess } from './token';
@@ -58,7 +60,7 @@ function useCombinedState(pullRequests: readonly PullRequestRef[]) {
   const access = useGitHubAccess();
   const anonymous = access.via === undefined;
   const queries = usePullRequests(pullRequests, {
-    ...ANSWERED_ONLY,
+    ...useBannerRefetch(true),
     ...(anonymous && { enabled: false }),
   });
   // A refetch GitHub refused keeps the answer before beside the error: that one counts no more.
@@ -244,6 +246,7 @@ function PullRequestsMenu({
                 worktree={worktree}
                 item={item}
                 className="mrpr-thread-menu-rows"
+                inBanner
               />
             </Menu>
           </FocusTrap>

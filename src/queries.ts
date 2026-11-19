@@ -87,13 +87,17 @@ export async function refreshPullRequest(
 }
 
 /** What a caller can change of a query's refetching: the chips leave out the refetch on window focus,
- * a thread's details also the one on mount, for an answer and for a refusal alike; `enabled: false`
- * reads only what is already there. */
+ * a thread's details also the one on mount, for an answer and for a refusal alike, and the banner's
+ * button with access adds an interval (`useBannerRefetch`); `enabled: false` reads only what is
+ * already there. */
 export type RefetchOptions = {
   enabled?: false;
   refetchOnWindowFocus?: boolean;
   refetchOnMount?: boolean;
   retryOnMount?: boolean;
+  /** A pull request's query only: how often to read it again, per its answer (`query`). */
+  refetchInterval?: (query: { state: { data: unknown } }) => number | false;
+  refetchIntervalInBackground?: boolean;
 };
 
 // A chip asks again when it shows after its answer went stale, not when the tab regains focus:

@@ -19,10 +19,10 @@ import {
   type PullRequestStateKey,
 } from './presentation';
 import { usePullRequestStatus } from './pullRequestStatus';
-import { NO_FOCUS_REFETCH, usePullRequests } from './queries';
+import { NO_FOCUS_REFETCH, usePullRequests, type RefetchOptions } from './queries';
 import { pluginRootStyle } from './theme';
 import { useThreadPullRequests, type ThreadWorktree } from './threadPullRequests';
-import { RoomGitHub } from './token';
+import { RoomGitHub, useGitHubAccess } from './token';
 
 /** The most code points a worktree's path shows, shortened in its middle so its leaf stays. */
 const PATH_MAX = 40;
@@ -31,6 +31,30 @@ const PATH_MAX = 40;
 // yet is asked for, so moving the pointer over cards spends none of the hourly limit. A refusal is an
 // answer too: without `retryOnMount` every hover would ask again for a pull request GitHub refused.
 export const ANSWERED_ONLY = { ...NO_FOCUS_REFETCH, refetchOnMount: false, retryOnMount: false };
+
+// How often the banner's button reads again a pull request that is still open or a draft.
+const UNSETTLED_INTERVAL = 5 * 60_000;
+const STALE_ON_MOUNT: RefetchOptions = { ...ANSWERED_ONLY, refetchOnMount: true };
+const FOLLOWING: RefetchOptions = {
+  ...STALE_ON_MOUNT,
+  refetchOnWindowFocus: true,
+  refetchInterval: (query) =>
+    (query.state.data as PullRequest | undefined)?.state === 'open' ? UNSETTLED_INTERVAL : false,
+  refetchIntervalInBackground: false,
+};
+
+/**
+ * How the open thread's banner reads its pull requests: `following` for its button, which stays
+ * mounted as long as the thread shows, else for its menu's rows. With a token or MindRoom's
+ * connection, GitHub answers a pull request unchanged since the last read with a 304, which costs
+ * no rate limit: the menu then reads an answer older than two minutes again when it opens, and the
+ * button also when the page shows again (the tab, or the app resumed) and every five minutes while
+ * it shows, until the pull request is merged or closed. Anonymously, `ANSWERED_ONLY`, as a hover.
+ */
+export function useBannerRefetch(following: boolean): RefetchOptions {
+  if (useGitHubAccess().via === undefined) return ANSWERED_ONLY;
+  return following ? FOLLOWING : STALE_ON_MOUNT;
+}
 
 const STATE_RANK: Record<PullRequestStateKey, number> = { open: 0, draft: 1, closed: 2, merged: 3 };
 
@@ -67,21 +91,26 @@ export function ThreadDetails({ room, threadId }: ThreadDetailProps) {
 /**
  * The rows, inside `RoomGitHub`, so the heads are read with the room's access, as each chip reads
  * them. `item` wraps each pull request's and the worktree's rows (`pullRequest` undefined), as the
- * menu's items; `className` joins the root's.
+ * menu's items; `className` joins the root's. `inBanner`, the open thread's menu, reads stale
+ * answers again (`useBannerRefetch`); elsewhere they are a hover's, `ANSWERED_ONLY`.
  */
 export function Details({
   pullRequests,
   worktree,
   item = (_pullRequest, rows) => rows,
   className,
+  inBanner = false,
 }: {
   pullRequests: readonly PullRequestRef[];
   worktree: ThreadWorktree | undefined;
   item?: (pullRequest: PullRequestRef | undefined, rows: ReactNode) => ReactNode;
   className?: string;
+  inBanner?: boolean;
 }) {
+  const bannerRefetch = useBannerRefetch(false);
+  const refetch = inBanner ? bannerRefetch : ANSWERED_ONLY;
   // The same queries as each pull request's below, so they ask GitHub nothing more.
-  const queries = usePullRequests(pullRequests, ANSWERED_ONLY);
+  const queries = usePullRequests(pullRequests, refetch);
   const heads = queries.map((query) => query.data?.headRef);
   // A refetch GitHub refused keeps the answer before beside the error: as the banner's button, the
   // order takes it for no answer.
@@ -95,7 +124,11 @@ export function Details({
         <Fragment key={pullRequestUrl(pullRequest)}>
           {item(
             pullRequest,
-            <PullRequestDetails pullRequest={pullRequest} worktreeBranch={worktree?.branch} />
+            <PullRequestDetails
+              pullRequest={pullRequest}
+              worktreeBranch={worktree?.branch}
+              refetch={refetch}
+            />
           )}
         </Fragment>
       ))}
@@ -112,13 +145,15 @@ export function Details({
 function PullRequestDetails({
   pullRequest,
   worktreeBranch,
+  refetch,
 }: {
   pullRequest: PullRequestRef;
   worktreeBranch: string | undefined;
+  refetch: RefetchOptions;
 }) {
   const t = usePluginTranslation('pull-requests');
   // The very ref the chip asks with: the same queries, so a chip that loaded leaves nothing to ask.
-  const { pr, state, checks } = usePullRequestStatus(pullRequest, ANSWERED_ONLY);
+  const { pr, state, checks } = usePullRequestStatus(pullRequest, refetch);
   const mark = checks && pullRequestChecksStatePresentation(checks);
   const StateIcon = state?.Icon ?? GitPullRequestArrow;
   return (
