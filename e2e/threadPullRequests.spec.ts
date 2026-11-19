@@ -2367,7 +2367,9 @@ test('on a phone the header scrolls away under a bar that brings it back', async
     await expect(
       panel(page).getByRole('button', { name: 'Close pull request panel' })
     ).toBeVisible();
-    const details = panel(page).getByRole('button', { name: 'Show pull request details' });
+    const details = panel(page).getByRole('button', {
+      name: `Show details of pull request #${PULLS.sessionStore.number}: ${PULLS.sessionStore.title}`,
+    });
     await expect(details).toHaveCount(0);
 
     expect(await scrollPanel(page, 600)).toBeGreaterThan(0);
@@ -2378,6 +2380,19 @@ test('on a phone the header scrolls away under a bar that brings it back', async
     const tabs = await panel(page).locator('.mrpr-tabbar').boundingBox();
     expect(Math.abs((tabs?.y ?? 0) - ((bar?.y ?? 0) + (bar?.height ?? 0)))).toBeLessThan(1.5);
     await expect(title).not.toBeInViewport();
+    // A finger's target, all inside the box that scrolls: the bar's button, and More actions and
+    // Close at the top row's top edge.
+    expect(bar?.height).toBeGreaterThanOrEqual(44);
+    expect((await details.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    for (const name of ['More actions', 'Close pull request panel']) {
+      const box = await panel(page).getByRole('button', { name }).boundingBox();
+      const hit = await page.evaluate(
+        ({ x, y }) =>
+          document.elementFromPoint(x, y)?.closest('button')?.getAttribute('aria-label'),
+        { x: (box?.x ?? 0) + (box?.width ?? 0) / 2, y: (bar?.y ?? 0) + 1 }
+      );
+      expect(hit).toBe(name);
+    }
 
     await details.click();
     await expect(title).toBeInViewport({ timeout: 10_000 });
