@@ -1,9 +1,11 @@
 // Ported from T3 Code (https://github.com/pingdotgg/t3code, apps/web/src/components/pullRequest/PullRequestDetailActions.tsx and PullRequestActionsMenu.tsx at 428d3659), MIT, Copyright (c) 2026 T3 Tools Inc. See NOTICE.
 // The header's actions on a pull request: its one primary control, the menu of the rest, the
 // dialog that asks before a branch is deleted, and the line under the header that says what runs
-// and what came of it. A viewer who cannot write to the repository, or has no token, sees none.
-// While the requests go through MindRoom, the menu also says as whom and holds what changes that
-// (a token in this browser instead, removing the token saved there), for writers or not.
+// and what came of it. A viewer who cannot write to the repository, or has no token, has no
+// action, and the menu holds only Open on GitHub and Copy checkout command (and Forget token
+// with a token). While the requests go through MindRoom, the menu also says as whom and holds
+// what changes that (a token in this browser instead, removing the token saved there), for
+// writers or not.
 import { useEffect, useId, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import FocusTrap from 'focus-trap-react';
 import {
@@ -84,23 +86,34 @@ const SHOWN_DONE: ReadonlySet<PullRequestAction> = new Set([
  * still from before it: the header then offers Merge on a merged pull request, and the line is
  * all that says it is merged.
  */
-function isOnlyAnnounced(result: ActionResult | null, pr: PullRequest): boolean {
+export function isOnlyAnnounced(result: ActionResult | null, pr: PullRequest): boolean {
   if (result?.outcome !== 'done' || SHOWN_DONE.has(result.action)) return false;
   return result.unread !== true || showsOutcome(pr, result.action);
 }
 
-export function HeaderActions({
+/**
+ * The header's actions, in three parts the header places itself: the primary `control` (none
+ * when nothing applies), the `menu` (its button, the menu and the delete dialog) and the `lines`
+ * under the header that say what runs and what came of it.
+ */
+export function useHeaderActions({
   pullRequestRef,
   pullRequest: pr,
   actions,
+  checkout,
   onUseToken,
+  onForgetToken,
 }: {
   pullRequestRef: PullRequestRef;
   pullRequest: PullRequest;
   actions: Actions;
+  /** The command that checks the pull request out, which the menu copies. */
+  checkout: string;
   /** Opens the panel's form to use a token in this browser; without it the menu does not offer it. */
   onUseToken?: () => void;
-}) {
+  /** Forgets the browser's token; without it the menu does not offer it. */
+  onForgetToken?: () => void;
+}): { control: ReactNode; menu: ReactNode; lines: ReactNode } {
   const t = usePluginTranslation('pull-requests');
   const { repo, method, chooseMethod, pending, result, perform, dismissResult } = actions;
   const canWrite = repo?.canWrite === true;
@@ -155,8 +168,27 @@ export function HeaderActions({
     }
   }, [busy]);
 
+  // The menu says it copied the command for a moment, and stays open meanwhile.
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return undefined;
+    const timer = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(timer);
+  }, [copied]);
+  const copy = () => {
+    // A browser that refuses the clipboard, or a page without one (an insecure context), leaves
+    // the entry as it was.
+    try {
+      void navigator.clipboard?.writeText(checkout).then(
+        () => setCopied(true),
+        () => undefined
+      );
+    } catch {
+      // The clipboard refused at once.
+    }
+  };
+
   const writable = canWrite ? repo : undefined;
-  if (!writable && !signedIn) return null;
 
   // The two controls that can have the focus when an action starts stay focusable while it
   // runs: `disabled` would drop the focus to the page, so they are off by ARIA and ignore the
@@ -302,13 +334,11 @@ export function HeaderActions({
   };
 
   const more = t('actions.more');
-  return (
+  const menu = (
     <>
-      {primaryControlElement}
       <IconTooltip label={more} align="End">
         {(triggerRef) => (
-          // Without a fill, as the room's and the thread banner's menu buttons: beside the plain
-          // Open on GitHub link it weighs no more than the link.
+          // Without a fill, as the room's and the thread banner's menu buttons.
           <PlainIconButton
             ref={(node: HTMLButtonElement | null) => {
               triggerRef(node);
@@ -390,12 +420,50 @@ export function HeaderActions({
                 <MenuGroup>
                   <MenuEntry
                     role="menuitem"
-                    label={t('actions.refresh')}
-                    icon={Icons.Reload}
-                    disabled={busy}
-                    onSelect={() => choose(refresh)}
+                    label={t('openOnGitHub')}
+                    icon={Icons.External}
+                    onSelect={() =>
+                      choose(() => window.open(pr.url, '_blank', 'noopener,noreferrer'))
+                    }
+                  />
+                  <MenuEntry
+                    role="menuitem"
+                    label={copied ? t('copied') : t('copyCheckout')}
+                    icon={copied ? Icons.Check : Icons.BlockCode}
+                    description={checkout}
+                    // Says it copied, to a screen reader too, as the primary control says what
+                    // it became.
+                    aria-live="polite"
+                    onSelect={copy}
                   />
                 </MenuGroup>
+                {writable || signedIn ? (
+                  <>
+                    <Line variant="Surface" size="300" />
+                    <MenuGroup>
+                      <MenuEntry
+                        role="menuitem"
+                        label={t('actions.refresh')}
+                        icon={Icons.Reload}
+                        disabled={busy}
+                        onSelect={() => choose(refresh)}
+                      />
+                    </MenuGroup>
+                  </>
+                ) : null}
+                {onForgetToken ? (
+                  <>
+                    <Line variant="Surface" size="300" />
+                    <MenuGroup>
+                      <MenuEntry
+                        role="menuitem"
+                        label={t('token.forget')}
+                        icon={Icons.Cross}
+                        onSelect={() => choose(onForgetToken)}
+                      />
+                    </MenuGroup>
+                  </>
+                ) : null}
                 {signedIn ? (
                   <>
                     <Line variant="Surface" size="300" />
@@ -447,6 +515,22 @@ export function HeaderActions({
           </FocusTrap>
         }
       />
+      {deleting === url ? (
+        <DeleteBranchDialog
+          branch={pr.headRef}
+          repository={pr.headRepo ?? `${pullRequestRef.owner}/${pullRequestRef.repo}`}
+          returnFocus={() => moreRef.current ?? false}
+          onCancel={() => setDeleting(null)}
+          onConfirm={() => {
+            setDeleting(null);
+            perform('delete-branch');
+          }}
+        />
+      ) : null}
+    </>
+  );
+  const lines = (
+    <>
       {removal.failed ? (
         // On a line of its own under the controls, as what an action came to.
         <div role="alert" className="mrpr-action-result">
@@ -462,20 +546,9 @@ export function HeaderActions({
           onDismiss={dismissResult}
         />
       ) : null}
-      {deleting === url ? (
-        <DeleteBranchDialog
-          branch={pr.headRef}
-          repository={pr.headRepo ?? `${pullRequestRef.owner}/${pullRequestRef.repo}`}
-          returnFocus={() => moreRef.current ?? false}
-          onCancel={() => setDeleting(null)}
-          onConfirm={() => {
-            setDeleting(null);
-            perform('delete-branch');
-          }}
-        />
-      ) : null}
     </>
   );
+  return { control: primaryControlElement, menu, lines };
 }
 
 /**

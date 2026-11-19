@@ -1,5 +1,6 @@
 // Ported from T3 Code (https://github.com/pingdotgg/t3code, apps/web/src/components/pullRequest/PullRequestDetailLayout.tsx and PullRequestDetailCrumbs.tsx at 8ab427c6), MIT, Copyright (c) 2026 T3 Tools Inc. See NOTICE.
 // The side panel: the header of the pull request a link opened, then its Summary and its Code.
+// It shows its own name and Close (`title: 'own'`), so the room draws no title row above it.
 import {
   useContext,
   useEffect,
@@ -8,19 +9,20 @@ import {
   useState,
   type KeyboardEvent,
   type ReactNode,
+  type RefObject,
 } from 'react';
+import { IconButton as PlainIconButton } from 'folds';
 import {
   ArrowLeft,
-  Check,
   CircleCheck,
-  Copy,
   FileDiff,
   GitCommitHorizontal,
   MessageSquare,
+  X,
 } from 'lucide-react';
-import { usePluginTranslation } from '@mindroom/client-sdk/core';
-import { IconButton, IconTooltip } from '@mindroom/client-sdk/ui';
-import { HeaderActions } from './actions/HeaderActions';
+import { usePluginTranslation, useRoomSidePanel } from '@mindroom/client-sdk/core';
+import { IconTooltip } from '@mindroom/client-sdk/ui';
+import { isOnlyAnnounced, useHeaderActions } from './actions/HeaderActions';
 import { usePullRequestActions } from './actions/usePullRequestActions';
 import { CodeTab, type ListState } from './CodeTab';
 import { BaseBranch } from './detail/BaseBranch';
@@ -199,42 +201,218 @@ function TimelineBarEnd({
   );
 }
 
-/** The button that copies the command to check the pull request out; it says so for a moment. */
-function CopyCheckoutButton({ command }: { command: string }) {
+/** The panel's own Close (`title: 'own'`): the room draws no title row above the panel. */
+function CloseButton() {
   const t = usePluginTranslation('pull-requests');
-  const [copied, setCopied] = useState(false);
-  useEffect(() => {
-    if (!copied) return undefined;
-    const timer = setTimeout(() => setCopied(false), 1500);
-    return () => clearTimeout(timer);
-  }, [copied]);
-  const label = copied ? t('copied') : t('copyCheckout', { command });
-  const Icon = copied ? Check : Copy;
+  const panel = useRoomSidePanel('pull-requests', 'pull-request');
+  if (!panel) return null;
+  const label = t('closePanel');
   return (
-    <IconTooltip label={label}>
+    <IconTooltip label={label} align="End">
       {(triggerRef) => (
-        <IconButton
+        // As the menu's button beside it, without a fill.
+        <PlainIconButton
           ref={triggerRef}
           size="300"
           radii="300"
+          variant="SurfaceVariant"
+          fill="None"
+          className="mrpr-header-more"
           aria-label={label}
-          onClick={() => {
-            // A browser that refuses the clipboard leaves the button as it was.
-            // A page without a clipboard (an insecure context) has nothing to copy with.
-            try {
-              void navigator.clipboard?.writeText(command).then(
-                () => setCopied(true),
-                () => undefined
-              );
-            } catch {
-              // The clipboard refused at once; the button stays as it was.
-            }
-          }}
+          onClick={panel.close}
         >
-          <Icon aria-hidden className="mrpr-button-icon" />
-        </IconButton>
+          <X aria-hidden className="mrpr-button-icon" />
+        </PlainIconButton>
       )}
     </IconTooltip>
+  );
+}
+
+/** The box that scrolls the panel: the nearest ancestor whose content scrolls, the room's. */
+function scrollerOf(element: HTMLElement): HTMLElement | null {
+  for (let node = element.parentElement; node; node = node.parentElement) {
+    if (/auto|scroll/.test(getComputedStyle(node).overflowY)) return node;
+  }
+  return null;
+}
+
+/**
+ * Whether the header has scrolled out of view under the panel's top row, while `watches`: one
+ * observer of the header against the box that scrolls, no listener of every scroll.
+ */
+function useScrolledAway(
+  header: RefObject<HTMLElement>,
+  bar: RefObject<HTMLElement>,
+  watches: boolean
+): boolean {
+  const [away, setAway] = useState(false);
+  useEffect(() => {
+    const element = header.current;
+    if (!watches || !element || typeof IntersectionObserver === 'undefined') return undefined;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[entries.length - 1];
+        if (entry) setAway(!entry.isIntersecting);
+      },
+      // The top row stays over the box's top, so what is under it is out of view.
+      { root: scrollerOf(element), rootMargin: `-${bar.current?.offsetHeight ?? 0}px 0px 0px 0px` }
+    );
+    observer.observe(element);
+    return () => {
+      observer.disconnect();
+      setAway(false);
+    };
+  }, [bar, header, watches]);
+  return watches && away;
+}
+
+/**
+ * The pull request's header, top to bottom: the top row (state, repository, number, badges, More
+ * actions and Close), the title, the author and changes, the branches with the primary control,
+ * and the lines of what runs. In the tabs that scroll with it (`collapses`), once it is out of
+ * view the top row stays as a bar with the number and title, which scrolls back up to it.
+ */
+function Header({
+  pr,
+  pullRequestRef: ref,
+  state,
+  actions,
+  freshness,
+  collapses,
+  onUseToken,
+  onForgetToken,
+}: {
+  pr: PullRequest;
+  pullRequestRef: PullRequestRef;
+  state: NonNullable<ReturnType<typeof resolvePullRequestState>>;
+  actions: ReturnType<typeof usePullRequestActions>;
+  freshness: ReturnType<typeof baseFreshness>;
+  collapses: boolean;
+  onUseToken?: () => void;
+  onForgetToken?: () => void;
+}) {
+  const t = usePluginTranslation('pull-requests');
+  const headerRef = useRef<HTMLDivElement>(null);
+  const barRef = useRef<HTMLDivElement>(null);
+  const collapsed = useScrolledAway(headerRef, barRef, collapses);
+  const { control, menu, lines } = useHeaderActions({
+    pullRequestRef: ref,
+    pullRequest: pr,
+    actions,
+    checkout: `gh pr checkout ${ref.number} -R ${ref.owner}/${ref.repo}`,
+    onUseToken,
+    onForgetToken,
+  });
+  const forkOwner =
+    pr.headRepo && pr.headRepo !== pr.baseRepo ? pr.headRepo.split('/')[0] : undefined;
+  const showDetails = () => {
+    const header = headerRef.current;
+    const scroller = header && scrollerOf(header);
+    const still = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    scroller?.scrollTo({ top: 0, behavior: still ? 'auto' : 'smooth' });
+    header?.querySelector<HTMLElement>('.mrpr-panel-title')?.focus({ preventScroll: true });
+  };
+  const stateIcon = <state.Icon aria-hidden className={`mrpr-icon ${state.toneClassName}`} />;
+  return (
+    <>
+      <div ref={barRef} className="mrpr-crumbs mrpr-bar">
+        {collapsed ? (
+          <button
+            type="button"
+            className="mrpr-bar-details"
+            aria-label={t('showDetails')}
+            onClick={showDetails}
+          >
+            {stateIcon}
+            <span className={`mrpr-shrink-0 ${state.toneClassName}`}>#{ref.number}</span>
+            <span className="mrpr-truncate mrpr-bar-title">{pr.title}</span>
+          </button>
+        ) : (
+          <>
+            {stateIcon}
+            <a
+              className="mrpr-crumb-link mrpr-truncate"
+              href={`https://github.com/${ref.owner}/${ref.repo}`}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {ref.owner}/{ref.repo}
+            </a>
+            <a
+              className={`mrpr-crumb-link mrpr-shrink-0 ${state.toneClassName}`}
+              href={pr.url}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              #{ref.number}
+            </a>
+            <span className="mrpr-badges">
+              {state.key === 'open' ? null : (
+                <span className={`mrpr-badge mrpr-badge-state ${state.toneClassName}`}>
+                  {t(`state.${state.key}`)}
+                </span>
+              )}
+              {pr.autoMerge ? (
+                <span className="mrpr-badge mrpr-badge-outline">
+                  {t('badge.autoMerge', { method: pr.autoMerge.method })}
+                </span>
+              ) : null}
+            </span>
+          </>
+        )}
+        <span className="mrpr-bar-end">
+          {menu}
+          <CloseButton />
+        </span>
+      </div>
+      <div ref={headerRef} className="mrpr-header">
+        <h2 className="mrpr-panel-title" tabIndex={-1}>
+          {pr.title}
+        </h2>
+        <div className="mrpr-panel-meta">
+          <PullRequestMetaLine>
+            <PullRequestActorLabel key="author" actor={pr.author} profileUrl={pr.author?.url} />
+            <span key="updated" className="mrpr-shrink-0">
+              <RelativeTime timestamp={pr.updatedAt} label={(time) => t('updated', { time })} />
+            </span>
+          </PullRequestMetaLine>
+          <span className="mrpr-counts">
+            <span className="mrpr-file-count">
+              <FileDiff aria-hidden className="mrpr-arrow mrpr-file-icon" />
+              {t('code.fileCount', { count: pr.changedFiles })}
+            </span>
+            <ChangeBreakdownStat
+              pullRequestRef={ref}
+              additions={pr.additions}
+              deletions={pr.deletions}
+            />
+          </span>
+        </div>
+        <div className="mrpr-branches">
+          <span className="mrpr-refs">
+            <BaseBranch
+              baseBranch={pr.baseRef}
+              headBranch={pr.headRef}
+              freshness={freshness}
+              // As T3 Code: an update only for a branch GitHub found mergeable, not while it
+              // still computes that (null) nor for one that conflicts.
+              onUpdate={
+                actions.repo?.canWrite && pr.mergeable === true
+                  ? (action) => actions.perform(action)
+                  : undefined
+              }
+              updating={actions.pending !== null}
+            />
+            <ArrowLeft aria-label={t('receivesChanges')} className="mrpr-arrow mrpr-arrow-back" />
+            <span className="mrpr-truncate">
+              {forkOwner ? `${forkOwner}:${pr.headRef}` : pr.headRef}
+            </span>
+          </span>
+          {control}
+        </div>
+        <div className="mrpr-header-lines">{lines}</div>
+      </div>
+    </>
   );
 }
 
@@ -414,13 +592,17 @@ function Panel({ roomId, request }: PanelProps) {
     setOverriding(false);
     setLatch(undefined);
   };
-  const forkOwner =
-    pr?.headRepo && pr.headRepo !== pr.baseRepo ? pr.headRepo.split('/')[0] : undefined;
+  // Summary and Timeline scroll with the header, in the room's box, the Code tab in itself. While
+  // an action runs or its line shows, the header stays put above the tab, so the line does too.
+  const holds =
+    pr !== undefined &&
+    (actions.pending !== null || (actions.result !== null && !isOnlyAnnounced(actions.result, pr)));
+  const scrolls = tab !== 'code' && !holds;
 
   return (
     <div
       ref={root}
-      className="mrpr-root mrpr-panel"
+      className={scrolls ? 'mrpr-root mrpr-panel mrpr-panel-scrolls' : 'mrpr-root mrpr-panel'}
       style={pluginRootStyle()}
       onFocus={() => {
         focused.current = true;
@@ -431,124 +613,47 @@ function Panel({ roomId, request }: PanelProps) {
     >
       <PanelTokenFormContext.Provider value={tokenForm.context}>
         <RemovedTokenNote className="mrpr-status mrpr-panel-removed" />
-        {!ref ? (
-          <p className="mrpr-status mrpr-panel-note">{t('emptyPanel')}</p>
-        ) : !pr || !state ? (
-          <div className="mrpr-panel-note">
-            {error === undefined ? (
-              <p className="mrpr-status">{t('loading')}</p>
+        {!ref || !pr || !state ? (
+          <>
+            {/* The panel's name and Close until a pull request shows. */}
+            <div className="mrpr-crumbs mrpr-bar">
+              <h2 className="mrpr-bar-label mrpr-truncate">{t('panelLabel')}</h2>
+              <span className="mrpr-bar-end">
+                <CloseButton />
+              </span>
+            </div>
+            {!ref ? (
+              <p className="mrpr-status mrpr-panel-note">{t('emptyPanel')}</p>
             ) : (
-              <GitHubErrorState
-                error={error}
-                onRetry={() => void query.refetch()}
-                withTokenForm={false}
-              />
-            )}
-          </div>
-        ) : (
-          <div className="mrpr-header">
-            <div className="mrpr-crumbs">
-              <state.Icon aria-hidden className={`mrpr-icon ${state.toneClassName}`} />
-              <a
-                className="mrpr-crumb-link mrpr-truncate"
-                href={`https://github.com/${ref.owner}/${ref.repo}`}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                {ref.owner}/{ref.repo}
-              </a>
-              <a
-                className={`mrpr-crumb-link mrpr-shrink-0 ${state.toneClassName}`}
-                href={pr.url}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                #{ref.number}
-              </a>
-              <span className="mrpr-badges">
-                {state.key === 'open' ? null : (
-                  <span className={`mrpr-badge mrpr-badge-state ${state.toneClassName}`}>
-                    {t(`state.${state.key}`)}
-                  </span>
+              <div className="mrpr-panel-note">
+                {error === undefined ? (
+                  <p className="mrpr-status">{t('loading')}</p>
+                ) : (
+                  <GitHubErrorState
+                    error={error}
+                    onRetry={() => void query.refetch()}
+                    withTokenForm={false}
+                  />
                 )}
-                {pr.autoMerge ? (
-                  <span className="mrpr-badge mrpr-badge-outline">
-                    {t('badge.autoMerge', { method: pr.autoMerge.method })}
-                  </span>
-                ) : null}
-              </span>
-            </div>
-            <p className="mrpr-panel-title" tabIndex={-1}>
-              {pr.title}
-            </p>
-            <div className="mrpr-panel-meta">
-              <PullRequestMetaLine>
-                <PullRequestActorLabel key="author" actor={pr.author} profileUrl={pr.author?.url} />
-                <span key="updated" className="mrpr-shrink-0">
-                  <RelativeTime timestamp={pr.updatedAt} label={(time) => t('updated', { time })} />
-                </span>
-              </PullRequestMetaLine>
-              <CopyCheckoutButton
-                command={`gh pr checkout ${ref.number} -R ${ref.owner}/${ref.repo}`}
-              />
-            </div>
-            <div className="mrpr-branches">
-              <span className="mrpr-refs">
-                <BaseBranch
-                  baseBranch={pr.baseRef}
-                  headBranch={pr.headRef}
-                  freshness={freshness}
-                  // As T3 Code: an update only for a branch GitHub found mergeable, not while it
-                  // still computes that (null) nor for one that conflicts.
-                  onUpdate={
-                    actions.repo?.canWrite && pr.mergeable === true
-                      ? (action) => actions.perform(action)
-                      : undefined
-                  }
-                  updating={actions.pending !== null}
-                />
-                <ArrowLeft
-                  aria-label={t('receivesChanges')}
-                  className="mrpr-arrow mrpr-arrow-back"
-                />
-                <span className="mrpr-truncate">
-                  {forkOwner ? `${forkOwner}:${pr.headRef}` : pr.headRef}
-                </span>
-              </span>
-              <span className="mrpr-counts">
-                <span className="mrpr-file-count">
-                  <FileDiff aria-hidden className="mrpr-arrow mrpr-file-icon" />
-                  {t('code.fileCount', { count: pr.changedFiles })}
-                </span>
-                <ChangeBreakdownStat
-                  pullRequestRef={ref}
-                  additions={pr.additions}
-                  deletions={pr.deletions}
-                />
-              </span>
-            </div>
-            <div className="mrpr-header-actions">
-              <HeaderActions
-                pullRequestRef={ref}
-                pullRequest={pr}
-                actions={actions}
-                // Who the requests go as and what changes that sit in its menu, out of the way.
-                onUseToken={
-                  via === 'server' && !tokenForm.reason && !overriding
-                    ? () => setOverriding(true)
-                    : undefined
-                }
-              />
-              <a className="mrpr-link" href={pr.url} target="_blank" rel="noopener noreferrer">
-                {t('openOnGitHub')}
-              </a>
-              {token !== undefined ? (
-                <button className="mrpr-button" type="button" onClick={forget}>
-                  {t('token.forget')}
-                </button>
-              ) : null}
-            </div>
-          </div>
+              </div>
+            )}
+          </>
+        ) : (
+          <Header
+            pr={pr}
+            pullRequestRef={ref}
+            state={state}
+            actions={actions}
+            freshness={freshness}
+            collapses={scrolls}
+            // Who the requests go as and what changes that sit in its menu, out of the way.
+            onUseToken={
+              via === 'server' && !tokenForm.reason && !overriding
+                ? () => setOverriding(true)
+                : undefined
+            }
+            onForgetToken={token !== undefined ? forget : undefined}
+          />
         )}
         {/* Invariant: the panel's token form has exactly one owner, here, and one tree position,
           keyed only by the server's origin and the pull request; the loading, error and loaded

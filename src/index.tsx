@@ -29,6 +29,8 @@ const plugin: ClientPlugin = {
       icon: Icons.Code,
       remember: true,
       Component: PullRequestPanel,
+      // Its top row shows the pull request and its own Close, in place of the room's title row.
+      title: 'own',
     },
   ],
   // Each chip opens its own hover card, so the card's details card stays closed over the chips.

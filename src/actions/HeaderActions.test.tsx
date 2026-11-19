@@ -5,7 +5,7 @@ import { renderPluginComponent } from '@mindroom/client-sdk/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PullRequest, PullRequestRef } from '../github';
 import plugin from '../index';
-import { HeaderActions } from './HeaderActions';
+import { useHeaderActions } from './HeaderActions';
 import {
   resetPullRequestActions,
   usePullRequestActions,
@@ -115,6 +115,18 @@ const answerHeld = async () => {
 
 let writeAnswer: () => Promise<Response>;
 
+/** The header's three parts in a row, as the panel places them in its rows. */
+function HeaderActions(props: Omit<Parameters<typeof useHeaderActions>[0], 'checkout'>) {
+  const { control, menu, lines } = useHeaderActions({ ...props, checkout: 'gh pr checkout 7' });
+  return (
+    <>
+      {control}
+      {menu}
+      {lines}
+    </>
+  );
+}
+
 function Harness({ pullRequest }: { pullRequest: PullRequest }) {
   const actions = usePullRequestActions(ref, pullRequest);
   return (
@@ -141,9 +153,13 @@ const row = (view: View, name: string) => {
   return button;
 };
 const moreActions = (view: View) => view.getByRole('button', { name: 'More actions' });
+// What the menu holds for everyone: Copy checkout command shows its command under it.
+const ALWAYS = ['Open on GitHub', 'Copy checkout commandgh pr checkout 7'];
+// The menu shows before the repository's access is in, with Open on GitHub and Copy checkout
+// command alone; the actions, and Refresh, join it once it is.
 const openMenu = async (view: View) => {
-  await waitUntil(() => expect(moreActions(view)).toBeTruthy());
   await click(moreActions(view));
+  await waitUntil(() => expect(view.getByText('Refresh')).toBeTruthy());
 };
 
 beforeEach(() => {
@@ -184,16 +200,24 @@ afterEach(async () => {
 });
 
 describe('HeaderActions', () => {
-  it('draws nothing without a token, and asks GitHub nothing', async () => {
+  // The menu's button alone, whose menu holds what applies without a write.
+  const onlyTheMenu = async (view: View) => {
+    const buttons = Array.from(view.getByTestId('header-row').querySelectorAll('button'));
+    expect(buttons.map((button) => button.getAttribute('aria-label'))).toEqual(['More actions']);
+    await click(moreActions(view));
+    expect(view.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(ALWAYS);
+  };
+
+  it('has only the menu without a token, and asks GitHub nothing', async () => {
     localStorage.clear();
     const view = await show();
     await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
-    expect(view.getByTestId('header-row').innerHTML).toBe('');
+    await onlyTheMenu(view);
     expect(graphqlRequests()).toEqual([]);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('draws nothing on a repository the viewer can only read', async () => {
+  it('has only the menu on a repository the viewer can only read', async () => {
     repository = { ...repository, viewerPermission: 'READ' };
     const view = await show();
     await waitUntil(() =>
@@ -201,7 +225,7 @@ describe('HeaderActions', () => {
         canWrite: false,
       })
     );
-    expect(view.getByTestId('header-row').innerHTML).toBe('');
+    await onlyTheMenu(view);
     expect(fetchMock.mock.calls.filter(([url]) => url.includes('/check-runs'))).toEqual([]);
   });
 
@@ -328,6 +352,7 @@ describe('HeaderActions', () => {
       'Enable auto-merge',
       'Convert to draft',
       'Close pull request',
+      ...ALWAYS,
       'Refresh',
     ]);
   });
@@ -345,6 +370,7 @@ describe('HeaderActions', () => {
     expect(view.getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
       'Convert to draft',
       'Close pull request',
+      ...ALWAYS,
       'Refresh',
     ]);
   });
@@ -450,7 +476,10 @@ describe('HeaderActions', () => {
       expect(fetchMock.mock.calls.some(([url, init]) => isHeadBranchQuery(url, init))).toBe(true)
     );
     await openMenu(view);
-    expect(view.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Refresh']);
+    expect(view.getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
+      ...ALWAYS,
+      'Refresh',
+    ]);
   });
 
   it('leaves a branch that got commits after the menu was drawn, and says so', async () => {

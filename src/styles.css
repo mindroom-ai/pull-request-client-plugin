@@ -698,10 +698,34 @@
 /* The side panel: a column as tall as the panel. The header and tab bar keep their height; the
    tab's area takes the rest, so the Code tab scrolls inside itself and the Summary as a whole. */
 .mrpr-panel {
+  /* The height of the top row, which the tab bar stays under once the header scrolled away. */
+  --mrpr-bar-size: 2.5rem;
+  --mrpr-tabbar-size: 2.875rem;
   display: flex;
   flex-direction: column;
   block-size: 100%;
   min-block-size: 0;
+}
+/* Summary and Timeline: the panel takes its content's height, so the room's box scrolls it whole,
+   the header with it, under the top row and the tab bar, which stay. The Code tab scrolls in
+   itself, under a header that stays. */
+.mrpr-panel-scrolls {
+  flex-shrink: 0;
+  block-size: auto;
+}
+.mrpr-panel-scrolls > .mrpr-tabbar {
+  position: sticky;
+  inset-block-start: var(--mrpr-bar-size);
+  z-index: 3;
+  background: var(--pr-panel);
+}
+.mrpr-panel-scrolls > .mrpr-tabpanel {
+  flex: none;
+  overflow: visible;
+}
+/* A section's heading stays under the tab bar, with the part of its padding the tab bar covers. */
+.mrpr-panel-scrolls .mrpr-section-heading {
+  inset-block-start: calc(var(--mrpr-bar-size) + var(--mrpr-tabbar-size) - 0.75rem);
 }
 
 .mrpr-panel-note {
@@ -722,7 +746,7 @@
   flex-shrink: 0;
   min-inline-size: 0;
   padding-inline: 1rem;
-  padding-block: 0.25rem 1rem;
+  padding-block: 0 0.75rem;
 }
 
 .mrpr-crumbs {
@@ -734,6 +758,50 @@
   font-size: 0.75rem;
   font-weight: 500;
   color: var(--pr-muted);
+}
+/* The panel's top row, in place of the room's title row: the crumbs, or the bar that stands for
+   the header once it scrolled away, then More actions and Close. It stays at the top. */
+.mrpr-bar {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 4;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  block-size: var(--mrpr-bar-size);
+  padding-inline: 1rem 0.5rem;
+  background: var(--pr-panel);
+}
+.mrpr-bar-label {
+  margin: 0;
+  color: var(--pr-fg);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+.mrpr-bar-details {
+  display: flex;
+  min-inline-size: 0;
+  flex: 1;
+  align-items: center;
+  gap: 0.25rem;
+  align-self: stretch;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.mrpr-bar-title {
+  color: var(--pr-fg);
+  font-weight: 600;
+}
+.mrpr-bar-end {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.125rem;
+  margin-inline-start: auto;
 }
 
 .mrpr-panel-title {
@@ -764,8 +832,8 @@
   min-inline-size: 0;
   align-items: center;
   gap: 0.5rem;
-  min-block-size: 1.25rem;
-  margin-block-start: 1rem;
+  min-block-size: 1.625rem;
+  margin-block-start: 0.5rem;
   font-size: 0.75rem;
   color: var(--pr-muted);
 }
@@ -830,13 +898,17 @@
   opacity: 1;
 }
 
-.mrpr-header-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.75rem;
-  margin-block-start: 0.75rem;
+/* The primary control ends the branches, which truncate before it shrinks. */
+.mrpr-branches > .mrpr-button,
+.mrpr-branches > .mrpr-badge {
+  flex-shrink: 0;
+}
+/* What runs or came of it, under the branches. */
+.mrpr-header-lines {
   font-size: 0.75rem;
+}
+.mrpr-header-lines > .mrpr-action-result {
+  margin-block-start: 0.5rem;
 }
 
 /* The header's actions: the primary control in the accent, the menu's button, and the line that
@@ -938,6 +1010,20 @@
   .mrpr-action-result-dismiss {
     min-inline-size: max(44px, 2.75rem);
     min-block-size: max(44px, 2.75rem);
+  }
+  /* In the top row and on the branches, a control keeps its pointer height and takes a finger's
+     target above and below it, so the row does not grow. */
+  .mrpr-bar .mrpr-header-more,
+  .mrpr-branches > .mrpr-button-primary {
+    position: relative;
+    min-block-size: 2rem;
+  }
+  .mrpr-bar .mrpr-header-more::after,
+  .mrpr-branches > .mrpr-button-primary::after {
+    position: absolute;
+    inset-block: calc((100% - max(44px, 2.75rem)) / 2);
+    inset-inline: 0;
+    content: '';
   }
 }
 
@@ -1389,6 +1475,9 @@
   display: flex;
   flex-direction: column;
   min-inline-size: 0;
+}
+.mrpr-summary-meta:empty {
+  display: none;
 }
 .mrpr-summary-meta {
   display: flex;

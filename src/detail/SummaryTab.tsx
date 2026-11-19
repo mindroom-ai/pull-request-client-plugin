@@ -110,7 +110,7 @@ function MetaRow({
   );
 }
 
-/** The reviewers' avatars: those asked and those who gave a verdict, a ring and a glyph for each verdict. */
+/** The reviewers' avatars: those asked and those who gave a verdict, a ring and a glyph for each verdict; nothing once it is known there are none. */
 function ReviewersRow({
   pullRequest,
   reviews,
@@ -130,6 +130,8 @@ function ReviewersRow({
   );
   const entries = joinReviewers(outcomes, pullRequest.requestedReviewers);
   const nothing = entries.length === 0 && pullRequest.requestedTeams.length === 0;
+  // No row only to say there are none.
+  if (nothing && reviews && !reviews.truncated && !error) return null;
   return (
     <MetaRow icon={<Users aria-hidden className="mrpr-icon" />} label={t('summary.reviewers')}>
       <span className="mrpr-reviewers">

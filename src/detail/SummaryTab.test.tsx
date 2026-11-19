@@ -225,6 +225,20 @@ describe('SummaryTab', () => {
     expect(view.getAllByText('ann')).toHaveLength(1);
   });
 
+  it('shows no reviewers row without reviewers, and one once there are', async () => {
+    serve();
+    const view = await show();
+    expect(await view.findByText('No comments yet.')).toBeTruthy();
+    expect(view.queryByText('Reviewers')).toBeNull();
+    expect(view.queryByText('None')).toBeNull();
+    view.unmount();
+
+    serve({ reviews: [review(1, 'ann', 'APPROVED')] });
+    const reviewed = await show();
+    expect(await reviewed.findByText('ann')).toBeTruthy();
+    expect(reviewed.getByText('Reviewers')).toBeTruthy();
+  });
+
   it('shows the labels', async () => {
     const view = await show(
       pull({
