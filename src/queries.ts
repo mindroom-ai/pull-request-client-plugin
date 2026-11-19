@@ -86,17 +86,27 @@ export async function refreshPullRequest(
   return shown.every((query) => query.state.status !== 'error');
 }
 
+type QueryState = { state: { data: unknown; error: unknown } };
+
+/** Whether GitHub refused what was asked (not found, or the token): asked again, it would refuse again. */
+export const refused = (error: unknown) =>
+  error instanceof GitHubError && (error.kind === 'notFound' || error.kind === 'badToken');
+
+/** A query's answer: also the last one beside a read again that failed, none after a refusal. */
+export const answerOf = <T>(query: { data: T | undefined; error: unknown }) =>
+  refused(query.error) ? undefined : query.data;
+
 /** What a caller can change of a query's refetching: the chips leave out the refetch on window focus,
  * a thread's details also the one on mount, for an answer and for a refusal alike, and the banner's
  * button with access adds an interval (`useBannerRefetch`); `enabled: false` reads only what is
  * already there. */
 export type RefetchOptions = {
   enabled?: false;
-  refetchOnWindowFocus?: boolean;
-  refetchOnMount?: boolean;
+  refetchOnWindowFocus?: boolean | ((query: QueryState) => boolean);
+  refetchOnMount?: boolean | ((query: QueryState) => boolean);
   retryOnMount?: boolean;
   /** A pull request's query only: how often to read it again, per its answer (`query`). */
-  refetchInterval?: (query: { state: { data: unknown } }) => number | false;
+  refetchInterval?: (query: QueryState) => number | false;
   refetchIntervalInBackground?: boolean;
 };
 

@@ -532,6 +532,57 @@ describe('ThreadPullRequestsButton', () => {
       expect(pullRequestRequests()).toHaveLength(1);
     });
 
+    it('with a token, keeps the last answer of a pull request whose read again failed, until one works', async () => {
+      withToken();
+      vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
+      serve({ 1: pull('open'), 2: pull('merged') });
+      const { view } = await show([{ number: 1 }, { number: 2 }]);
+      await vi.waitFor(() => expect(tone(view)).toBe('mrpr-tone-open'));
+      expect(pullRequestRequests()).toHaveLength(2);
+      const failing = (url: string) =>
+        /\/pulls\/1$/.test(url)
+          ? respond({ message: 'Bad Gateway' }, 502)
+          : respond(pull('merged'));
+      fetchMock.mockImplementation(async (url) => failing(url));
+      await act(async () => vi.advanceTimersByTime(FIVE_MINUTES));
+      // The read and its two tries again, a second and two apart.
+      await vi.waitFor(() => expect(pullRequestRequests()).toHaveLength(5), { timeout: 6_000 });
+      await act(async () => new Promise((resolve) => setTimeout(resolve, 10)));
+      expect(tone(view)).toBe('mrpr-tone-open');
+      expect(trigger(view).getAttribute('aria-label')).toBe('Pull requests (2): Open');
+      await openMenu(view);
+      const number = (row: HTMLElement) => row.querySelector('.mrpr-truncate')?.textContent;
+      expect(rows(view).map(number)).toEqual(['mindroom-chat #1', 'mindroom-chat #2']);
+      serve({ 1: pull('merged'), 2: pull('merged') });
+      await act(async () => vi.advanceTimersByTime(FIVE_MINUTES));
+      await vi.waitFor(() => expect(tone(view)).toBe('mrpr-tone-merged'), { timeout: 6_000 });
+      expect(states(view)).toEqual(['Merged', 'Merged']);
+    }, 15_000);
+
+    it('with a token, asks nothing again by itself after GitHub refused a pull request, until asked to', async () => {
+      withToken();
+      vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
+      serve({ 1: pull('open') });
+      const { view } = await show([{ number: 1 }]);
+      await vi.waitFor(() => expect(tone(view)).toBe('mrpr-tone-open'));
+      serve({});
+      await act(async () => vi.advanceTimersByTime(FIVE_MINUTES));
+      await vi.waitFor(() => expect(tone(view)).toBeUndefined());
+      expect(pullRequestRequests()).toHaveLength(2);
+      // Not on the next interval, nor when the page comes back, nor when the menu opens stale.
+      await act(async () => vi.advanceTimersByTime(FIVE_MINUTES));
+      later(STALE);
+      await comeBack();
+      await openMenu(view);
+      await act(async () => new Promise((resolve) => setTimeout(resolve, 10)));
+      expect(pullRequestRequests()).toHaveLength(2);
+      // What asks again on purpose (a new token, Refresh) still does.
+      serve({ 1: pull('merged') });
+      await act(async () => client.invalidateQueries());
+      await vi.waitFor(() => expect(tone(view)).toBe('mrpr-tone-merged'));
+      expect(pullRequestRequests()).toHaveLength(3);
+    });
+
     it('without a token, asks nothing on mount, when the page comes back, on an interval or when the menu opens', async () => {
       vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
       serve({ 1: pull('merged') });

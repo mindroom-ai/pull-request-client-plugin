@@ -25,7 +25,7 @@ import {
   resolvePullRequestState,
   type PullRequestStateKey,
 } from './presentation';
-import { usePullRequests } from './queries';
+import { answerOf, usePullRequests } from './queries';
 import { useShownPullRequest } from './shownPullRequest';
 import { Details, useBannerRefetch } from './ThreadDetails';
 import { useThreadPullRequests, type ThreadWorktree } from './threadPullRequests';
@@ -64,9 +64,11 @@ function useCombinedState(pullRequests: readonly PullRequestRef[]) {
     ...(anonymous && { enabled: false }),
   });
   // A refetch GitHub refused keeps the answer before beside the error: that one counts no more.
-  const answered = queries.flatMap((query) =>
-    query.status === 'success' ? [resolvePullRequestState(query.data).key] : []
-  );
+  // One that failed (no answer, an error of GitHub's, its rate limit) still does.
+  const answered = queries.flatMap((query) => {
+    const answer = answerOf(query);
+    return answer ? [resolvePullRequestState(answer).key] : [];
+  });
   const combined = combinedPullRequestState(answered);
   const loading = queries.some((query) => query.status === 'pending');
   // Until the room's MindRoom server says whether GitHub is connected there, what was read

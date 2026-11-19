@@ -19,7 +19,13 @@ import {
   type PullRequestStateKey,
 } from './presentation';
 import { usePullRequestStatus } from './pullRequestStatus';
-import { NO_FOCUS_REFETCH, usePullRequests, type RefetchOptions } from './queries';
+import {
+  answerOf,
+  NO_FOCUS_REFETCH,
+  refused,
+  usePullRequests,
+  type RefetchOptions,
+} from './queries';
 import { pluginRootStyle } from './theme';
 import { useThreadPullRequests, type ThreadWorktree } from './threadPullRequests';
 import { RoomGitHub, useGitHubAccess } from './token';
@@ -34,20 +40,25 @@ export const ANSWERED_ONLY = { ...NO_FOCUS_REFETCH, refetchOnMount: false, retry
 
 // How often the banner's button reads again a pull request that is still open or a draft.
 const UNSETTLED_INTERVAL = 5 * 60_000;
-const STALE_ON_MOUNT: RefetchOptions = { ...ANSWERED_ONLY, refetchOnMount: true };
+// After a refusal none of these asks again by itself; a new token or a Refresh still does.
+const unlessRefused = (query: { state: { error: unknown } }) => !refused(query.state.error);
+const STALE_ON_MOUNT: RefetchOptions = { ...ANSWERED_ONLY, refetchOnMount: unlessRefused };
 const FOLLOWING: RefetchOptions = {
   ...STALE_ON_MOUNT,
-  refetchOnWindowFocus: true,
+  refetchOnWindowFocus: unlessRefused,
   refetchInterval: (query) =>
-    (query.state.data as PullRequest | undefined)?.state === 'open' ? UNSETTLED_INTERVAL : false,
+    unlessRefused(query) && (query.state.data as PullRequest | undefined)?.state === 'open'
+      ? UNSETTLED_INTERVAL
+      : false,
   refetchIntervalInBackground: false,
 };
 
 /**
  * How the open thread's banner reads its pull requests: `following` for its button, which stays
  * mounted as long as the thread shows, else for its menu's rows. With a token or MindRoom's
- * connection, GitHub answers a pull request unchanged since the last read with a 304, which costs
- * no rate limit: the menu then reads an answer older than two minutes again when it opens, and the
+ * connection GitHub allows 5,000 requests an hour, and a token's own read of a pull request
+ * unchanged since, answered with a 304, costs none (one through MindRoom is an ordinary request):
+ * the menu then reads an answer older than two minutes again when it opens, and the
  * button also when the page shows again (the tab, or the app resumed) and every five minutes while
  * it shows, until the pull request is merged or closed. Anonymously, `ANSWERED_ONLY`, as a hover.
  */
@@ -113,8 +124,8 @@ export function Details({
   const queries = usePullRequests(pullRequests, refetch);
   const heads = queries.map((query) => query.data?.headRef);
   // A refetch GitHub refused keeps the answer before beside the error: as the banner's button, the
-  // order takes it for no answer.
-  const answers = queries.map((query) => (query.status === 'success' ? query.data : undefined));
+  // order takes it for no answer; one that failed (no answer, an error of GitHub's) keeps it.
+  const answers = queries.map(answerOf);
   return (
     <div
       className={className ? `mrpr-root mrpr-details ${className}` : 'mrpr-root mrpr-details'}
