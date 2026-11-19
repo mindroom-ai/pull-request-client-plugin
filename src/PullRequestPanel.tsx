@@ -341,18 +341,24 @@ function Header({
     onUseToken,
     onForgetToken,
   });
-  // A hold that starts while the header is out of view, as from the bar's More actions, brings it
-  // and its line back into view.
+  useLayoutEffect(() => {
+    onHold(holds);
+    return () => onHold(false);
+  }, [holds, onHold]);
+  // A hold that starts while the header is out of view, as from the bar's More actions, and a
+  // line that comes under it while it holds (what a merge started at the top came to, after a
+  // scroll), bring the header and its line back into view.
   const wasCollapsed = useRef(collapsed);
   wasCollapsed.current = collapsed;
   useLayoutEffect(() => {
-    onHold(holds);
-    if (holds && wasCollapsed.current) {
-      const header = headerRef.current;
-      (header && scrollerOf(header))?.scrollTo({ top: 0 });
+    const header = headerRef.current;
+    const scroller = header && scrollerOf(header);
+    if (!holds || !header || !scroller) return;
+    const under = scroller.getBoundingClientRect().top + (barRef.current?.offsetHeight ?? 0);
+    if (wasCollapsed.current || header.getBoundingClientRect().bottom <= under) {
+      scroller.scrollTo({ top: 0 });
     }
-    return () => onHold(false);
-  }, [holds, onHold]);
+  }, [holds, actions.result]);
   const forkOwner =
     pr.headRepo && pr.headRepo !== pr.baseRepo ? pr.headRepo.split('/')[0] : undefined;
   const showDetails = () => {

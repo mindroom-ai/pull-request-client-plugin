@@ -2428,6 +2428,38 @@ describe('the dense header', () => {
     expect(view.getByRole('button', { name: bar })).toBeTruthy();
   });
 
+  it.each([
+    ['out of view', -40, 1],
+    ['in view', 300, 0],
+  ])(
+    'brings back the header %s when a line comes while an action holds it',
+    async (_where, bottom, reveals) => {
+      asWriter();
+      // The merge answers when the test lets it.
+      let answer!: () => void;
+      const answered = new Promise<void>((resolve) => (answer = resolve));
+      const writer = fetchMock.getMockImplementation()!;
+      fetchMock.mockImplementation(async (url, init) => {
+        if (url.includes('/merge')) await answered;
+        return writer(url, init);
+      });
+      const view = await showScrolling();
+      const scroller = view.getByTestId('scroller');
+      const scrollTo = vi.fn();
+      scroller.scrollTo = scrollTo as typeof scroller.scrollTo;
+      // Started at the top, then scrolled while the merge runs.
+      await click(await view.findByRole('button', { name: 'Merge' }));
+      await click(await view.findByRole('button', { name: 'Confirm merge?' }));
+      const header = view.container.querySelector('.mrpr-header') as HTMLElement;
+      header.getBoundingClientRect = () => ({ top: bottom - 200, bottom } as DOMRect);
+      scrollTo.mockClear();
+      await act(async () => answer());
+      expect(await view.findByText(/Base branch was modified/)).toBeTruthy();
+      expect(scrollTo).toHaveBeenCalledTimes(reveals);
+      if (reveals) expect(scrollTo).toHaveBeenCalledWith(expect.objectContaining({ top: 0 }));
+    }
+  );
+
   it('has no button on the branch line of a merged pull request', async () => {
     asWriter({ state: 'closed', merged_at: '2026-11-02T00:00:00Z' });
     const view = await show();
