@@ -696,11 +696,13 @@
 }
 
 /* The side panel: a column as tall as the panel. The header and tab bar keep their height; the
-   tab's area takes the rest, so the Code tab scrolls inside itself and the Summary as a whole. */
+   tab's area takes the rest, so the Code tab scrolls inside itself (Summary and Timeline scroll
+   with the header, below). */
 .mrpr-panel {
-  /* The height of the top row, which the tab bar stays under once the header scrolled away. */
+  /* The heights of the top row and the tab bar, which stay at the top while the header scrolls
+     away; a section heading stays under both. */
   --mrpr-bar-size: 2.5rem;
-  --mrpr-tabbar-size: 2.875rem;
+  --mrpr-tabbar-size: 2.625rem;
   display: flex;
   flex-direction: column;
   block-size: 100%;
