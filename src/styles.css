@@ -826,6 +826,17 @@
   font-size: 0.75rem;
   line-height: 1rem;
 }
+/* The changes in the size and color they had on the branches' line. */
+.mrpr-panel-meta > .mrpr-counts {
+  font-size: 0.75rem;
+  color: var(--pr-muted);
+}
+/* Beside the changes, the author keeps their login (a long one truncates), and the time truncates
+   first. */
+.mrpr-panel-meta .mrpr-actor {
+  flex-shrink: 0;
+  max-inline-size: 9rem;
+}
 
 .mrpr-branches {
   display: flex;
@@ -898,10 +909,22 @@
   opacity: 1;
 }
 
-/* The primary control ends the branches, which truncate before it shrinks. */
+/* The changes end the author's line and the primary control the branches, which truncate before
+   either shrinks; on a line too narrow for both (a narrow panel at a large page zoom) the end goes
+   under them. */
+.mrpr-panel-meta,
+.mrpr-branches {
+  flex-wrap: wrap;
+  row-gap: 0.25rem;
+}
+.mrpr-panel-meta > .mrpr-meta,
+.mrpr-branches > .mrpr-refs {
+  flex: 1 1 10rem;
+}
 .mrpr-branches > .mrpr-button,
 .mrpr-branches > .mrpr-badge {
   flex-shrink: 0;
+  margin-inline-start: auto;
 }
 /* What runs or came of it, under the branches. */
 .mrpr-header-lines {

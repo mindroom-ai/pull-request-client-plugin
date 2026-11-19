@@ -372,7 +372,7 @@ function Header({
         <div className="mrpr-panel-meta">
           <PullRequestMetaLine>
             <PullRequestActorLabel key="author" actor={pr.author} profileUrl={pr.author?.url} />
-            <span key="updated" className="mrpr-shrink-0">
+            <span key="updated" className="mrpr-truncate">
               <RelativeTime timestamp={pr.updatedAt} label={(time) => t('updated', { time })} />
             </span>
           </PullRequestMetaLine>

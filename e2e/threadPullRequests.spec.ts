@@ -36,7 +36,8 @@ import { touch } from '@mindroom/e2e/touch';
 // its branch goes), sees GitHub's reason for a refused merge, chooses the merge method that the
 // next pull request and the next page load keep, closes and reopens a pull request, and updates a
 // branch behind its base from the base branch's warning (and is told only that the update was
-// requested when GitHub has not made it yet), with the header's controls on a phone; and without
+// requested when GitHub has not made it yet), with the header's controls on a phone, where the header
+// scrolls away under a bar that brings it back; and without
 // a token, with the GitHub account connected in the room's MindRoom server (which the page also
 // answers), the chips, the panel and a merge go through that server, and the page asks GitHub
 // nothing itself; and at a page zoom of 150 % the panel's text, its diffs and its file tree are
@@ -2317,6 +2318,73 @@ test("on a phone the panel's header has the controls", async ({ browser, baseURL
     expect(unanswered).toEqual([]);
     expect(warnings).toEqual([]);
   } finally {
+    await context.close();
+  }
+});
+
+// An invented description long enough to scroll the panel on a phone.
+const LONG_BODY = [
+  '## Why',
+  'A deploy drops every session held in Postgres, so each person signs in again.',
+  '## What changed',
+  ...Array.from({ length: 8 }, (_, index) => `- Step ${index + 1} of the move to the new store.`),
+  '## How to test',
+  'Run the session tests, then restart the server and check that a session survives it.',
+  '## Notes',
+  'The fallback stays until the cache is warm after a deploy.',
+].join('\n\n');
+
+/** The box that scrolls the panel: the nearest ancestor of its root whose content scrolls. */
+const scrollPanel = (page: Page, top: number) =>
+  panel(page)
+    .locator('.mrpr-panel')
+    .evaluate((root, to) => {
+      let node = root.parentElement;
+      while (node && !/auto|scroll/.test(getComputedStyle(node).overflowY)) {
+        node = node.parentElement;
+      }
+      node?.scrollTo({ top: to });
+      return node?.scrollTop ?? -1;
+    }, top);
+
+test('on a phone the header scrolls away under a bar that brings it back', async ({
+  browser,
+  baseURL,
+}) => {
+  test.setTimeout(4 * 60_000);
+  const context = await browser.newContext({ baseURL, ...PHONE_CONTEXT });
+  const page = await context.newPage();
+  const body = PULLS.sessionStore.body;
+  PULLS.sessionStore.body = LONG_BODY;
+  try {
+    await stubGitHub(page);
+    await openRoom(page);
+    await cardChips(page, roots.sessions).first().click();
+    const title = panel(page).locator('.mrpr-panel-title');
+    await expect(title).toHaveText(PULLS.sessionStore.title, { timeout: 30_000 });
+    // The room draws no title row: the panel's own top row, with its Close, is its top.
+    await expect(panel(page).locator('header')).toHaveCount(0);
+    await expect(
+      panel(page).getByRole('button', { name: 'Close pull request panel' })
+    ).toBeVisible();
+    const details = panel(page).getByRole('button', { name: 'Show pull request details' });
+    await expect(details).toHaveCount(0);
+
+    expect(await scrollPanel(page, 600)).toBeGreaterThan(0);
+    await expect(details).toBeVisible();
+    await expect(details).toContainText(`#${PULLS.sessionStore.number}`);
+    // The tab bar stays right under the bar.
+    const bar = await panel(page).locator('.mrpr-bar').boundingBox();
+    const tabs = await panel(page).locator('.mrpr-tabbar').boundingBox();
+    expect(Math.abs((tabs?.y ?? 0) - ((bar?.y ?? 0) + (bar?.height ?? 0)))).toBeLessThan(1.5);
+    await expect(title).not.toBeInViewport();
+
+    await details.click();
+    await expect(title).toBeInViewport({ timeout: 10_000 });
+    await expect(details).toHaveCount(0);
+    await expect(panel(page).getByRole('link', { name: 'acme/webapp' })).toBeVisible();
+  } finally {
+    PULLS.sessionStore.body = body;
     await context.close();
   }
 });
