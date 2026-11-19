@@ -163,6 +163,54 @@ afterEach(() => {
   roomServer.current = undefined;
 });
 
+// The observers the panel made, so a test can report the header in or out of view and the top
+// row's new height.
+let observers: {
+  callback: IntersectionObserverCallback;
+  options?: IntersectionObserverInit;
+  targets: Element[];
+}[] = [];
+let resized: ResizeObserverCallback[] = [];
+const stubObservers = () => {
+  observers = [];
+  resized = [];
+  vi.stubGlobal(
+    'IntersectionObserver',
+    class {
+      targets: Element[] = [];
+      constructor(callback: IntersectionObserverCallback, options?: IntersectionObserverInit) {
+        observers.push({ callback, options, targets: this.targets });
+      }
+      observe(target: Element) {
+        this.targets.push(target);
+      }
+      disconnect() {
+        this.targets.splice(0);
+      }
+    }
+  );
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      constructor(callback: ResizeObserverCallback) {
+        resized.push(callback);
+      }
+      observe() {}
+      disconnect() {}
+    }
+  );
+};
+const report = (inView: boolean) =>
+  act(async () => {
+    for (const { callback, targets } of observers) {
+      if (targets.length === 0) continue;
+      callback(
+        targets.map((target) => ({ target, isIntersecting: inView } as IntersectionObserverEntry)),
+        {} as IntersectionObserver
+      );
+    }
+  });
+
 const EMPTY = 'Click a pull request link in a message to show it here.';
 
 describe('PullRequestPanel', () => {
@@ -1047,6 +1095,31 @@ describe('with the GitHub account connected in MindRoom', () => {
     // The entry went with the menu: the focus goes back to the button that opened it.
     const more = view.getByRole('button', { name: 'More actions' });
     await waitUntil(() => expect(document.activeElement).toBe(more));
+  });
+
+  it('does not collapse while a failed removal from the menu says so', async () => {
+    stubObservers();
+    const mindroom = githubServer(withUser);
+    await saveInMindroom(mindroom);
+    const real = mindroom.server.request.getMockImplementation()!;
+    mindroom.server.request.mockImplementation(async (path, init) => {
+      if (path === '/api/github/token' && init?.method === 'DELETE') {
+        throw new MindroomServerError('Forbidden', 403, {});
+      }
+      return real(path, init);
+    });
+    roomServer.current = mindroom.server;
+    const view = await show();
+    await view.findByRole('button', { name: 'More actions' });
+    await report(false);
+    expect(view.getByRole('button', { name: /^Show details of pull request/ })).toBeTruthy();
+    await choose(view, 'Remove token from MindRoom');
+    await view.findByText('MindRoom could not remove the token.');
+    // The header comes back with the line, and stays while it shows.
+    expect(view.queryByRole('button', { name: /^Show details of pull request/ })).toBeNull();
+    await report(false);
+    expect(view.queryByRole('button', { name: /^Show details of pull request/ })).toBeNull();
+    expect(view.container.querySelector('.mrpr-panel-scrolls')).toBeNull();
   });
 
   it('says a removal from the menu failed on a line of its own, until a token is saved again', async () => {
@@ -2133,44 +2206,13 @@ describe('the dense header', () => {
     });
   };
 
-  // The observers the panel made, so a test can report the header in or out of view.
-  let observers: { callback: IntersectionObserverCallback; targets: Element[] }[] = [];
-  beforeEach(() => {
-    observers = [];
-    vi.stubGlobal(
-      'IntersectionObserver',
-      class {
-        targets: Element[] = [];
-        constructor(callback: IntersectionObserverCallback) {
-          observers.push({ callback, targets: this.targets });
-        }
-        observe(target: Element) {
-          this.targets.push(target);
-        }
-        disconnect() {
-          this.targets.splice(0);
-        }
-      }
-    );
-  });
+  beforeEach(stubObservers);
   afterEach(() => {
     panelControl.close = undefined;
   });
   beforeEach(() => {
     panelControl.close = vi.fn();
   });
-  const report = (inView: boolean) =>
-    act(async () => {
-      for (const { callback, targets } of observers) {
-        if (targets.length === 0) continue;
-        callback(
-          targets.map(
-            (target) => ({ target, isIntersecting: inView } as IntersectionObserverEntry)
-          ),
-          {} as IntersectionObserver
-        );
-      }
-    });
   // The panel in a box that scrolls, as the room's panel box does.
   const showScrolling = async () => {
     client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -2183,7 +2225,8 @@ describe('the dense header', () => {
       { id: 'pull-requests', plugin }
     );
   };
-  const bar = 'Show pull request details';
+  // Its name says what it does and which pull request it shows.
+  const bar = 'Show details of pull request #200: Add pull request cards';
 
   it('puts the crumbs with More actions and Close, the title, the meta and the branches in that order', async () => {
     asWriter();
@@ -2271,6 +2314,40 @@ describe('the dense header', () => {
     await report(true);
     expect(view.queryByRole('button', { name: bar })).toBeNull();
     expect(view.getByText('mindroom-ai/mindroom-chat')).toBeTruthy();
+  });
+
+  it('keeps the focus on the number as the top row turns into the bar and back', async () => {
+    const view = await showScrolling();
+    await view.findByText('Add pull request cards');
+    const number = () => view.getByRole('link', { name: '#200' });
+    act(() => number().focus());
+    await report(false);
+    expect(document.activeElement).toBe(view.getByRole('button', { name: bar }));
+    await report(true);
+    expect(document.activeElement).toBe(number());
+    // What stays in the row keeps its focus, and focus elsewhere stays where it is.
+    act(() => view.getByRole('button', { name: 'More actions' }).focus());
+    await report(false);
+    expect(document.activeElement).toBe(view.getByRole('button', { name: 'More actions' }));
+    act(() => view.getByRole('tab', { name: 'Summary' }).focus());
+    await report(true);
+    expect(document.activeElement).toBe(view.getByRole('tab', { name: 'Summary' }));
+  });
+
+  it("watches the header again under the top row's new height", async () => {
+    const view = await showScrolling();
+    await view.findByText('Add pull request cards');
+    const bar = view.container.querySelector('.mrpr-bar') as Element;
+    await act(async () => {
+      for (const callback of resized) {
+        callback(
+          [{ target: bar, contentRect: { height: 60 } } as unknown as ResizeObserverEntry],
+          {} as ResizeObserver
+        );
+      }
+    });
+    const watching = observers.filter(({ targets }) => targets.length > 0);
+    expect(watching.map(({ options }) => options?.rootMargin)).toEqual(['-60px 0px 0px 0px']);
   });
 
   it('does not collapse on the Code tab, which scrolls itself', async () => {

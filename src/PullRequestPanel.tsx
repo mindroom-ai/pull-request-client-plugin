@@ -4,6 +4,7 @@
 import {
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -22,7 +23,7 @@ import {
 } from 'lucide-react';
 import { usePluginTranslation, useRoomSidePanel } from '@mindroom/client-sdk/core';
 import { IconTooltip } from '@mindroom/client-sdk/ui';
-import { isOnlyAnnounced, useHeaderActions } from './actions/HeaderActions';
+import { useHeaderActions } from './actions/HeaderActions';
 import { usePullRequestActions } from './actions/usePullRequestActions';
 import { CodeTab, type ListState } from './CodeTab';
 import { BaseBranch } from './detail/BaseBranch';
@@ -238,32 +239,61 @@ function scrollerOf(element: HTMLElement): HTMLElement | null {
 
 /**
  * Whether the header has scrolled out of view under the panel's top row, while `watches`: one
- * observer of the header against the box that scrolls, no listener of every scroll.
+ * observer of the header against the box that scrolls, no listener of every scroll, made again
+ * when the top row's height changes (Page Zoom). The part of the top row that changes with it,
+ * `swap`, gives the focus it had to its counterpart there, marked `data-mrpr-swap-focus`.
  */
 function useScrolledAway(
   header: RefObject<HTMLElement>,
   bar: RefObject<HTMLElement>,
+  swap: RefObject<HTMLElement>,
   watches: boolean
 ): boolean {
   const [away, setAway] = useState(false);
+  const [barSize, setBarSize] = useState(0);
+  // Whether the part that changes had the focus as it changed.
+  const refocus = useRef(false);
+  useEffect(() => {
+    const element = bar.current;
+    if (!element || typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[entries.length - 1];
+      if (entry) setBarSize(Math.round(entry.contentRect.height));
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [bar]);
   useEffect(() => {
     const element = header.current;
     if (!watches || !element || typeof IntersectionObserver === 'undefined') return undefined;
+    const set = (next: boolean) =>
+      setAway((was) => {
+        if (was !== next) refocus.current = swap.current?.contains(document.activeElement) ?? false;
+        return next;
+      });
     const observer = new IntersectionObserver(
       (entries) => {
         const entry = entries[entries.length - 1];
-        if (entry) setAway(!entry.isIntersecting);
+        if (entry) set(!entry.isIntersecting);
       },
       // The top row stays over the box's top, so what is under it is out of view.
-      { root: scrollerOf(element), rootMargin: `-${bar.current?.offsetHeight ?? 0}px 0px 0px 0px` }
+      { root: scrollerOf(element), rootMargin: `-${barSize}px 0px 0px 0px` }
     );
     observer.observe(element);
     return () => {
       observer.disconnect();
-      setAway(false);
+      set(false);
     };
-  }, [bar, header, watches]);
-  return watches && away;
+  }, [barSize, header, swap, watches]);
+  const collapsed = watches && away;
+  useLayoutEffect(() => {
+    if (!refocus.current) return;
+    refocus.current = false;
+    swap.current
+      ?.querySelector<HTMLElement>('[data-mrpr-swap-focus]')
+      ?.focus({ preventScroll: true });
+  }, [collapsed, swap]);
+  return collapsed;
 }
 
 /**
@@ -279,6 +309,7 @@ function Header({
   actions,
   freshness,
   collapses,
+  onHold,
   onUseToken,
   onForgetToken,
 }: {
@@ -288,14 +319,17 @@ function Header({
   actions: ReturnType<typeof usePullRequestActions>;
   freshness: ReturnType<typeof baseFreshness>;
   collapses: boolean;
+  /** Told whether the header stays in place: an action runs, or a line says what came of one. */
+  onHold: (holds: boolean) => void;
   onUseToken?: () => void;
   onForgetToken?: () => void;
 }) {
   const t = usePluginTranslation('pull-requests');
   const headerRef = useRef<HTMLDivElement>(null);
   const barRef = useRef<HTMLDivElement>(null);
-  const collapsed = useScrolledAway(headerRef, barRef, collapses);
-  const { control, menu, lines } = useHeaderActions({
+  const swapRef = useRef<HTMLSpanElement>(null);
+  const collapsed = useScrolledAway(headerRef, barRef, swapRef, collapses);
+  const { control, menu, lines, holds } = useHeaderActions({
     pullRequestRef: ref,
     pullRequest: pr,
     actions,
@@ -303,6 +337,10 @@ function Header({
     onUseToken,
     onForgetToken,
   });
+  useLayoutEffect(() => {
+    onHold(holds);
+    return () => onHold(false);
+  }, [holds, onHold]);
   const forkOwner =
     pr.headRepo && pr.headRepo !== pr.baseRepo ? pr.headRepo.split('/')[0] : undefined;
   const showDetails = () => {
@@ -316,50 +354,54 @@ function Header({
   return (
     <>
       <div ref={barRef} className="mrpr-crumbs mrpr-bar">
-        {collapsed ? (
-          <button
-            type="button"
-            className="mrpr-bar-details"
-            aria-label={t('showDetails')}
-            onClick={showDetails}
-          >
-            {stateIcon}
-            <span className={`mrpr-shrink-0 ${state.toneClassName}`}>#{ref.number}</span>
-            <span className="mrpr-truncate mrpr-bar-title">{pr.title}</span>
-          </button>
-        ) : (
-          <>
-            {stateIcon}
-            <a
-              className="mrpr-crumb-link mrpr-truncate"
-              href={`https://github.com/${ref.owner}/${ref.repo}`}
-              target="_blank"
-              rel="noopener noreferrer"
+        <span ref={swapRef} className="mrpr-bar-swap">
+          {collapsed ? (
+            <button
+              type="button"
+              className="mrpr-bar-details"
+              aria-label={t('showDetails', { number: ref.number, title: pr.title })}
+              data-mrpr-swap-focus
+              onClick={showDetails}
             >
-              {ref.owner}/{ref.repo}
-            </a>
-            <a
-              className={`mrpr-crumb-link mrpr-shrink-0 ${state.toneClassName}`}
-              href={pr.url}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              #{ref.number}
-            </a>
-            <span className="mrpr-badges">
-              {state.key === 'open' ? null : (
-                <span className={`mrpr-badge mrpr-badge-state ${state.toneClassName}`}>
-                  {t(`state.${state.key}`)}
-                </span>
-              )}
-              {pr.autoMerge ? (
-                <span className="mrpr-badge mrpr-badge-outline">
-                  {t('badge.autoMerge', { method: pr.autoMerge.method })}
-                </span>
-              ) : null}
-            </span>
-          </>
-        )}
+              {stateIcon}
+              <span className={`mrpr-shrink-0 ${state.toneClassName}`}>#{ref.number}</span>
+              <span className="mrpr-truncate mrpr-bar-title">{pr.title}</span>
+            </button>
+          ) : (
+            <>
+              {stateIcon}
+              <a
+                className="mrpr-crumb-link mrpr-truncate"
+                href={`https://github.com/${ref.owner}/${ref.repo}`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {ref.owner}/{ref.repo}
+              </a>
+              <a
+                className={`mrpr-crumb-link mrpr-shrink-0 ${state.toneClassName}`}
+                href={pr.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                data-mrpr-swap-focus
+              >
+                #{ref.number}
+              </a>
+              <span className="mrpr-badges">
+                {state.key === 'open' ? null : (
+                  <span className={`mrpr-badge mrpr-badge-state ${state.toneClassName}`}>
+                    {t(`state.${state.key}`)}
+                  </span>
+                )}
+                {pr.autoMerge ? (
+                  <span className="mrpr-badge mrpr-badge-outline">
+                    {t('badge.autoMerge', { method: pr.autoMerge.method })}
+                  </span>
+                ) : null}
+              </span>
+            </>
+          )}
+        </span>
         <span className="mrpr-bar-end">
           {menu}
           <CloseButton />
@@ -593,11 +635,10 @@ function Panel({ roomId, request }: PanelProps) {
     setLatch(undefined);
   };
   // Summary and Timeline scroll with the header, in the room's box, the Code tab in itself. While
-  // an action runs or its line shows, the header stays put above the tab, so the line does too.
-  const holds =
-    pr !== undefined &&
-    (actions.pending !== null || (actions.result !== null && !isOnlyAnnounced(actions.result, pr)));
-  const scrolls = tab !== 'code' && !holds;
+  // an action runs or a line under the header says what came of one, the header stays put above
+  // the tab, so the line does too (`Header`'s `onHold`).
+  const [headerHeld, setHeaderHeld] = useState(false);
+  const scrolls = tab !== 'code' && !headerHeld;
 
   return (
     <div
@@ -646,6 +687,7 @@ function Panel({ roomId, request }: PanelProps) {
             actions={actions}
             freshness={freshness}
             collapses={scrolls}
+            onHold={setHeaderHeld}
             // Who the requests go as and what changes that sit in its menu, out of the way.
             onUseToken={
               via === 'server' && !tokenForm.reason && !overriding

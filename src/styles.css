@@ -773,6 +773,9 @@
   padding-inline: 1rem 0.5rem;
   background: var(--pr-panel);
 }
+.mrpr-bar-swap {
+  display: contents;
+}
 .mrpr-bar-label {
   margin: 0;
   color: var(--pr-fg);
@@ -1035,6 +1038,11 @@
   .mrpr-action-result-dismiss {
     min-inline-size: max(44px, 2.75rem);
     min-block-size: max(44px, 2.75rem);
+  }
+  /* The top row is a finger's height, so its controls' targets fit inside the box that scrolls
+     and the bar's button is one. */
+  .mrpr-panel {
+    --mrpr-bar-size: max(44px, 2.75rem);
   }
   /* In the top row and on the branches, a control keeps its pointer height and takes a finger's
      target above and below it, so the row does not grow. */

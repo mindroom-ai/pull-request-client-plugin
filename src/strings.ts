@@ -64,7 +64,7 @@ export const en = {
   // The panel's own Close, at the end of its top row, and the bar that stands for the header
   // once it scrolled away.
   closePanel: 'Close pull request panel',
-  showDetails: 'Show pull request details',
+  showDetails: 'Show details of pull request #{{number}}: {{title}}',
   badge: { autoMerge: 'Auto-merge ({{method}})' },
   // The header's actions on a pull request: its primary control, the menu, the delete dialog
   // and the line under the header that says what runs and what failed. `pending`, `failed` and

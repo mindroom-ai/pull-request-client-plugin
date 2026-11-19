@@ -117,9 +117,13 @@ let writeAnswer: () => Promise<Response>;
 
 /** The header's three parts in a row, as the panel places them in its rows. */
 function HeaderActions(props: Omit<Parameters<typeof useHeaderActions>[0], 'checkout'>) {
-  const { control, menu, lines } = useHeaderActions({ ...props, checkout: 'gh pr checkout 7' });
+  const { control, menu, lines, holds } = useHeaderActions({
+    ...props,
+    checkout: 'gh pr checkout 7',
+  });
   return (
     <>
+      <span data-testid="holds">{String(holds)}</span>
       {control}
       {menu}
       {lines}
@@ -520,10 +524,10 @@ describe('HeaderActions', () => {
 
   // The header with an outcome the runner left, on the pull request as the panel has it.
   const dismissResult = vi.fn();
-  const withResult = (result: ActionResult, pullRequest: PullRequest) => {
+  const withResult = (result: ActionResult, pullRequest: PullRequest, canWrite = true) => {
     const actions = {
       repo: {
-        canWrite: true,
+        canWrite,
         mergeMethods: ['merge' as const],
         autoMergeAllowed: false,
         defaultBranch: 'main',
@@ -541,6 +545,23 @@ describe('HeaderActions', () => {
       </QueryClientProvider>
     );
   };
+
+  it('holds the header in place only while its line shows the outcome', async () => {
+    const result = { action: 'update-branch', outcome: 'requested' } as const;
+    const shown = await renderPluginComponent(withResult(result, open), {
+      id: 'pull-requests',
+      plugin,
+    });
+    expect(shown.getByTestId('holds').textContent).toBe('true');
+    shown.unmount();
+    // Once the access that may write is gone, the line and its Dismiss are, and nothing holds.
+    const hidden = await renderPluginComponent(withResult(result, open, false), {
+      id: 'pull-requests',
+      plugin,
+    });
+    expect(hidden.queryByRole('button', { name: 'Dismiss' })).toBeNull();
+    expect(hidden.getByTestId('holds').textContent).toBe('false');
+  });
 
   it('says an update whose new head did not show yet was requested, not made', async () => {
     const view = await renderPluginComponent(

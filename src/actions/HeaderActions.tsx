@@ -86,7 +86,7 @@ const SHOWN_DONE: ReadonlySet<PullRequestAction> = new Set([
  * still from before it: the header then offers Merge on a merged pull request, and the line is
  * all that says it is merged.
  */
-export function isOnlyAnnounced(result: ActionResult | null, pr: PullRequest): boolean {
+function isOnlyAnnounced(result: ActionResult | null, pr: PullRequest): boolean {
   if (result?.outcome !== 'done' || SHOWN_DONE.has(result.action)) return false;
   return result.unread !== true || showsOutcome(pr, result.action);
 }
@@ -94,7 +94,8 @@ export function isOnlyAnnounced(result: ActionResult | null, pr: PullRequest): b
 /**
  * The header's actions, in three parts the header places itself: the primary `control` (none
  * when nothing applies), the `menu` (its button, the menu and the delete dialog) and the `lines`
- * under the header that say what runs and what came of it.
+ * under the header that say what runs and what came of it; `holds` while an action runs or a line
+ * shows what came of one, as long as the header should stay in view.
  */
 export function useHeaderActions({
   pullRequestRef,
@@ -113,7 +114,7 @@ export function useHeaderActions({
   onUseToken?: () => void;
   /** Forgets the browser's token; without it the menu does not offer it. */
   onForgetToken?: () => void;
-}): { control: ReactNode; menu: ReactNode; lines: ReactNode } {
+}): { control: ReactNode; menu: ReactNode; lines: ReactNode; holds: boolean } {
   const t = usePluginTranslation('pull-requests');
   const { repo, method, chooseMethod, pending, result, perform, dismissResult } = actions;
   const canWrite = repo?.canWrite === true;
@@ -548,7 +549,12 @@ export function useHeaderActions({
       ) : null}
     </>
   );
-  return { control: primaryControlElement, menu, lines };
+  // What the lines show, not what the runner keeps: without write access they show none.
+  const holds =
+    removal.failed ||
+    (writable !== undefined &&
+      (pending !== null || (result !== null && !isOnlyAnnounced(result, pr))));
+  return { control: primaryControlElement, menu, lines, holds };
 }
 
 /**
