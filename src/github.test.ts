@@ -904,42 +904,110 @@ describe('the lists', () => {
 
 describe('fetchDiffBlob', () => {
   const sha = 'b'.repeat(40);
-  const oversized = 'a'.repeat(128 * 1024 + 1);
+  const blobPath = `/repos/a/b/git/blobs/${sha}`;
+  const rawMedia = 'application/vnd.github.raw+json';
+  const sizeAnswer = (byteSize: number) => json({ data: { repository: { object: { byteSize } } } });
 
-  it('reads the immutable Git Data blob through MindRoom', async () => {
-    const upstream = vi.fn((url: string) =>
-      Promise.resolve(
-        json({
-          encoding: 'base64',
-          size: 3,
-          content: 'w6kK\n',
-        })
-      )
+  it('uses a small GraphQL size preflight then requests the immutable JSON blob through MindRoom', async () => {
+    const upstream = vi.fn(async (url: string, _init?: RequestInit) =>
+      url.endsWith('/graphql')
+        ? sizeAnswer(3)
+        : json({ encoding: 'base64', size: 3, content: 'w6kK\n' })
+    );
+    const { server, githubRequests } = githubServer(upstream);
+    const via = { server, account: 'gardener', disconnected: vi.fn(), unreadable: vi.fn() };
+    expect(await fetchDiffBlob(ref, sha, via)).toBe('é\n');
+    expect(githubRequests()).toEqual([
+      {
+        path: '/graphql',
+        method: 'POST',
+        accept: 'application/vnd.github+json',
+        body: {
+          query: expect.stringContaining('byteSize'),
+          variables: { owner: 'a', repo: 'b', sha },
+        },
+      },
+      { path: blobPath, method: 'GET', accept: 'application/vnd.github+json' },
+    ]);
+  });
+
+  it('never requests the blob through MindRoom when its immutable object is too large', async () => {
+    const upstream = vi.fn(async (url: string) =>
+      url.endsWith('/graphql')
+        ? sizeAnswer(128 * 1024 + 1)
+        : json({ encoding: 'base64', size: 1, content: 'YQ==' })
     );
     const { server } = githubServer(upstream);
     const via = { server, account: 'gardener', disconnected: vi.fn(), unreadable: vi.fn() };
-    expect(await fetchDiffBlob(ref, sha, via)).toBe('é\n');
-    expect(upstream.mock.calls[0]?.[0]).toBe(`https://api.github.com/repos/a/b/git/blobs/${sha}`);
+    expect(await fetchDiffBlob(ref, sha, via)).toBeNull();
+    expect(upstream.mock.calls.map(([url]) => url)).toEqual(['https://api.github.com/graphql']);
+  });
+
+  it('honors a rate limit reported inside a successful GraphQL response', async () => {
+    const upstream = vi.fn(async (_url: string) =>
+      json({ errors: [{ type: 'RATE_LIMITED' }] }, { headers: { 'retry-after': '60' } })
+    );
+    const { server } = githubServer(upstream);
+    const via = { server, account: 'limited-gardener', disconnected: vi.fn(), unreadable: vi.fn() };
+    vi.useFakeTimers({ now: Date.UTC(2026, 0, 1), toFake: ['Date'] });
+    try {
+      await expect(fetchDiffBlob(ref, sha, via)).rejects.toMatchObject({ kind: 'rateLimited' });
+      await expect(fetchDiffBlob(ref, sha, via)).rejects.toMatchObject({ kind: 'rateLimited' });
+      expect(upstream.mock.calls).toEqual([['https://api.github.com/graphql', expect.any(Object)]]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reads small raw UTF-8 directly with the token', async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response('é\n'));
+    vi.stubGlobal('fetch', fetchMock);
+    expect(await fetchDiffBlob(ref, sha, 'blob-fixture')).toBe('é\n');
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({ Accept: rawMedia });
+  });
+
+  it.each([true, false])('cancels an oversized stream (length header: %s)', async (withLength) => {
+    const max = 128 * 1024;
+    let reads = 0;
+    const cancel = vi.fn();
+    const body = new ReadableStream<Uint8Array>(
+      {
+        pull(controller) {
+          reads += 1;
+          const size = reads === 1 ? max : 1;
+          if (reads === 3) controller.close();
+          else controller.enqueue(new Uint8Array(size).fill(0x61));
+        },
+        cancel,
+      },
+      { highWaterMark: 0 }
+    );
+    const headers = withLength ? { 'content-length': String(max + 1) } : undefined;
+    const fetchMock = stubRoutes({ '/git/blobs/': new Response(body, { headers }) });
+    expect(await fetchDiffBlob(ref, sha, 'blob-fixture')).toBeNull();
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(reads).toBe(withLength ? 0 : 2);
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it.each([
     ['404 (including submodule commit IDs)', new Response(null, { status: 404 })],
-    ['403', new Response(null, { status: 403 })],
-    ['oversized content', { size: oversized.length, encoding: 'base64', content: btoa(oversized) }],
-    ['binary data with a NUL', { size: 2, encoding: 'base64', content: 'AGE=' }],
-    ['invalid UTF-8', { size: 1, encoding: 'base64', content: '/w==' }],
-    ['a malformed response', { size: 2, encoding: 'base64', content: 'YQ==' }],
-    [
-      'an LFS pointer',
-      {
-        size: 43,
-        encoding: 'base64',
-        content: btoa('version https://git-lfs.github.com/spec/v1\n'),
-      },
-    ],
-  ])('falls back on %s', async (_case, body) => {
+    ['binary data with a NUL', new Response(Uint8Array.of(0, 97))],
+    ['invalid UTF-8', new Response(Uint8Array.of(0xff))],
+    ['an LFS pointer', new Response('version https://git-lfs.github.com/spec/v1\n')],
+  ])('falls back permanently on %s', async (_case, body) => {
     stubRoutes({ '/git/blobs/': body });
     expect(await fetchDiffBlob(ref, sha, 'blob-fixture')).toBeNull();
+  });
+
+  it.each([403, 502])('rejects HTTP %d instead of caching no content', async (status) => {
+    stubRoutes({ '/git/blobs/': new Response(null, { status }) });
+    await expect(fetchDiffBlob(ref, sha, 'blob-fixture')).rejects.toMatchObject({ status });
+  });
+
+  it('rejects a network failure instead of caching no content', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
+    await expect(fetchDiffBlob(ref, sha, 'blob-fixture')).rejects.toMatchObject({ status: 0 });
   });
 
   it.each([
@@ -948,12 +1016,21 @@ describe('fetchDiffBlob', () => {
       'without Retry-After',
       json({ message: 'You have exceeded a secondary rate limit.' }, { status: 403 }),
     ],
-  ])('stops requesting blobs after a secondary rate limit %s', async (label, answer) => {
+  ])('rejects the same SHA during cooldown %s and reads it after reset', async (label, answer) => {
     const token = `limited-blob-fixture-${label}`;
-    const fetchMock = stubRoutes({ '/git/blobs/': answer });
-    expect(await fetchDiffBlob(ref, sha, token)).toBeNull();
-    expect(await fetchDiffBlob(ref, 'c'.repeat(40), token)).toBeNull();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    vi.useFakeTimers({ now: Date.UTC(2026, 0, 1), toFake: ['Date'] });
+    try {
+      const fetchMock = stubRoutes({ '/git/blobs/': answer });
+      await expect(fetchDiffBlob(ref, sha, token)).rejects.toMatchObject({ kind: 'rateLimited' });
+      await expect(fetchDiffBlob(ref, sha, token)).rejects.toMatchObject({ kind: 'rateLimited' });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      vi.setSystemTime(Date.now() + 60_000);
+      fetchMock.mockImplementation(async () => new Response('bud\n'));
+      await expect(fetchDiffBlob(ref, sha, token)).resolves.toBe('bud\n');
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

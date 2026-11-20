@@ -7,7 +7,7 @@ import {
   parsePatchFiles,
   type FileDiffMetadata,
 } from '@pierre/diffs';
-import { GIT_LFS_POINTER_HEADER, MAX_DIFF_BLOB_BYTES, type PullRequestFile } from '../github';
+import { GIT_LFS_POINTER_HEADER, MAX_DIFF_BLOB_BYTES, type DiffSource } from './diffSource';
 
 export const DIFF_THEME_NAMES = {
   light: 'pierre-light',
@@ -68,12 +68,6 @@ export function getDiffLineStat(files: ReadonlyArray<FileDiffMetadata>): DiffLin
   );
 }
 
-interface RenderablePatchOptions {
-  ignoreWhitespace?: boolean;
-}
-
-type DiffSource = Pick<PullRequestFile, 'patch' | 'sha' | 'additions' | 'deletions'>;
-
 export function canHydrateDiff(file: FileDiffMetadata): boolean {
   return (
     file.isPartial &&
@@ -133,6 +127,8 @@ export function reconstructOldFile(
       (newEOF && gap + newCount > 0)
     )
       return null;
+    if (gap > 0 && !lines[newStart - 1]?.endsWith('\n')) oldEOF = true;
+    if (oldEOF && oldCount > 0) return null;
     old.push(lines.slice(newEnd, newStart).join(''));
 
     let oldRows = 0;
@@ -192,11 +188,12 @@ export function reconstructOldFile(
     return null;
   old.push(lines.slice(newEnd).join(''));
   const contents = old.join('');
+  // Lines only present in the old patch are not covered by the new blob's checks.
   if (contents.startsWith(GIT_LFS_POINTER_HEADER)) return null;
   return new TextEncoder().encode(contents).length <= MAX_DIFF_BLOB_BYTES ? contents : null;
 }
 
-type Preparation = RenderablePatchOptions & { source?: DiffSource; blob?: string };
+type Preparation = { ignoreWhitespace?: boolean; source?: DiffSource; blob?: string };
 type Prepared = { source?: DiffSource; blob?: string; result: FileDiffMetadata };
 const preparedByFile = new WeakMap<FileDiffMetadata, Map<boolean, Prepared>>();
 
@@ -293,8 +290,7 @@ function hideWhitespaceChanges(file: FileDiffMetadata): FileDiffMetadata {
 
 export function getRenderablePatch(
   patch: string | undefined,
-  cacheScope = 'diff-panel',
-  options: RenderablePatchOptions = {}
+  cacheScope = 'diff-panel'
 ): RenderablePatch | null {
   if (!patch?.trim()) return null;
 
@@ -302,8 +298,7 @@ export function getRenderablePatch(
     const parsedPatches = parsePatchFiles(patch, {
       cacheKeyPrefix: buildPatchCacheKey(patch, cacheScope),
     });
-    const sourceFiles = parsedPatches.flatMap((parsedPatch) => parsedPatch.files);
-    const files = options.ignoreWhitespace ? sourceFiles.map(hideWhitespaceChanges) : sourceFiles;
+    const files = parsedPatches.flatMap((parsedPatch) => parsedPatch.files);
     if (files.length > 0) {
       return { kind: 'files', files };
     }

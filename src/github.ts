@@ -4,6 +4,7 @@
 // those load only with the side panel.
 import { MindroomServerError, type MindroomServer } from '@mindroom/client-sdk/server';
 import { imageSources, type ImageSources } from './images';
+import { GIT_LFS_POINTER_HEADER, MAX_DIFF_BLOB_BYTES, type DiffSource } from './diff/diffSource';
 
 export type PullRequestRef = { owner: string; repo: string; number: number };
 
@@ -52,15 +53,10 @@ export type PullRequest = {
   url: string;
 };
 
-export type PullRequestFile = {
+export type PullRequestFile = DiffSource & {
   path: string;
   previousPath: string | null;
   status: 'added' | 'removed' | 'modified' | 'renamed' | 'copied' | 'changed' | 'unchanged';
-  additions: number;
-  deletions: number;
-  patch: string | null;
-  /** The SHA of the file's blob, which changes with its content, patch or not. */
-  sha: string | null;
   url: string;
 };
 
@@ -237,14 +233,50 @@ function resetTime(response: Response): number {
     : now + 60_000;
 }
 
-function activeRateLimit(token: GitHubAuth | undefined): RateLimit | undefined {
+export function checkGitHubReadLimit(token: GitHubAuth | undefined): void {
   const { budget, who } = budgetOf(token);
   const limit = rateLimits.get(budget);
-  return limit && limit.who === who && Date.now() < limit.resetsAt ? limit : undefined;
+  if (limit && limit.who === who && Date.now() < limit.resetsAt)
+    throw new GitHubError('rateLimited', limit.status);
 }
 
-export const isGitHubRateLimited = (token: GitHubAuth): boolean =>
-  activeRateLimit(token) !== undefined;
+function rateLimited(token: GitHubAuth | undefined, response: Response): GitHubError {
+  const { budget, who } = budgetOf(token);
+  rateLimits.set(budget, { who, status: response.status, resetsAt: resetTime(response) });
+  return new GitHubError('rateLimited', response.status);
+}
+
+async function readGitHub(
+  token: GitHubAuth | undefined,
+  path: string,
+  init: GitHubInit
+): Promise<Response> {
+  checkGitHubReadLimit(token);
+  rateLimits.delete(budgetOf(token).budget);
+  const { signal } = init;
+  let response: Response;
+  try {
+    // GitHub allows a minute of caching, so a read just after a write could show the state from
+    // before it. With a token the browser revalidates by ETag, and an authorized 304 costs no rate
+    // limit. Without one a 304 still counts, and no write can have happened, so the cache serves.
+    const cache: RequestCache = token ? 'no-cache' : 'default';
+    response = await githubFetch(token, path, { ...init, cache });
+  } catch (error) {
+    // An aborted request is the caller's own doing, not a failure of GitHub.
+    if (signal?.aborted) throw error;
+    throw new GitHubError('failed', 0);
+  }
+  if (!response.ok) {
+    let kind = errorKind(response, Boolean(token));
+    if (kind === 'failed' && response.status === 403) {
+      const body = record(await response.json().catch(() => null));
+      if (/secondary rate limit/i.test(text(body?.message))) kind = 'rateLimited';
+    }
+    if (kind === 'rateLimited') throw rateLimited(token, response);
+    throw new GitHubError(kind, response.status);
+  }
+  return response;
+}
 
 async function getJson(
   path: string,
@@ -252,34 +284,7 @@ async function getJson(
   signal: AbortSignal | undefined,
   accept: string = JSON_MEDIA
 ): Promise<unknown> {
-  const withToken = Boolean(token);
-  const limit = activeRateLimit(token);
-  if (limit) throw new GitHubError('rateLimited', limit.status);
-  const { budget, who } = budgetOf(token);
-  rateLimits.delete(budget);
-  let response: Response;
-  try {
-    // GitHub allows a minute of caching, so a read just after a write could show the state from
-    // before it. With a token the browser revalidates by ETag, and an authorized 304 costs no rate
-    // limit. Without one a 304 still counts, and no write can have happened, so the cache serves.
-    const cache: RequestCache = token ? 'no-cache' : 'default';
-    response = await githubFetch(token, path, { method: 'GET', accept, signal, cache });
-  } catch (error) {
-    // An aborted request is the caller's own doing, not a failure of GitHub.
-    if (signal?.aborted) throw error;
-    throw new GitHubError('failed', 0);
-  }
-  if (!response.ok) {
-    let kind = errorKind(response, withToken);
-    if (kind === 'failed' && response.status === 403) {
-      const body = record(await response.json().catch(() => null));
-      if (/secondary rate limit/i.test(text(body?.message))) kind = 'rateLimited';
-    }
-    if (kind === 'rateLimited') {
-      rateLimits.set(budget, { who, status: response.status, resetsAt: resetTime(response) });
-    }
-    throw new GitHubError(kind, response.status);
-  }
+  const response = await readGitHub(token, path, { method: 'GET', accept, signal });
   try {
     return await response.json();
   } catch {
@@ -553,9 +558,76 @@ export function filePatch(file: PullRequestFile): string | null {
 
 const repoPath = (ref: PullRequestRef) => `/repos/${ref.owner}/${ref.repo}`;
 
-// Whole-file highlighting runs on the UI thread.
-export const MAX_DIFF_BLOB_BYTES = 128 * 1024;
-export const GIT_LFS_POINTER_HEADER = 'version https://git-lfs.github.com/spec/v1';
+const RAW_BLOB_MEDIA = 'application/vnd.github.raw+json';
+const BLOB_SIZE_QUERY = `query DiffBlobSize($owner: String!, $repo: String!, $sha: GitObjectID!) {
+  repository(owner: $owner, name: $repo) { object(oid: $sha) { ... on Blob { byteSize } } }
+}`;
+
+async function readRawDiffBlob(response: Response): Promise<Uint8Array | null> {
+  if (Number(response.headers.get('content-length')) > MAX_DIFF_BLOB_BYTES) {
+    await response.body?.cancel().catch(() => undefined);
+    return null;
+  }
+  const reader = response.body?.getReader();
+  if (!reader) return new Uint8Array(0);
+  const bytes = new Uint8Array(MAX_DIFF_BLOB_BYTES);
+  let size = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) return bytes.subarray(0, size);
+      if (size + value.byteLength > MAX_DIFF_BLOB_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        return null;
+      }
+      bytes.set(value, size);
+      size += value.byteLength;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+async function readProxiedDiffBlob(
+  ref: PullRequestRef,
+  sha: string,
+  token: GitHubViaServer,
+  signal?: AbortSignal
+): Promise<Uint8Array | null> {
+  // MindRoom's proxy accepts JSON but not the raw blob media type. Ask for size only, then use
+  // the same immutable object ID for the JSON blob so a large body is never requested.
+  const metadata = await readGitHub(token, '/graphql', {
+    method: 'POST',
+    accept: JSON_MEDIA,
+    signal,
+    body: { query: BLOB_SIZE_QUERY, variables: { owner: ref.owner, repo: ref.repo, sha } },
+  });
+  const answer = record(await metadata.json());
+  const errors = list(answer?.errors);
+  if (errors.some((error) => error.type === 'RATE_LIMITED')) throw rateLimited(token, metadata);
+  if (errors.length > 0) {
+    if (errors.every((error) => error.type === 'NOT_FOUND')) return null;
+    throw new GitHubError('failed', metadata.status);
+  }
+  const data = record(answer?.data);
+  if (!data) throw new GitHubError('failed', metadata.status);
+  const object = record(record(data.repository)?.object);
+  const size = object?.byteSize;
+  // Missing objects and non-Blob Git objects have no byteSize.
+  if (typeof size !== 'number' || size > MAX_DIFF_BLOB_BYTES) return null;
+
+  const raw = record(await getJson(`${repoPath(ref)}/git/blobs/${sha}`, token, signal));
+  if (
+    raw?.encoding !== 'base64' ||
+    raw.size !== size ||
+    typeof raw.content !== 'string' ||
+    raw.content.length > 2 * MAX_DIFF_BLOB_BYTES
+  )
+    throw new GitHubError('failed', 200);
+  const bytes = Uint8Array.from(atob(raw.content), (byte) => byte.charCodeAt(0));
+  if (bytes.length !== size) throw new GitHubError('failed', 200);
+  return bytes;
+}
 
 /** GitHub supplies this blob SHA beside the patch, even when the PR comes from a fork. */
 export async function fetchDiffBlob(
@@ -565,19 +637,24 @@ export async function fetchDiffBlob(
   signal?: AbortSignal
 ): Promise<string | null> {
   if (!/^[0-9a-f]{40}$/i.test(sha)) return null;
+  let bytes: Uint8Array | null;
   try {
-    const raw = record(await getJson(`${repoPath(ref)}/git/blobs/${sha}`, token, signal));
-    if (
-      raw?.encoding !== 'base64' ||
-      typeof raw.size !== 'number' ||
-      raw.size > MAX_DIFF_BLOB_BYTES ||
-      typeof raw.content !== 'string'
-    )
-      return null;
-    const encoded = raw.content.replace(/\s/g, '');
-    if (encoded.length > Math.ceil(MAX_DIFF_BLOB_BYTES / 3) * 4) return null;
-    const bytes = Uint8Array.from(atob(encoded), (byte) => byte.charCodeAt(0));
-    if (bytes.length !== raw.size || bytes.includes(0)) return null;
+    bytes =
+      typeof token === 'string'
+        ? await readRawDiffBlob(
+            await readGitHub(token, `${repoPath(ref)}/git/blobs/${sha}`, {
+              method: 'GET',
+              accept: RAW_BLOB_MEDIA,
+              signal,
+            })
+          )
+        : await readProxiedDiffBlob(ref, sha, token, signal);
+  } catch (error) {
+    if (error instanceof GitHubError && error.status === 404) return null;
+    throw error;
+  }
+  if (!bytes || bytes.includes(0)) return null;
+  try {
     const decoded = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
     return decoded.startsWith(GIT_LFS_POINTER_HEADER) ? null : decoded;
   } catch {

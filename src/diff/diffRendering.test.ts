@@ -23,13 +23,14 @@ const source = (patch = greenhousePatch, additions = 2, deletions = 2, sha = 'b'
 });
 const parse = (patch = greenhousePatch) => {
   const name = greenhousePath;
-  const result = getRenderablePatch(
-    `diff --git a/${name} b/${name}\n--- a/${name}\n+++ b/${name}\n${patch}\n`,
-    'pr'
-  );
+  return parseFile(`diff --git a/${name} b/${name}\n--- a/${name}\n+++ b/${name}\n${patch}\n`);
+};
+
+function parseFile(patch: string) {
+  const result = getRenderablePatch(patch, 'pr');
   if (result?.kind !== 'files' || !result.files[0]) throw new Error('not parsed');
   return result.files[0];
-};
+}
 
 const firstHunk = greenhousePatch.split('\n@@ -9')[0]!;
 const secondHunk = greenhousePatch.slice(firstHunk.length + 1);
@@ -127,6 +128,16 @@ describe('reconstructOldFile', () => {
     expect(reconstructOldFile(parse(patch), source(patch, 1, 1), 'bud\n')).toBeNull();
   });
 
+  it('rejects a deletion after a copied line with no final newline', () => {
+    const patch = '@@ -2 +1,0 @@\n-b';
+    expect(reconstructOldFile(parse(patch), source(patch, 0, 1), 'a')).toBeNull();
+  });
+
+  it('rejects a NUL in a reconstructed old row even when the new blob has none', () => {
+    const patch = '@@ -1 +1 @@\n-b\0ud\n+bud';
+    expect(reconstructOldFile(parse(patch), source(patch, 1, 1), 'bud\n')).toBeNull();
+  });
+
   it('caps the reconstructed side by UTF-8 byte length', () => {
     const patch = `@@ -1 +1 @@\n-${'é'.repeat(65_536)}\n+bud`;
     expect(reconstructOldFile(parse(patch), source(patch, 1, 1), 'bud\n')).toBeNull();
@@ -191,7 +202,7 @@ describe('partial diff hydration', () => {
   });
 });
 
-describe('getRenderablePatch', () => {
+describe('prepareFileDiff whitespace filtering', () => {
   it('ignore whitespace hides an indentation-only change', () => {
     const patch = [
       'diff --git a/a.ts b/a.ts',
@@ -203,12 +214,11 @@ describe('getRenderablePatch', () => {
       '+    return 1;',
       ' }',
     ].join('\n');
-    const shown = getRenderablePatch(patch, 'pr');
-    const hidden = getRenderablePatch(patch, 'pr', { ignoreWhitespace: true });
-    if (shown?.kind !== 'files' || hidden?.kind !== 'files') throw new Error('not parsed');
-    expect(getDiffLineStat(shown.files)).toEqual({ additions: 1, deletions: 1 });
-    expect(getDiffLineStat(hidden.files)).toEqual({ additions: 0, deletions: 0 });
-    expect(hidden.files[0]!.hunks[0]!.hunkContent).toEqual([
+    const shown = parseFile(patch);
+    const hidden = prepareFileDiff(shown, { ignoreWhitespace: true });
+    expect(getDiffLineStat([shown])).toEqual({ additions: 1, deletions: 1 });
+    expect(getDiffLineStat([hidden])).toEqual({ additions: 0, deletions: 0 });
+    expect(hidden.hunks[0]!.hunkContent).toEqual([
       { type: 'context', lines: 3, additionLineIndex: 0, deletionLineIndex: 0 },
     ]);
   });
@@ -233,13 +243,12 @@ describe('getRenderablePatch', () => {
       '-const value = 1;',
       '+const value = 2;',
     ].join('\n');
-    const shown = getRenderablePatch(patch, 'pr');
-    const hidden = getRenderablePatch(patch, 'pr', { ignoreWhitespace: true });
-    if (shown?.kind !== 'files' || hidden?.kind !== 'files') throw new Error('not parsed');
-    expect(getDiffLineStat(shown.files)).toEqual({ additions: 6, deletions: 4 });
-    expect(getDiffLineStat(hidden.files)).toEqual({ additions: 3, deletions: 1 });
-    const before = shown.files[0]!;
-    const file = hidden.files[0]!;
+    const shown = parseFile(patch);
+    const hidden = prepareFileDiff(shown, { ignoreWhitespace: true });
+    expect(getDiffLineStat([shown])).toEqual({ additions: 6, deletions: 4 });
+    expect(getDiffLineStat([hidden])).toEqual({ additions: 3, deletions: 1 });
+    const before = shown;
+    const file = hidden;
     expect(file.additionLines).toEqual(before.additionLines);
     expect(file.deletionLines).toEqual(before.deletionLines);
     expect(file.cacheKey).not.toBe(before.cacheKey);
@@ -274,28 +283,21 @@ describe('getRenderablePatch', () => {
       ...after.split('\n').map((line) => `+${line}`),
       '',
     ].join('\n');
-    const filtered = getRenderablePatch(patch, 'pr', { ignoreWhitespace: true });
-    expect(filtered?.kind).toBe('files');
-    if (filtered?.kind !== 'files') return;
-    expect(getDiffLineStat(filtered.files)).toEqual({ additions, deletions });
+    const filtered = prepareFileDiff(parseFile(patch), { ignoreWhitespace: true });
+    expect(getDiffLineStat([filtered])).toEqual({ additions, deletions });
   });
 
   it.each(['+', '-'])('keeps %s blank lines without a final newline', (sign) => {
-    const parsed = getRenderablePatch(
-      [
-        'diff --git a/blank.txt b/blank.txt',
-        '--- a/blank.txt',
-        '+++ b/blank.txt',
-        sign === '+' ? '@@ -0,0 +1 @@' : '@@ -1 +0,0 @@',
-        `${sign}  `,
-        '\\ No newline at end of file',
-      ].join('\n'),
-      'pr',
-      { ignoreWhitespace: true }
-    );
-    expect(parsed?.kind).toBe('files');
-    if (parsed?.kind !== 'files') return;
-    expect(getDiffLineStat(parsed.files)).toEqual({
+    const patch = [
+      'diff --git a/blank.txt b/blank.txt',
+      '--- a/blank.txt',
+      '+++ b/blank.txt',
+      sign === '+' ? '@@ -0,0 +1 @@' : '@@ -1 +0,0 @@',
+      `${sign}  `,
+      '\\ No newline at end of file',
+    ].join('\n');
+    const filtered = prepareFileDiff(parseFile(patch), { ignoreWhitespace: true });
+    expect(getDiffLineStat([filtered])).toEqual({
       additions: sign === '+' ? 1 : 0,
       deletions: sign === '-' ? 1 : 0,
     });

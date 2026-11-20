@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  CancelledError,
   isCancelledError,
   useQueries,
   useQuery,
@@ -23,7 +22,7 @@ import {
   fetchReviews,
   GitHubError,
   GitHubWriteError,
-  isGitHubRateLimited,
+  checkGitHubReadLimit,
   refused,
   type GitHubAuth,
   type PullRequest,
@@ -370,17 +369,17 @@ export function useDiffBlobs(
         queryKey,
         queryFn: ({ signal }: { signal: AbortSignal }) => {
           const auth = access.authFor(access.key);
-          if (auth === undefined || isGitHubRateLimited(auth)) return Promise.resolve(null);
-          return withBlobRead(() => {
+          checkGitHubReadLimit(auth);
+          return withBlobRead(async () => {
             signal.throwIfAborted();
             if (!client.getQueryCache().find({ queryKey, exact: true })?.isActive()) {
-              throw new CancelledError({ revert: true });
+              await client.cancelQueries({ queryKey, exact: true });
+              signal.throwIfAborted();
             }
             // Check credentials again after waiting; getJson also rechecks the rate limit.
             const current = access.authFor(access.key);
-            return current === undefined
-              ? Promise.resolve(null)
-              : fetchDiffBlob(ref, sha, current, signal);
+            if (current === undefined) throw new GitHubError('badToken', 0);
+            return fetchDiffBlob(ref, sha, current, signal);
           });
         },
         enabled: access.via !== undefined && !access.pending && enabledShas.has(sha),

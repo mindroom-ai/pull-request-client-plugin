@@ -333,8 +333,10 @@ function Holder({
   );
 }
 
-const show = ({ themeKind, commit, ...options }: Options = {}) => {
-  const client = new QueryClient({ defaultOptions: { queries: { retryDelay: 0 } } });
+const show = (
+  { themeKind, commit, ...options }: Options = {},
+  client = new QueryClient({ defaultOptions: { queries: { retryDelay: 0 } } })
+) => {
   return renderPluginComponent(
     <QueryClientProvider client={client}>
       <Holder {...options} initial={commit} />
@@ -453,8 +455,15 @@ describe('CodeTab', () => {
     const other = file({ ...testFile, path: 'seedlings.py', sha: otherSha });
     const blobCalls = () =>
       fetchMock.mock.calls.filter(([url]) => url.includes('/git/blobs/')).map(([url]) => url);
-    const response = (text = greenhouseAfter) =>
-      respond({ encoding: 'base64', size: text.length, content: btoa(text) });
+    const response = (text = greenhouseAfter) => new Response(text);
+    const blobKey = (sha: string) => [
+      'pull-requests',
+      'blob',
+      request.owner,
+      request.repo,
+      sha,
+      true,
+    ];
     // The real viewer only post-renders the items in its virtual window.
     const setInWindow = (path: string, phase: 'mount' | 'unmount' = 'mount') =>
       act(async () => {
@@ -546,15 +555,55 @@ describe('CodeTab', () => {
         await waiting;
         return response();
       });
-      const tab = await show({ files, pullRequest: request });
+      const client = new QueryClient();
+      const tab = await show({ files, pullRequest: request }, client);
+      const skipped = files[4]!;
       for (const entry of files) await setInWindow(entry.path);
       expect(blobCalls()).toEqual(files.slice(0, 4).map(({ sha }) => endpoint + sha));
-      await setInWindow(files[4]!.path, 'unmount');
+      await setInWindow(skipped.path, 'unmount');
       await act(async () => release());
       await tab.findByTestId(`complete:${files[5]!.path}`);
+      expect(client.getQueryState(blobKey(skipped.sha!))).toMatchObject({
+        fetchStatus: 'idle',
+        status: 'pending',
+      });
       expect(blobCalls()).toEqual(
         [...files.slice(0, 4), files[5]!].map(({ sha }) => endpoint + sha)
       );
+    });
+
+    it('hydrates the same SHA when re-enabled after a rate limit resets', async () => {
+      localStorage.setItem(tokenKey, 'retry-blob-fixture');
+      const now = vi.spyOn(Date, 'now');
+      const started = Date.now();
+      try {
+        now.mockReturnValue(started);
+        fetchMock.mockResolvedValueOnce(
+          new Response(null, { status: 429, headers: { 'retry-after': '60' } })
+        );
+        fetchMock.mockImplementation(async () => response());
+        const client = new QueryClient();
+        const tab = await show({ files: [testFile, other], pullRequest: request }, client);
+        await setInWindow(other.path);
+        await act(async () => {
+          await vi.waitFor(() =>
+            expect(client.getQueryState(blobKey(otherSha))?.status).toBe('error')
+          );
+        });
+        await setInWindow(greenhousePath);
+        await act(async () => {
+          await vi.waitFor(() => expect(client.getQueryState(blobKey(sha))?.status).toBe('error'));
+        });
+        expect(blobCalls()).toEqual([endpoint + otherSha]);
+        expect(tab.getByTestId(`partial:${greenhousePath}`)).toBeTruthy();
+        await setInWindow(greenhousePath, 'unmount');
+        now.mockReturnValue(started + 60_000);
+        await setInWindow(greenhousePath);
+        expect(await tab.findByTestId(`complete:${greenhousePath}`)).toBeTruthy();
+        expect(blobCalls()).toEqual([endpoint + otherSha, endpoint + sha]);
+      } finally {
+        now.mockRestore();
+      }
     });
 
     it('keeps other prepared diffs when one blob arrives or a viewed mark changes', async () => {

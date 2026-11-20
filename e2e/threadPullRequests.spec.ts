@@ -1012,16 +1012,7 @@ test('the Code tab highlights a hunk inside a docstring and can expand its conte
   });
   await page.route(`${api}/git/blobs/${blob}`, async (route) => {
     await partialIsVisible;
-    const bytes = Buffer.from(greenhouseAfter);
-    await route.fulfill({
-      headers: CORS,
-      json: {
-        sha: blob,
-        encoding: 'base64',
-        size: bytes.length,
-        content: bytes.toString('base64'),
-      },
-    });
+    await route.fulfill({ headers: CORS, body: greenhouseAfter });
   });
   await openRoom(page);
   await cardChips(page, roots.sessions).first().click();
