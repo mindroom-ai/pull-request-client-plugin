@@ -1,5 +1,5 @@
 import { parsePatchFiles } from '@pierre/diffs';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { MindroomServerError, type MindroomServer } from '@mindroom/client-sdk/server';
 import {
   GitHubError,
@@ -1434,8 +1434,8 @@ describe('through MindRoom', () => {
   ): GitHubViaServer & {
     sent: Sent[];
     paths: string[];
-    disconnected: ReturnType<typeof vi.fn>;
-    unreadable: ReturnType<typeof vi.fn>;
+    disconnected: Mock<() => void>;
+    unreadable: Mock<() => void>;
   } {
     const sent: Sent[] = [];
     const paths: string[] = [];
