@@ -7,7 +7,7 @@ import plugin from './index';
 import { middleTruncate } from './middleTruncate';
 import { linkedRoom, type TestLink, type TestWorktree } from './testing/linkedRoom';
 import { ThreadCardPullRequests } from './ThreadCardPullRequests';
-import { orderPullRequests, ThreadDetails } from './ThreadDetails';
+import { orderPullRequests, PullRequestLinkHoverCard, ThreadDetails } from './ThreadDetails';
 import { threadHasDetails } from './threadPullRequests';
 
 // A card's chip opens its thread on a click, which needs the room's page; no test here clicks.
@@ -165,6 +165,53 @@ describe('orderPullRequests', () => {
       )
     ).toEqual(order)
   );
+});
+
+describe('PullRequestLinkHoverCard', () => {
+  const HREF = 'https://github.com/example-org/example-repo/pull/123';
+  const hover = (client: QueryClient) =>
+    renderPluginComponent(
+      <QueryClientProvider client={client}>
+        <PullRequestLinkHoverCard href={HREF} roomId={ROOM_ID} />
+      </QueryClientProvider>,
+      { id: 'pull-requests', plugin }
+    );
+
+  it("is the pull request link's hover card, with the banner menu's rows for its pull request", async () => {
+    expect(plugin.messageLinks?.[0]?.hoverCard).toBe(PullRequestLinkHoverCard);
+    saveToken();
+    fetchMock.mockImplementation(async (url) => {
+      if (url.endsWith('/repos/example-org/example-repo/pulls/123')) {
+        return respond(pull({ title: 'Add an example feature', changed_files: 4 }));
+      }
+      if (url.includes(`/commits/${SHA}/check-runs?`))
+        return respond({ check_runs: [run('success')] });
+      if (url.includes(`/commits/${SHA}/status?`)) return respond({ statuses: [] });
+      return respond({ message: 'Not Found' }, 404);
+    });
+    const view = await hover(newClient());
+    expect(view.getByText('example-repo #123')).toBeTruthy();
+    expect(await view.findByText('Open')).toBeTruthy();
+    expect(await view.findByText('checks passed')).toBeTruthy();
+    expect(view.getByText('Add an example feature')).toBeTruthy();
+    expect(view.getByText('4 files')).toBeTruthy();
+    expect(view.queryByText('this worktree')).toBeNull();
+    expect(view.container.querySelector('button, a, [tabindex]')).toBeNull();
+  });
+
+  it('asks GitHub nothing more on a second hover after it refused, without a token', async () => {
+    fetchMock.mockImplementation(async () => respond({ message: 'Not Found' }, 404));
+    const client = newClient();
+    const first = await hover(client);
+    await answered(client, '/pulls/123');
+    expect(fetchMock.mock.calls.length).toBe(1);
+    first.unmount();
+    const second = await hover(client);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await vi.waitFor(() => expect(client.isFetching()).toBe(0));
+    expect(fetchMock.mock.calls.length).toBe(1);
+    expect(second.container.textContent).toBe('example-repo #123');
+  });
 });
 
 describe('ThreadDetails', () => {

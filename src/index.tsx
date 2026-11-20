@@ -5,7 +5,7 @@ import { parsePullRequestUrl } from './github';
 import { PullRequestCard } from './PullRequestCard';
 import { en } from './strings';
 import { ThreadCardPullRequests } from './ThreadCardPullRequests';
-import { ThreadDetails } from './ThreadDetails';
+import { PullRequestLinkHoverCard, ThreadDetails } from './ThreadDetails';
 import { ThreadPullRequestsButton } from './ThreadPullRequestsButton';
 import { threadHasDetails } from './threadPullRequests';
 import './styles.css';
@@ -20,6 +20,7 @@ const plugin: ClientPlugin = {
       Component: PullRequestCard,
       // The card's request, so a click while the panel shows this pull request opens it on GitHub.
       sidePanel: { id: 'pull-request', request: (url) => parsePullRequestUrl(url) },
+      hoverCard: PullRequestLinkHoverCard,
     },
   ],
   sidePanels: [
