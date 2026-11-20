@@ -615,45 +615,25 @@ describe('CodeTab', () => {
       );
     });
 
-    it('does not send queued size preflights after the REST blob budget is exhausted', async () => {
-      const files = Array.from({ length: 6 }, (_, index) =>
-        file({
-          ...testFile,
-          path: `bed_${index}.py`,
-          sha: `${index + 1}`.repeat(40),
-        })
+    it('hydrates a diff with one raw blob request through MindRoom', async () => {
+      const upstream = githubServer(async (url) =>
+        url === endpoint + sha ? response() : respond({}, 404)
       );
-      let release!: () => void;
-      const waiting = new Promise<void>((resolve) => {
-        release = resolve;
-      });
-      const upstream = githubServer(
-        async (url) => {
-          if (url.endsWith('/graphql')) {
-            return respond({
-              data: { repository: { object: { byteSize: greenhouseAfter.length } } },
-            });
-          }
-          await waiting;
-          return new Response(null, { status: 403, headers: { 'x-ratelimit-remaining': '0' } });
+      const tab = await show(
+        { files: [testFile], pullRequest: request },
+        new QueryClient(),
+        upstream.server
+      );
+      await setInWindow(greenhousePath);
+      expect(await tab.findByTestId(`complete:${greenhousePath}`)).toBeTruthy();
+      expect(upstream.githubRequests()).toEqual([
+        {
+          path: new URL(endpoint + sha).pathname,
+          method: 'GET',
+          accept: 'application/vnd.github.raw+json',
+          max_bytes: 128 * 1024,
         },
-        undefined,
-        'https://meadow.example.org'
-      );
-      const client = new QueryClient();
-      await show({ files, pullRequest: request }, client, upstream.server);
-      for (const entry of files) await setInWindow(entry.path);
-      const paths = () => upstream.githubRequests().map(({ path }) => path);
-      const blobPaths = () => paths().filter((path) => path.includes('/git/blobs/'));
-      await vi.waitFor(() => expect(blobPaths()).toHaveLength(4));
-      await act(async () => release());
-      await vi.waitFor(() => {
-        const queries = client.getQueryCache().findAll({ queryKey: ['pull-requests', 'blob'] });
-        expect(queries.map(({ state }) => state.status)).toEqual(Array(6).fill('error'));
-        for (const { state } of queries) expect(state.error).toMatchObject({ kind: 'rateLimited' });
-      });
-      expect(paths().filter((path) => path === '/graphql')).toHaveLength(4);
-      expect(blobPaths()).toHaveLength(4);
+      ]);
     });
 
     it('hydrates the same SHA when re-enabled after a rate limit resets', async () => {

@@ -22,7 +22,6 @@ import {
   fetchReviews,
   GitHubError,
   GitHubWriteError,
-  checkGitHubReadLimit,
   refused,
   type GitHubAuth,
   type PullRequest,
@@ -364,17 +363,14 @@ export function useDiffBlobs(
   const data = useQueries({
     queries: watched.map((sha) => ({
       queryKey: diffBlobKey(ref, sha, access.key),
-      queryFn: ({ signal }: { signal: AbortSignal }) => {
-        checkGitHubReadLimit(access.authFor(access.key));
-        return withBlobRead(async () => {
+      queryFn: ({ signal }: { signal: AbortSignal }) =>
+        withBlobRead(async () => {
           // Removing the last observer aborts the signal, including for work still queued.
           signal.throwIfAborted();
           const current = access.authFor(access.key);
           if (current === undefined) throw new GitHubError('badToken', 0);
-          checkGitHubReadLimit(current, 'core');
           return fetchDiffBlob(ref, sha, current, signal);
-        });
-      },
+        }),
       staleTime: Infinity,
       // Keep small blobs (at most 128 KiB each) warm while their files are offscreen.
       gcTime: 30 * 60 * 1000,

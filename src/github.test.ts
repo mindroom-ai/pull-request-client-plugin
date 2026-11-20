@@ -906,87 +906,99 @@ describe('fetchDiffBlob', () => {
   const sha = 'b'.repeat(40);
   const blobPath = `/repos/a/b/git/blobs/${sha}`;
   const rawMedia = 'application/vnd.github.raw+json';
-  const sizeAnswer = (byteSize: number) => json({ data: { repository: { object: { byteSize } } } });
-
-  it('uses a small GraphQL size preflight then requests the immutable JSON blob through MindRoom', async () => {
-    const upstream = vi.fn(async (url: string, _init?: RequestInit) =>
-      url.endsWith('/graphql')
-        ? sizeAnswer(3)
-        : json({ encoding: 'base64', size: 3, content: 'w6kK\n' })
-    );
-    const { server, githubRequests } = githubServer(upstream);
-    const via = { server, account: 'gardener', disconnected: vi.fn(), unreadable: vi.fn() };
-    expect(await fetchDiffBlob(ref, sha, via)).toBe('é\n');
-    expect(githubRequests()).toEqual([
-      {
-        path: '/graphql',
-        method: 'POST',
-        accept: 'application/vnd.github+json',
-        body: {
-          query: expect.stringContaining('byteSize'),
-          variables: { owner: 'a', repo: 'b', sha },
-        },
+  const proxy = (answer: () => unknown) => {
+    const request = vi.fn(async (_path: string, _init?: RequestInit) => answer());
+    return {
+      server: {
+        origin: 'https://meadow.example.org',
+        request: request as MindroomServer['request'],
       },
-      { path: blobPath, method: 'GET', accept: 'application/vnd.github+json' },
-    ]);
+      account: 'gardener',
+      disconnected: vi.fn(),
+      unreadable: vi.fn(),
+      request,
+    };
+  };
+
+  it('downloads one bounded raw blob through MindRoom and preserves its text', async () => {
+    const text = '\uFEFFé\n';
+    const via = proxy(() => ({ status: 200, body: text }));
+    await expect(fetchDiffBlob(ref, sha, via)).resolves.toBe(text);
+    expect(via.request).toHaveBeenCalledOnce();
+    const [path, init] = via.request.mock.calls[0]!;
+    expect(path).toBe('/api/github/request');
+    expect(init?.method).toBe('POST');
+    expect(JSON.parse(String(init?.body))).toEqual({
+      method: 'GET',
+      path: blobPath,
+      accept: rawMedia,
+      max_bytes: 128 * 1024,
+    });
   });
 
-  it('never requests the blob through MindRoom when its immutable object is too large', async () => {
-    const upstream = vi.fn(async (url: string) =>
-      url.endsWith('/graphql')
-        ? sizeAnswer(128 * 1024 + 1)
-        : json({ encoding: 'base64', size: 1, content: 'YQ==' })
-    );
-    const { server } = githubServer(upstream);
-    const via = { server, account: 'gardener', disconnected: vi.fn(), unreadable: vi.fn() };
-    expect(await fetchDiffBlob(ref, sha, via)).toBeNull();
-    expect(upstream.mock.calls.map(([url]) => url)).toEqual(['https://api.github.com/graphql']);
+  it.each([
+    [502, 'github_response_too_large'],
+    [502, 'github_response_not_text'],
+    [422, 'github_request_invalid'],
+  ])('leaves the patch alone on MindRoom %d %s', async (status, error) => {
+    const via = proxy(() => {
+      throw new MindroomServerError('Proxy refusal', status, { error });
+    });
+    await expect(fetchDiffBlob(ref, sha, via)).resolves.toBeNull();
+    expect(via.request).toHaveBeenCalledOnce();
   });
 
-  it.each([200, 403])(
-    'keeps a GraphQL preflight limit (%d) off REST and existing GraphQL reads',
-    async (status) => {
-      const filesPath = '/repos/a/b/pulls/1/files?per_page=100&page=1';
-      const upstream = vi.fn(async (url: string, init?: RequestInit) => {
-        if (url.endsWith(filesPath)) return json([]);
-        if (String(init?.body).includes('DiffBlobSize')) {
-          return json(
-            { errors: [{ type: 'RATE_LIMITED' }] },
-            {
-              status,
-              headers: {
-                'x-ratelimit-remaining': '0',
-                'x-ratelimit-reset': String(Date.now() / 1000 + 60),
-              },
-            }
-          );
-        }
-        return json({ data: { repository: apiRepository } });
-      });
-      const { server, githubRequests } = githubServer(upstream);
-      const via = {
-        server,
-        account: `limited-gardener-${status}`,
-        disconnected: vi.fn(),
-        unreadable: vi.fn(),
-      };
-      vi.useFakeTimers({ now: Date.UTC(2026, 0, 1), toFake: ['Date'] });
-      try {
-        await expect(fetchDiffBlob(ref, sha, via)).rejects.toMatchObject({ kind: 'rateLimited' });
-        await expect(fetchDiffBlob(ref, sha, via)).rejects.toMatchObject({ kind: 'rateLimited' });
-        expect(githubRequests().map(({ path }) => path)).toEqual(['/graphql']);
-        await expect(fetchPullRequestFiles(ref, via)).resolves.toEqual([]);
-        expect((await fetchRepository('a', 'b', via)).canWrite).toBe(true);
-        expect(githubRequests().map(({ path }) => path)).toEqual([
-          '/graphql',
-          filesPath,
-          '/graphql',
-        ]);
-      } finally {
-        vi.useRealTimers();
-      }
+  it.each(['bud\0\n', 'version https://git-lfs.github.com/spec/v1\n'])(
+    'rejects unsupported proxy text %j',
+    async (body) => {
+      await expect(
+        fetchDiffBlob(
+          ref,
+          sha,
+          proxy(() => ({ status: 200, body }))
+        )
+      ).resolves.toBeNull();
     }
   );
+
+  it('leaves the patch alone when the proxy relays GitHub 404', async () => {
+    await expect(
+      fetchDiffBlob(
+        ref,
+        sha,
+        proxy(() => ({ status: 404, body: null }))
+      )
+    ).resolves.toBeNull();
+  });
+
+  it('rejects other proxy failures rather than caching no blob', async () => {
+    const broken = proxy(() => {
+      throw new MindroomServerError('Proxy failure', 502, { error: 'github_unreachable' });
+    });
+    const offline = proxy(() => {
+      throw new TypeError('Failed to fetch');
+    });
+    const upstream = proxy(() => ({ status: 503, body: null }));
+    for (const [via, status] of [
+      [broken, 0],
+      [offline, 0],
+      [upstream, 503],
+    ] as const) {
+      await expect(fetchDiffBlob(ref, sha, via)).rejects.toMatchObject({ kind: 'failed', status });
+    }
+  });
+
+  it('throws on a GitHub rate limit relayed by MindRoom and suppresses the next download', async () => {
+    vi.useFakeTimers({ now: Date.UTC(2026, 0, 1), toFake: ['Date'] });
+    try {
+      const via = proxy(() => ({ status: 403, headers: { 'x-ratelimit-remaining': '0' } }));
+      await expect(fetchDiffBlob(ref, sha, via)).rejects.toMatchObject({ kind: 'rateLimited' });
+      await expect(fetchDiffBlob(ref, sha, via)).rejects.toMatchObject({ kind: 'rateLimited' });
+      expect(via.request).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it('reads small raw UTF-8 directly with the token', async () => {
     const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response('é\n'));

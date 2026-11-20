@@ -133,7 +133,6 @@ export type GitHubViaServer = {
 export type GitHubAuth = string | GitHubViaServer;
 
 type RateLimit = { who: string; status: number; resetsAt: number };
-type ReadResource = 'core' | 'graphql';
 
 // The rate limit GitHub last answered, for requests with a token, for those through each MindRoom
 // server, and for those without either (which it counts against the address), while it lasts.
@@ -143,14 +142,10 @@ type ReadResource = 'core' | 'graphql';
 const rateLimits = new Map<string, RateLimit>();
 
 /** The budget a request spends, and who within it: a token's own, or a server's. */
-function budgetOf(
-  token: GitHubAuth | undefined,
-  resource: ReadResource
-): { budget: string; who: string } {
-  // Primary quotas are separate. Keep ambiguous throttling replies scoped to the API that sent them.
-  if (token === undefined) return { budget: `${resource}:anonymous`, who: '' };
-  if (typeof token === 'string') return { budget: `${resource}:token`, who: token };
-  return { budget: `${resource}:server:${token.server.origin}`, who: token.account };
+function budgetOf(token: GitHubAuth | undefined): { budget: string; who: string } {
+  if (token === undefined) return { budget: 'anonymous', who: '' };
+  if (typeof token === 'string') return { budget: 'token', who: token };
+  return { budget: `server:${token.server.origin}`, who: token.account };
 }
 
 type GitHubInit = {
@@ -159,6 +154,7 @@ type GitHubInit = {
   body?: unknown;
   signal?: AbortSignal;
   cache?: RequestCache;
+  maxBytes?: number;
 };
 
 /**
@@ -171,7 +167,7 @@ type GitHubInit = {
 async function githubFetch(
   token: GitHubAuth | undefined,
   path: string,
-  { method, accept, body, signal, cache }: GitHubInit
+  { method, accept, body, signal, cache, maxBytes }: GitHubInit
 ): Promise<Response> {
   if (token === undefined || typeof token === 'string') {
     const headers: Record<string, string> = {
@@ -186,7 +182,7 @@ async function githubFetch(
       method === 'GET' ? { headers, signal, cache } : { method, headers, body: sent, signal };
     return fetch(`${API}${path}`, init);
   }
-  const request = body === undefined ? { method, path, accept } : { method, path, body, accept };
+  const request = { method, path, body, accept, max_bytes: maxBytes };
   let answer: Json | null;
   try {
     answer = record(
@@ -238,54 +234,42 @@ function resetTime(response: Response): number {
     : now + 60_000;
 }
 
-export function checkGitHubReadLimit(
-  token: GitHubAuth | undefined,
-  resource: ReadResource = 'core'
-): void {
-  const { budget, who } = budgetOf(token, resource);
-  const limit = rateLimits.get(budget);
-  if (limit && limit.who === who && Date.now() < limit.resetsAt)
-    throw new GitHubError('rateLimited', limit.status);
-}
-
-function rateLimited(
-  token: GitHubAuth | undefined,
-  resource: ReadResource,
-  response: Response
-): GitHubError {
-  const { budget, who } = budgetOf(token, resource);
-  rateLimits.set(budget, { who, status: response.status, resetsAt: resetTime(response) });
-  return new GitHubError('rateLimited', response.status);
-}
-
 async function readGitHub(
-  token: GitHubAuth | undefined,
   path: string,
-  init: GitHubInit
+  token: GitHubAuth | undefined,
+  signal: AbortSignal | undefined,
+  accept: string,
+  maxBytes?: number
 ): Promise<Response> {
-  const resource = path === '/graphql' ? 'graphql' : 'core';
-  checkGitHubReadLimit(token, resource);
-  rateLimits.delete(budgetOf(token, resource).budget);
-  const { signal } = init;
+  const withToken = Boolean(token);
+  const { budget, who } = budgetOf(token);
+  const limit = rateLimits.get(budget);
+  if (limit && limit.who === who && Date.now() < limit.resetsAt) {
+    throw new GitHubError('rateLimited', limit.status);
+  }
+  rateLimits.delete(budget);
   let response: Response;
   try {
     // GitHub allows a minute of caching, so a read just after a write could show the state from
     // before it. With a token the browser revalidates by ETag, and an authorized 304 costs no rate
     // limit. Without one a 304 still counts, and no write can have happened, so the cache serves.
     const cache: RequestCache = token ? 'no-cache' : 'default';
-    response = await githubFetch(token, path, { ...init, cache });
+    response = await githubFetch(token, path, { method: 'GET', accept, signal, cache, maxBytes });
   } catch (error) {
     // An aborted request is the caller's own doing, not a failure of GitHub.
-    if (signal?.aborted) throw error;
+    if (signal?.aborted || (maxBytes !== undefined && isPermanentDiffBlobRefusal(error)))
+      throw error;
     throw new GitHubError('failed', 0);
   }
   if (!response.ok) {
-    let kind = errorKind(response, Boolean(token));
+    let kind = errorKind(response, withToken);
     if (kind === 'failed' && response.status === 403) {
       const body = record(await response.json().catch(() => null));
       if (/secondary rate limit/i.test(text(body?.message))) kind = 'rateLimited';
     }
-    if (kind === 'rateLimited') throw rateLimited(token, resource, response);
+    if (kind === 'rateLimited') {
+      rateLimits.set(budget, { who, status: response.status, resetsAt: resetTime(response) });
+    }
     throw new GitHubError(kind, response.status);
   }
   return response;
@@ -297,7 +281,7 @@ async function getJson(
   signal: AbortSignal | undefined,
   accept: string = JSON_MEDIA
 ): Promise<unknown> {
-  const response = await readGitHub(token, path, { method: 'GET', accept, signal });
+  const response = await readGitHub(path, token, signal, accept);
   try {
     return await response.json();
   } catch {
@@ -572,9 +556,6 @@ export function filePatch(file: PullRequestFile): string | null {
 const repoPath = (ref: PullRequestRef) => `/repos/${ref.owner}/${ref.repo}`;
 
 const RAW_BLOB_MEDIA = 'application/vnd.github.raw+json';
-const BLOB_SIZE_QUERY = `query DiffBlobSize($owner: String!, $repo: String!, $sha: GitObjectID!) {
-  repository(owner: $owner, name: $repo) { object(oid: $sha) { ... on Blob { byteSize } } }
-}`;
 
 async function readRawDiffBlob(response: Response): Promise<Uint8Array | null> {
   if (Number(response.headers.get('content-length')) > MAX_DIFF_BLOB_BYTES) {
@@ -601,46 +582,15 @@ async function readRawDiffBlob(response: Response): Promise<Uint8Array | null> {
   }
 }
 
-async function readProxiedDiffBlob(
-  ref: PullRequestRef,
-  sha: string,
-  token: GitHubViaServer,
-  signal?: AbortSignal
-): Promise<Uint8Array | null> {
-  // MindRoom's proxy accepts JSON but not the raw blob media type. Ask for size only, then use
-  // the same immutable object ID for the JSON blob so a large body is never requested.
-  const metadata = await readGitHub(token, '/graphql', {
-    method: 'POST',
-    accept: JSON_MEDIA,
-    signal,
-    body: { query: BLOB_SIZE_QUERY, variables: { owner: ref.owner, repo: ref.repo, sha } },
-  });
-  const answer = record(await metadata.json());
-  const errors = list(answer?.errors);
-  if (errors.some((error) => error.type === 'RATE_LIMITED'))
-    throw rateLimited(token, 'graphql', metadata);
-  if (errors.length > 0) {
-    if (errors.every((error) => error.type === 'NOT_FOUND')) return null;
-    throw new GitHubError('failed', metadata.status);
-  }
-  const data = record(answer?.data);
-  if (!data) throw new GitHubError('failed', metadata.status);
-  const object = record(record(data.repository)?.object);
-  const size = object?.byteSize;
-  // Missing objects and non-Blob Git objects have no byteSize.
-  if (typeof size !== 'number' || size > MAX_DIFF_BLOB_BYTES) return null;
-
-  const raw = record(await getJson(`${repoPath(ref)}/git/blobs/${sha}`, token, signal));
-  if (
-    raw?.encoding !== 'base64' ||
-    raw.size !== size ||
-    typeof raw.content !== 'string' ||
-    raw.content.length > 2 * MAX_DIFF_BLOB_BYTES
-  )
-    throw new GitHubError('failed', 200);
-  const bytes = Uint8Array.from(atob(raw.content), (byte) => byte.charCodeAt(0));
-  if (bytes.length !== size) throw new GitHubError('failed', 200);
-  return bytes;
+function isPermanentDiffBlobRefusal(error: unknown): boolean {
+  if (!(error instanceof MindroomServerError)) return false;
+  const code = record(error.body)?.error;
+  // Older proxies don't accept raw blobs or max_bytes.
+  if (error.status === 422) return code === 'github_request_invalid';
+  return (
+    error.status === 502 &&
+    (code === 'github_response_too_large' || code === 'github_response_not_text')
+  );
 }
 
 /** GitHub supplies this blob SHA beside the patch, even when the PR comes from a fork. */
@@ -651,22 +601,21 @@ export async function fetchDiffBlob(
   signal?: AbortSignal
 ): Promise<string | null> {
   if (!/^[0-9a-f]{40}$/i.test(sha)) return null;
-  let bytes: Uint8Array | null;
+  let response: Response;
   try {
-    bytes =
-      typeof token === 'string'
-        ? await readRawDiffBlob(
-            await readGitHub(token, `${repoPath(ref)}/git/blobs/${sha}`, {
-              method: 'GET',
-              accept: RAW_BLOB_MEDIA,
-              signal,
-            })
-          )
-        : await readProxiedDiffBlob(ref, sha, token, signal);
+    response = await readGitHub(
+      `${repoPath(ref)}/git/blobs/${sha}`,
+      token,
+      signal,
+      RAW_BLOB_MEDIA,
+      MAX_DIFF_BLOB_BYTES
+    );
   } catch (error) {
-    if (error instanceof GitHubError && error.status === 404) return null;
+    if ((error instanceof GitHubError && error.status === 404) || isPermanentDiffBlobRefusal(error))
+      return null;
     throw error;
   }
+  const bytes = await readRawDiffBlob(response);
   if (!bytes || bytes.includes(0)) return null;
   try {
     const decoded = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
