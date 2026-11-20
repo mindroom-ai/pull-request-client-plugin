@@ -962,13 +962,15 @@ test("the header's popovers hold still: the lines tooltip under the pointer, the
   const { over, angles } = await list.evaluate(
     (element) =>
       new Promise<{ over: number; angles: number }>((resolve) => {
-        const drawing = element.querySelector('.mrpr-spin > *')!;
+        // The icon or its drawing, whichever turns.
+        const icon = element.querySelector('.mrpr-spin')!;
+        const parts = [icon, ...icon.children];
         const seen = new Set<string>();
         let over = 0;
         const start = performance.now();
         const tick = () => {
           if (element.scrollHeight > element.clientHeight) over += 1;
-          seen.add(getComputedStyle(drawing).transform);
+          seen.add(parts.map((part) => getComputedStyle(part).transform).join());
           if (performance.now() - start < 1_100) requestAnimationFrame(tick);
           else resolve({ over, angles: seen.size });
         };
