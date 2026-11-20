@@ -371,10 +371,13 @@ export function useDiffBlobs(
           signal.throwIfAborted();
           const current = access.authFor(access.key);
           if (current === undefined) throw new GitHubError('badToken', 0);
+          checkGitHubReadLimit(current, 'core');
           return fetchDiffBlob(ref, sha, current, signal);
         });
       },
       staleTime: Infinity,
+      // Keep small blobs (at most 128 KiB each) warm while their files are offscreen.
+      gcTime: 30 * 60 * 1000,
       retry: false,
       ...NO_FOCUS_REFETCH,
     })),
