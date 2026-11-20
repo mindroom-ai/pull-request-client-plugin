@@ -2,7 +2,13 @@
 import { getSharedHighlighter, renderDiffWithHighlighter } from '@pierre/diffs';
 import { describe, expect, it } from 'vitest';
 
-import { getDiffLineStat, getRenderablePatch, patchAgreesWithContents } from './diffRendering';
+import {
+  getDiffLineStat,
+  getRenderablePatch,
+  patchAgreesWithContents,
+  prepareFileDiff,
+  type DiffContents,
+} from './diffRendering';
 import {
   greenhouseAfter,
   greenhouseBefore,
@@ -16,11 +22,14 @@ const greenhouse = `diff --git a/${greenhousePath} b/${greenhousePath}
 ${greenhousePatch}
 `;
 
-function greenhouseFile(options?: Parameters<typeof getRenderablePatch>[2]) {
-  const result = getRenderablePatch(greenhouse, 'pr', options);
+function parsedFile(patch: string) {
+  const result = getRenderablePatch(patch, 'pr');
   if (result?.kind !== 'files' || !result.files[0]) throw new Error('not parsed');
   return result.files[0];
 }
+
+const greenhouseFile = (contents?: DiffContents) =>
+  prepareFileDiff(parsedFile(greenhouse), { contents });
 
 describe('patch agreement', () => {
   it.each([
@@ -38,7 +47,7 @@ describe('patch agreement', () => {
 describe('partial diff hydration', () => {
   it('highlights a hunk that starts inside a Python docstring as a string', async () => {
     const partial = greenhouseFile();
-    const file = greenhouseFile({ contents: { before: greenhouseBefore, after: greenhouseAfter } });
+    const file = greenhouseFile({ before: greenhouseBefore, after: greenhouseAfter });
     const highlighter = await getSharedHighlighter({ themes: ['pierre-light'], langs: ['python'] });
     const highlighted = renderDiffWithHighlighter(file, highlighter, {
       theme: 'pierre-light',
@@ -55,7 +64,7 @@ describe('partial diff hydration', () => {
     expect(docLine.children).toContainEqual(
       expect.objectContaining({
         properties: stringToken.properties,
-        children: [{ type: 'text', value: 'if a leaf is dry, move its pot.' }],
+        children: [{ type: 'text', value: '    if a leaf is dry, move its pot.' }],
       })
     );
     expect(file.isPartial).toBe(false);
@@ -64,26 +73,24 @@ describe('partial diff hydration', () => {
 
   it('hides whitespace after hydrating and keeps hunk offsets in the full file', () => {
     const patch = greenhouse.replace('+    return COUNT + 2', '+    return  COUNT + 1');
-    const result = getRenderablePatch(patch, 'pr', {
+    const file = prepareFileDiff(parsedFile(patch), {
       ignoreWhitespace: true,
       contents: {
         before: greenhouseBefore,
         after: greenhouseAfter.replace('return COUNT + 2', 'return  COUNT + 1'),
       },
     });
-    if (result?.kind !== 'files' || !result.files[0]) throw new Error('not parsed');
-    const file = result.files[0];
     expect(file.isPartial).toBe(false);
-    expect(getDiffLineStat(result.files)).toEqual({ additions: 1, deletions: 1 });
+    expect(getDiffLineStat([file])).toEqual({ additions: 1, deletions: 1 });
     expect(file.hunks[1]?.hunkContent).toEqual([
       { type: 'context', lines: 6, additionLineIndex: 8, deletionLineIndex: 8 },
     ]);
   });
 
   it('leaves the entire partial diff alone when the contents do not match', () => {
-    expect(
-      greenhouseFile({ contents: { before: greenhouseAfter, after: greenhouseAfter } })
-    ).toEqual(greenhouseFile());
+    expect(greenhouseFile({ before: greenhouseAfter, after: greenhouseAfter })).toEqual(
+      greenhouseFile()
+    );
   });
 });
 

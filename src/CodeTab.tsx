@@ -52,8 +52,10 @@ import { orderDiffFilesLikeTree } from './diff/diffFileTree.logic';
 import { FileTreeColumn } from './diff/FileTreeColumn';
 import {
   DIFF_THEME_NAMES,
+  canHydrateDiff,
   fnv1a32,
   getRenderablePatch,
+  prepareFileDiff,
   resolveFileDiffPath,
 } from './diff/diffRendering';
 import { orderDiffFiles } from './diff/fileOrder.logic';
@@ -64,12 +66,13 @@ import {
   filePatch,
   pullRequestUrl,
   type Commit,
+  type PullRequest,
   type PullRequestFile,
   type PullRequestRef,
 } from './github';
 import { GitHubErrorState } from './GitHubErrorState';
 import { PullRequestDiffStat, PullRequestMetaLine } from './presentation';
-import { useCommitFiles } from './queries';
+import { useCommitFiles, useComparisonBase, useDiffContents } from './queries';
 import type { ReviewThread } from './reviewThreads';
 import { pluginRootStyle } from './theme';
 
@@ -240,6 +243,7 @@ type Folds = {
 
 export function CodeTab({
   pullRequest,
+  revisions,
   files,
   threads,
   commits,
@@ -249,6 +253,7 @@ export function CodeTab({
   truncatedCommits,
 }: {
   pullRequest: PullRequestRef;
+  revisions?: Pick<PullRequest, 'baseSha' | 'headSha' | 'headRepo'>;
   /** The files of the pull request as a whole. */
   files: PullRequestFile[];
   threads: ListState<ReviewThread>;
@@ -278,7 +283,7 @@ export function CodeTab({
       ? commit
       : undefined;
   const commitFiles = useCommitFiles(pullRequest, shownCommit ?? '', shownCommit !== undefined);
-  const viewFiles = shownCommit === undefined ? files : commitFiles.data;
+  const viewFiles = shownCommit === undefined ? files : commitFiles.data?.files;
 
   // Viewed marks belong to the pull request as a whole: a file keeps its mark, against its patch
   // in the pull request, in a commit's view, and a file only a commit changes has none. A file
@@ -313,29 +318,66 @@ export function CodeTab({
     [markTexts, viewed]
   );
 
-  // The highlighted lines depend on the theme, so the parse that caches them carries it in its key.
-  const scope = `pull-request:${pullRequest.owner}/${pullRequest.repo}#${pullRequest.number}:${themeKind}`;
+  const collapsedOf = useCallback(
+    (path: string) =>
+      isFileDiffCollapsed(foldKeyOf(path), folds.override, folds.choices, isViewedNow(path)),
+    [foldKeyOf, folds.override, folds.choices, isViewedNow]
+  );
+
+  // Even an identical patch can have different unchanged lines after a push. Keep Pierre's
+  // highlight cache separate by revision and theme, independently of folds and viewed marks.
+  const revision = shownCommit ?? `${revisions?.baseSha ?? ''}...${revisions?.headSha ?? ''}`;
+  const scope = `pull-request:${pullRequest.owner}/${pullRequest.repo}#${pullRequest.number}:${revision}:${themeKind}`;
   const { ignoreWhitespace, hideTests } = prefs;
   const parsedFiles = useMemo(() => {
     const patch = (viewFiles ?? [])
       .map(filePatch)
       .filter((part): part is string => part !== null)
       .join('');
-    const parsed = getRenderablePatch(patch, scope, { ignoreWhitespace });
+    const parsed = getRenderablePatch(patch, scope);
     // T3 Code's order, then the tree's, so the list and the tree agree.
     return parsed?.kind === 'files' ? orderDiffFilesLikeTree(orderDiffFiles(parsed.files)) : [];
-  }, [viewFiles, scope, ignoreWhitespace]);
+  }, [viewFiles, scope]);
 
   const testPaths = useMemo(
     () => new Set((viewFiles ?? []).map((file) => file.path).filter(isTestFile)),
     [viewFiles]
   );
-  const shownDiffs = useMemo(
+  const shownPartialDiffs = useMemo(
     () =>
       hideTests
         ? parsedFiles.filter((fileDiff) => !testPaths.has(resolveFileDiffPath(fileDiff)))
         : parsedFiles,
     [parsedFiles, hideTests, testPaths]
+  );
+  const hydrationTargets = useMemo(
+    () =>
+      shownPartialDiffs.filter(canHydrateDiff).map((diff) => {
+        const path = resolveFileDiffPath(diff);
+        return { path, previousPath: diff.prevName, enabled: !collapsedOf(path) };
+      }),
+    [shownPartialDiffs, collapsedOf]
+  );
+  const comparisonBase = useComparisonBase(
+    pullRequest,
+    revisions?.baseSha ?? '',
+    revisions?.headSha ?? '',
+    shownCommit === undefined && hydrationTargets.some(({ enabled }) => enabled)
+  );
+  const contents = useDiffContents(pullRequest, hydrationTargets, {
+    oldSha: shownCommit === undefined ? comparisonBase.data : commitFiles.data?.parentSha,
+    newSha: shownCommit ?? revisions?.headSha ?? '',
+    headRepo: shownCommit === undefined ? revisions?.headRepo ?? null : null,
+  });
+  const shownDiffs = useMemo(
+    () =>
+      shownPartialDiffs.map((file) =>
+        prepareFileDiff(file, {
+          contents: contents.get(resolveFileDiffPath(file)),
+          ignoreWhitespace,
+        })
+      ),
+    [shownPartialDiffs, contents, ignoreWhitespace]
   );
   const hiddenTests = hideTests ? testPaths.size : 0;
   // A file without a diff to show, as GitHub sends none for a binary or a very large file.
@@ -361,12 +403,7 @@ export function CodeTab({
       shownDiffs.map((fileDiff) => {
         const path = resolveFileDiffPath(fileDiff);
         const annotations = placed.annotations.get(path) ?? [];
-        const collapsed = isFileDiffCollapsed(
-          foldKeyOf(path),
-          folds.override,
-          folds.choices,
-          isViewedNow(path)
-        );
+        const collapsed = collapsedOf(path);
         return {
           id: path,
           type: 'diff',
@@ -381,7 +418,7 @@ export function CodeTab({
           ),
         };
       }),
-    [shownDiffs, placed, folds.override, folds.choices, foldKeyOf, isViewedNow]
+    [shownDiffs, placed, collapsedOf]
   );
   const statusByPath = useMemo(
     () => new Map((viewFiles ?? []).map((file) => [file.path, treeStatus(file.status)])),
@@ -463,8 +500,7 @@ export function CodeTab({
       return patch === undefined ? undefined : viewed.stateOf(path, patch);
     },
     setViewed,
-    foldedOf: (path) =>
-      isFileDiffCollapsed(foldKeyOf(path), folds.override, folds.choices, isViewedNow(path)),
+    foldedOf: collapsedOf,
     toggleFolded,
   };
   const allFolded = areAllDiffFilesCollapsed(

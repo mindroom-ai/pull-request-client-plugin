@@ -10,6 +10,12 @@ import type { ReviewThread } from './reviewThreads';
 import { CodeTab, type ListState } from './CodeTab';
 import { fnv1a32 } from './diff/diffRendering';
 import { trapOptions } from './testing/focusTrapStandIn';
+import {
+  greenhouseAfter,
+  greenhouseBefore,
+  greenhousePatch,
+  greenhousePath,
+} from './testing/greenhouseDiff';
 
 vi.mock('focus-trap-react', async () => ({
   default: (await import('./testing/focusTrapStandIn')).FocusTrapStandIn,
@@ -32,7 +38,11 @@ const view = vi.hoisted(() => ({
 vi.mock('@pierre/diffs/react', async () => {
   const { forwardRef, useImperativeHandle } = await import('react');
   type Annotation = { side: string; lineNumber: number };
-  type Item = { id: string; fileDiff: { name: string }; annotations?: Annotation[] };
+  type Item = {
+    id: string;
+    fileDiff: { name: string; isPartial: boolean };
+    annotations?: Annotation[];
+  };
   type Props = {
     items: Item[];
     renderCodeViewFooter?: () => ReactNode;
@@ -52,7 +62,10 @@ vi.mock('@pierre/diffs/react', async () => {
         <div data-testid="diff-view">
           <ol aria-label="Diffs">
             {props.items.map((item) => (
-              <li key={item.id}>
+              <li
+                key={item.id}
+                data-testid={`${item.fileDiff.isPartial ? 'partial' : 'complete'}:${item.id}`}
+              >
                 {item.fileDiff.name}
                 <div data-testid={`header:${item.id}`}>
                   {props.renderHeaderPrefix?.(item)}
@@ -420,6 +433,52 @@ afterEach(() => {
 });
 
 describe('CodeTab', () => {
+  it('hydrates a renamed file at the old path in the selected commit’s first parent', async () => {
+    const oldPath = 'seedlings.py';
+    const sha = commit(2).sha;
+    const parent = 'c'.repeat(40);
+    const calls: string[] = [];
+    fetchMock.mockImplementation(async (url) => {
+      const request = new URL(url);
+      if (request.pathname.endsWith(`/commits/${sha}`)) {
+        return respond({
+          parents: [{ sha: parent }, { sha: 'd'.repeat(40) }],
+          files: [
+            {
+              filename: greenhousePath,
+              previous_filename: oldPath,
+              status: 'renamed',
+              additions: 2,
+              deletions: 2,
+              patch: greenhousePatch,
+            },
+          ],
+        });
+      }
+      const path = `${request.pathname}${request.search}`;
+      if (path.includes('/contents/')) calls.push(path);
+      const text = path.endsWith(`/contents/${oldPath}?ref=${parent}`)
+        ? greenhouseBefore
+        : path.endsWith(`/contents/${greenhousePath}?ref=${sha}`)
+        ? greenhouseAfter
+        : null;
+      return text === null
+        ? respond({}, 404)
+        : respond({
+            type: 'file',
+            encoding: 'base64',
+            size: text.length,
+            content: btoa(text),
+          });
+    });
+    const tab = await show({ commit: sha });
+    expect(await tab.findByTestId(`complete:${greenhousePath}`)).toBeTruthy();
+    expect(calls).toEqual([
+      `/repos/${REF.owner}/${REF.repo}/contents/${oldPath}?ref=${parent}`,
+      `/repos/${REF.owner}/${REF.repo}/contents/${greenhousePath}?ref=${sha}`,
+    ]);
+  });
+
   it('lists every file in the tree, patchless ones included', async () => {
     const tab = await show();
     const tree = tab.getByRole('list', { name: 'Files of mindroom-ai/mindroom-chat #200' });

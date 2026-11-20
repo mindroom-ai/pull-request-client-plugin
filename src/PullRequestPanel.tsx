@@ -491,13 +491,12 @@ function listState<T>(
 /** The Code tab with what it shows: the files, the review threads and the commits. */
 function Files({
   pullRequest,
-  commitCount,
+  pr,
   commit,
   onCommitChange,
 }: {
   pullRequest: PullRequestRef;
-  /** How many commits the pull request has, which the list of them may fall short of. */
-  commitCount: number;
+  pr: PullRequest;
   commit: string | undefined;
   onCommitChange: (sha: string | undefined) => void;
 }) {
@@ -515,6 +514,7 @@ function Files({
         // The tab's own state, such as its open bar, folds and selector, is one pull request's.
         key={pullRequestUrl(pullRequest)}
         pullRequest={pullRequest}
+        revisions={pr}
         files={query.data}
         threads={listState(threads, reviewComments)}
         commits={listState(commits.data?.items, commits)}
@@ -524,7 +524,7 @@ function Files({
           reviewComments.data?.truncated ? reviewComments.data.items.length : undefined
         }
         truncatedCommits={
-          commits.data && commitsCut(commits.data, commitCount)
+          commits.data && commitsCut(commits.data, pr.commitCount)
             ? commits.data.items.length
             : undefined
         }
@@ -775,7 +775,7 @@ function Panel({ roomId, request }: PanelProps) {
               ) : (
                 <Files
                   pullRequest={ref}
-                  commitCount={pr.commitCount}
+                  pr={pr}
                   commit={selectedCommit}
                   onCommitChange={selectCommit}
                 />

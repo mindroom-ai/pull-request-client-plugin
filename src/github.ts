@@ -32,6 +32,7 @@ export type PullRequest = {
   mergeable: boolean | null;
   mergeableState: string | null;
   autoMerge: { method: 'merge' | 'squash' | 'rebase' } | null;
+  baseSha: string;
   headSha: string;
   headRepo: string | null;
   /** The head repository's GraphQL id, which reading and deleting its branch take; '' without one. */
@@ -437,6 +438,7 @@ export async function fetchPullRequest(
     mergeable: typeof raw.mergeable === 'boolean' ? raw.mergeable : null,
     mergeableState: textOrNull(raw.mergeable_state),
     autoMerge: autoMerge(record(raw.auto_merge)?.merge_method),
+    baseSha: text(base?.sha),
     headSha: text(head?.sha),
     headRepo: textOrNull(record(head?.repo)?.full_name),
     headRepoId: text(record(head?.repo)?.node_id),
@@ -526,7 +528,74 @@ export function filePatch(file: PullRequestFile): string | null {
   return `${head}${file.patch}\n`;
 }
 
-const repoPath = (ref: PullRequestRef) => `/repos/${ref.owner}/${ref.repo}`;
+const repoPath = (ref: Pick<PullRequestRef, 'owner' | 'repo'>) => `/repos/${ref.owner}/${ref.repo}`;
+
+/** The old side of a GitHub PR's three-dot diff is the merge base, not the base tip. */
+export async function fetchComparisonBase(
+  ref: PullRequestRef,
+  baseSha: string,
+  headSha: string,
+  token: GitHubAuth | undefined,
+  signal?: AbortSignal
+): Promise<string | null> {
+  try {
+    const raw = record(
+      await getJson(
+        `${repoPath(ref)}/compare/${encodeURIComponent(baseSha)}...${encodeURIComponent(
+          headSha
+        )}?per_page=1`,
+        token,
+        signal
+      )
+    );
+    return textOrNull(record(raw?.merge_base_commit)?.sha) || null;
+  } catch {
+    return null;
+  }
+}
+
+// Whole-file highlighting runs on the UI thread. Keep decoding, retention and highlighting cheap.
+const MAX_DIFF_FILE_BYTES = 128 * 1024;
+
+/** Read a small UTF-8 file as JSON so direct GitHub and the MindRoom proxy behave alike. */
+export async function fetchFileContent(
+  ref: Pick<PullRequestRef, 'owner' | 'repo'>,
+  path: string,
+  sha: string,
+  token: GitHubAuth | undefined,
+  signal?: AbortSignal
+): Promise<string | null> {
+  try {
+    const segments = path.split('/');
+    if (segments.some((segment) => segment === '' || segment === '.' || segment === '..'))
+      return null;
+    const encodedPath = segments.map(encodeURIComponent).join('/');
+    const raw = record(
+      await getJson(
+        `${repoPath(ref)}/contents/${encodedPath}?ref=${encodeURIComponent(sha)}`,
+        token,
+        signal
+      )
+    );
+    if (
+      raw?.type !== 'file' ||
+      raw.submodule_git_url != null ||
+      raw.encoding !== 'base64' ||
+      typeof raw.size !== 'number' ||
+      raw.size > MAX_DIFF_FILE_BYTES ||
+      typeof raw.content !== 'string'
+    )
+      return null;
+    const encoded = raw.content.replace(/\s/g, '');
+    if (encoded.length > Math.ceil(MAX_DIFF_FILE_BYTES / 3) * 4) return null;
+    const bytes = Uint8Array.from(atob(encoded), (byte) => byte.charCodeAt(0));
+    if (bytes.length !== raw.size || bytes.includes(0)) return null;
+    const decoded = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
+    return decoded.startsWith('version https://git-lfs.github.com/spec/v1') ? null : decoded;
+  } catch {
+    return null;
+  }
+}
 
 export type Paged<T> = { items: T[]; truncated: boolean };
 
@@ -881,18 +950,21 @@ export function fetchCommits(
   });
 }
 
-/** The files one commit changed, shaped like the pull request's. */
+/** The files one commit changed and the first parent GitHub diffs it against. */
 export async function fetchCommitFiles(
   ref: PullRequestRef,
   sha: string,
   token: GitHubAuth | undefined,
   signal?: AbortSignal
-): Promise<PullRequestFile[]> {
+): Promise<{ files: PullRequestFile[]; parentSha: string | null }> {
   const raw = record(
     await getJson(`${repoPath(ref)}/commits/${encodeURIComponent(sha)}`, token, signal)
   );
   if (!raw) throw new GitHubError('failed', 200);
-  return mapFiles(raw.files, `https://github.com/${ref.owner}/${ref.repo}/commit/${sha}`);
+  return {
+    files: mapFiles(raw.files, `https://github.com/${ref.owner}/${ref.repo}/commit/${sha}`),
+    parentSha: textOrNull(record(Array.isArray(raw.parents) ? raw.parents[0] : null)?.sha),
+  };
 }
 
 export type MergeMethod = 'merge' | 'squash' | 'rebase';

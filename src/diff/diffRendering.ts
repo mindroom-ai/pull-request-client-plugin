@@ -1,7 +1,12 @@
 // Ported from T3 Code (https://github.com/pingdotgg/t3code, apps/web/src/lib/diffRendering.ts at 8ab427c6), MIT, Copyright (c) 2026 T3 Tools Inc. See NOTICE.
 // Patch parsing, whitespace hiding and the diff surface's theme, the part of T3 Code's diff
 // rendering the Code tab uses.
-import { parseDiffFromFile, parsePatchFiles, type FileDiffMetadata } from '@pierre/diffs';
+import {
+  hydratePartialDiff,
+  parseDiffFromFile,
+  parsePatchFiles,
+  type FileDiffMetadata,
+} from '@pierre/diffs';
 
 export const DIFF_THEME_NAMES = {
   light: 'pierre-light',
@@ -64,6 +69,84 @@ export function getDiffLineStat(files: ReadonlyArray<FileDiffMetadata>): DiffLin
 
 interface RenderablePatchOptions {
   ignoreWhitespace?: boolean;
+}
+
+export type DiffContents = { before: string; after: string };
+
+export function canHydrateDiff(file: FileDiffMetadata): boolean {
+  return (
+    file.isPartial &&
+    file.hunks.length > 0 &&
+    (file.type === 'change' || file.type === 'rename-changed')
+  );
+}
+
+/** Match both sides at their hunk positions and verify that the omitted ranges really are unchanged. */
+export function patchAgreesWithContents(file: FileDiffMetadata, contents: DiffContents): boolean {
+  // Match Pierre's split, preserving line endings (including a missing final newline).
+  const lines = (text: string) => (text === '' ? [] : text.split(/(?<=\n)/));
+  const oldLines = lines(contents.before);
+  const newLines = lines(contents.after);
+  const sameLines = (a: string[], at: number, b: string[], bt: number, length: number) => {
+    if (length < 0 || at < 0 || bt < 0 || at + length > a.length || bt + length > b.length) {
+      return false;
+    }
+    for (let offset = 0; offset < length; offset += 1) {
+      if (a[at + offset] !== b[bt + offset]) return false;
+    }
+    return true;
+  };
+  let oldEnd = 0;
+  let newEnd = 0;
+  for (const hunk of file.hunks) {
+    // An empty side starts after the line named in the patch header, not at it.
+    const oldStart = hunk.deletionStart - (hunk.deletionCount > 0 ? 1 : 0);
+    const newStart = hunk.additionStart - (hunk.additionCount > 0 ? 1 : 0);
+    const gap = oldStart - oldEnd;
+    if (
+      gap !== newStart - newEnd ||
+      !sameLines(oldLines, oldEnd, newLines, newEnd, gap) ||
+      !sameLines(
+        oldLines,
+        oldStart,
+        file.deletionLines,
+        hunk.deletionLineIndex,
+        hunk.deletionCount
+      ) ||
+      !sameLines(newLines, newStart, file.additionLines, hunk.additionLineIndex, hunk.additionCount)
+    ) {
+      return false;
+    }
+    oldEnd = oldStart + hunk.deletionCount;
+    newEnd = newStart + hunk.additionCount;
+  }
+  const tail = oldLines.length - oldEnd;
+  return tail === newLines.length - newEnd && sameLines(oldLines, oldEnd, newLines, newEnd, tail);
+}
+
+export function prepareFileDiff(
+  file: FileDiffMetadata,
+  { contents, ignoreWhitespace }: RenderablePatchOptions & { contents?: DiffContents } = {}
+): FileDiffMetadata {
+  const filter = (diff: FileDiffMetadata) =>
+    ignoreWhitespace ? hideWhitespaceChanges(diff) : diff;
+  if (contents && canHydrateDiff(file) && patchAgreesWithContents(file, contents)) {
+    try {
+      return filter(
+        hydratePartialDiff('clone', file, {
+          oldFile: { name: file.prevName ?? file.name, contents: contents.before },
+          newFile: { name: file.name, contents: contents.after },
+        })
+      );
+    } catch {
+      // The original GitHub patch stays usable even if Pierre cannot hydrate it.
+    }
+  }
+  try {
+    return filter(file);
+  } catch {
+    return file;
+  }
 }
 
 function hideWhitespaceChanges(file: FileDiffMetadata): FileDiffMetadata {

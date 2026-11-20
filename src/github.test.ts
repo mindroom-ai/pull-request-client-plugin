@@ -1011,6 +1011,7 @@ const writePull: PullRequest = {
   mergeable: true,
   mergeableState: 'clean',
   autoMerge: null,
+  baseSha: 'base-tip',
   headSha: 'head7',
   headRepo: 'fork/r',
   headRepoId: 'R_fork',
