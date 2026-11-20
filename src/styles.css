@@ -1148,7 +1148,7 @@
 }
 
 /* Turn the drawing inside the icon, not the icon's box: a turning box sticks out past its row at 45°,
-   and in a scrolling list (the checks popover) that toggles the scrollbar four times a second. */
+   and in a scrolling list (the checks popover) its scrollbar comes and goes as the icon turns. */
 .mrpr-spin > * {
   transform-box: view-box;
   transform-origin: center;

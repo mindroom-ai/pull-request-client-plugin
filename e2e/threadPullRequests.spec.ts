@@ -958,21 +958,25 @@ test("the header's popovers hold still: the lines tooltip under the pointer, the
     .click();
   const list = page.locator('.mrpr-checks');
   await expect(list.locator('.mrpr-spin')).toHaveCount(1);
-  const overflowed = await list.evaluate(
+  // Over one whole turn (1 s), and with the spinner seen turning, so the check can't pass idle.
+  const { over, angles } = await list.evaluate(
     (element) =>
-      new Promise<number>((resolve) => {
-        let frames = 0;
+      new Promise<{ over: number; angles: number }>((resolve) => {
+        const drawing = element.querySelector('.mrpr-spin > *')!;
+        const seen = new Set<string>();
         let over = 0;
+        const start = performance.now();
         const tick = () => {
           if (element.scrollHeight > element.clientHeight) over += 1;
-          frames += 1;
-          if (frames < 60) requestAnimationFrame(tick);
-          else resolve(over);
+          seen.add(getComputedStyle(drawing).transform);
+          if (performance.now() - start < 1_100) requestAnimationFrame(tick);
+          else resolve({ over, angles: seen.size });
         };
         requestAnimationFrame(tick);
       })
   );
-  expect(overflowed).toBe(0);
+  expect(angles).toBeGreaterThan(10);
+  expect(over).toBe(0);
   expect(unanswered).toEqual([]);
 });
 
