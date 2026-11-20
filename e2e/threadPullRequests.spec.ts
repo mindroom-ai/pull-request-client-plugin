@@ -1,4 +1,10 @@
 import { join } from 'node:path';
+import {
+  greenhouseAfter,
+  greenhouseBefore,
+  greenhousePatch,
+  greenhousePath,
+} from '../src/testing/greenhouseDiff';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { loginWithPassword } from '@mindroom/e2e/auth';
 import { createRoom } from '@mindroom/e2e/createRoom';
@@ -979,6 +985,92 @@ test("the header's popovers hold still: the lines tooltip under the pointer, the
   );
   expect(angles).toBeGreaterThan(10);
   expect(over).toBe(0);
+  expect(unanswered).toEqual([]);
+});
+
+test('the Code tab highlights a hunk inside a docstring and can expand its context', async ({
+  page,
+}) => {
+  test.setTimeout(3 * 60_000);
+  const unanswered = await stubGitHub(page);
+  const pull = THREADS.sessions.pulls[0]!;
+  const api = `https://api.github.com/repos/acme/${pull.repo}`;
+  const base = 'a'.repeat(40);
+  const ancestor = 'b'.repeat(40);
+  const head = headSha(pull);
+  await page.route(`https://api.github.com${pullPath(pull)}`, (route) =>
+    route.fulfill({
+      headers: CORS,
+      json: { ...apiPull(pull), base: { ...apiPull(pull).base, sha: base } },
+    })
+  );
+  await page.route(`${api}/compare/${base}...${head}?per_page=1`, (route) =>
+    route.fulfill({ headers: CORS, json: { merge_base_commit: { sha: ancestor } } })
+  );
+  await page.route(`https://api.github.com${pullPath(pull)}/files?**`, (route) =>
+    route.fulfill({
+      headers: CORS,
+      json: [
+        {
+          filename: greenhousePath,
+          status: 'modified',
+          additions: 2,
+          deletions: 2,
+          patch: greenhousePatch,
+        },
+      ],
+    })
+  );
+  let release!: () => void;
+  const partialIsVisible = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  for (const [ref, text] of [
+    [ancestor, greenhouseBefore],
+    [head, greenhouseAfter],
+  ] as const) {
+    await page.route(`${api}/contents/${greenhousePath}?ref=${ref}`, async (route) => {
+      await partialIsVisible;
+      const bytes = Buffer.from(text);
+      await route.fulfill({
+        headers: CORS,
+        json: {
+          type: 'file',
+          encoding: 'base64',
+          size: bytes.length,
+          content: bytes.toString('base64'),
+        },
+      });
+    });
+  }
+  await openRoom(page);
+  await cardChips(page, roots.sessions).first().click();
+  const code = panel(page);
+  await code.getByRole('tab', { name: 'Code' }).click();
+  const lines = code.locator('[data-line]');
+  const literal = lines.getByText('"fern"', { exact: true }).first();
+  const prose = 'if a leaf is dry, move its pot.';
+  const docLine = lines.filter({ hasText: prose }).first();
+  const color = (token: Locator) => token.evaluate((element) => getComputedStyle(element).color);
+  await expect(docLine.getByText('if', { exact: true })).toBeVisible({ timeout: 30_000 });
+  const stringColor = await color(literal);
+  await shot(page, 'before');
+  release();
+  await expect(docLine.getByText(prose, { exact: true })).toHaveCSS('color', stringColor);
+  const keyword = lines
+    .filter({ hasText: 'return COUNT + 2' })
+    .getByText('return', { exact: true });
+  await expect(keyword).not.toHaveCSS('color', stringColor);
+  const separator = code
+    .locator('[data-separator]')
+    .filter({ hasText: '6 unmodified lines' })
+    .first();
+  const expand = separator.locator('[data-expand-button]').first();
+  await expect(expand).toBeVisible();
+  await shot(page, 'after');
+  await expand.click();
+  await expect(lines.filter({ hasText: 'Guide to the greenhouse.' }).first()).toBeVisible();
+  await shot(page, 'expanded');
   expect(unanswered).toEqual([]);
 });
 

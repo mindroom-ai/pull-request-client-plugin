@@ -1,7 +1,91 @@
 // Ported from T3 Code (https://github.com/pingdotgg/t3code, apps/web/src/lib/diffRendering.test.ts at 8ab427c6), MIT, Copyright (c) 2026 T3 Tools Inc. See NOTICE.
+import { getSharedHighlighter, renderDiffWithHighlighter } from '@pierre/diffs';
 import { describe, expect, it } from 'vitest';
 
-import { getDiffLineStat, getRenderablePatch } from './diffRendering';
+import { getDiffLineStat, getRenderablePatch, patchAgreesWithContents } from './diffRendering';
+import {
+  greenhouseAfter,
+  greenhouseBefore,
+  greenhousePatch,
+  greenhousePath,
+} from '../testing/greenhouseDiff';
+
+const greenhouse = `diff --git a/${greenhousePath} b/${greenhousePath}
+--- a/${greenhousePath}
++++ b/${greenhousePath}
+${greenhousePatch}
+`;
+
+function greenhouseFile(options?: Parameters<typeof getRenderablePatch>[2]) {
+  const result = getRenderablePatch(greenhouse, 'pr', options);
+  if (result?.kind !== 'files' || !result.files[0]) throw new Error('not parsed');
+  return result.files[0];
+}
+
+describe('patch agreement', () => {
+  it.each([
+    ['matching', greenhouseBefore, greenhouseAfter, true],
+    ['wrong context', greenhouseBefore, greenhouseAfter.replace('east bed', 'west bed'), false],
+    ['wrong old ref', greenhouseAfter, greenhouseAfter, false],
+    ['wrong new ref', greenhouseBefore, greenhouseBefore, false],
+    ['unreported change', greenhouseBefore, greenhouseAfter.replace('fresh soil', 'water'), false],
+    ['wrong last newline', greenhouseBefore, greenhouseAfter.trimEnd(), false],
+  ])('checks %s contents', (_case, before, after, agrees) => {
+    expect(patchAgreesWithContents(greenhouseFile(), { before, after })).toBe(agrees);
+  });
+});
+
+describe('partial diff hydration', () => {
+  it('highlights a hunk that starts inside a Python docstring as a string', async () => {
+    const partial = greenhouseFile();
+    const file = greenhouseFile({ contents: { before: greenhouseBefore, after: greenhouseAfter } });
+    const highlighter = await getSharedHighlighter({ themes: ['pierre-light'], langs: ['python'] });
+    const highlighted = renderDiffWithHighlighter(file, highlighter, {
+      theme: 'pierre-light',
+      useTokenTransformer: false,
+      tokenizeMaxLineLength: 1000,
+      lineDiffType: 'none',
+      maxLineDiffLength: 1000,
+    }).code.additionLines;
+    const docLine = highlighted[file.hunks[1]!.additionLineIndex];
+    const literal = highlighted[1];
+    if (docLine?.type !== 'element' || literal?.type !== 'element') throw new Error('not rendered');
+    const stringToken = literal.children.at(-1);
+    if (stringToken?.type !== 'element') throw new Error('no string token');
+    expect(docLine.children).toContainEqual(
+      expect.objectContaining({
+        properties: stringToken.properties,
+        children: [{ type: 'text', value: 'if a leaf is dry, move its pot.' }],
+      })
+    );
+    expect(file.isPartial).toBe(false);
+    expect(file.cacheKey).not.toBe(partial.cacheKey);
+  });
+
+  it('hides whitespace after hydrating and keeps hunk offsets in the full file', () => {
+    const patch = greenhouse.replace('+    return COUNT + 2', '+    return  COUNT + 1');
+    const result = getRenderablePatch(patch, 'pr', {
+      ignoreWhitespace: true,
+      contents: {
+        before: greenhouseBefore,
+        after: greenhouseAfter.replace('return COUNT + 2', 'return  COUNT + 1'),
+      },
+    });
+    if (result?.kind !== 'files' || !result.files[0]) throw new Error('not parsed');
+    const file = result.files[0];
+    expect(file.isPartial).toBe(false);
+    expect(getDiffLineStat(result.files)).toEqual({ additions: 1, deletions: 1 });
+    expect(file.hunks[1]?.hunkContent).toEqual([
+      { type: 'context', lines: 6, additionLineIndex: 8, deletionLineIndex: 8 },
+    ]);
+  });
+
+  it('leaves the entire partial diff alone when the contents do not match', () => {
+    expect(
+      greenhouseFile({ contents: { before: greenhouseAfter, after: greenhouseAfter } })
+    ).toEqual(greenhouseFile());
+  });
+});
 
 describe('getRenderablePatch', () => {
   it('ignore whitespace hides an indentation-only change', () => {
