@@ -1,10 +1,5 @@
 import { join } from 'node:path';
-import {
-  greenhouseAfter,
-  greenhouseBefore,
-  greenhousePatch,
-  greenhousePath,
-} from '../src/testing/greenhouseDiff';
+import { greenhouseAfter, greenhousePatch, greenhousePath } from '../src/testing/greenhouseDiff';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { loginWithPassword } from '@mindroom/e2e/auth';
 import { createRoom } from '@mindroom/e2e/createRoom';
@@ -995,24 +990,14 @@ test('the Code tab highlights a hunk inside a docstring and can expand its conte
   const unanswered = await stubGitHub(page);
   const pull = THREADS.sessions.pulls[0]!;
   const api = `https://api.github.com/repos/acme/${pull.repo}`;
-  const base = 'a'.repeat(40);
-  const ancestor = 'b'.repeat(40);
-  const head = headSha(pull);
-  await page.route(`https://api.github.com${pullPath(pull)}`, (route) =>
-    route.fulfill({
-      headers: CORS,
-      json: { ...apiPull(pull), base: { ...apiPull(pull).base, sha: base } },
-    })
-  );
-  await page.route(`${api}/compare/${base}...${head}?per_page=1`, (route) =>
-    route.fulfill({ headers: CORS, json: { merge_base_commit: { sha: ancestor } } })
-  );
+  const blob = 'b'.repeat(40);
   await page.route(`https://api.github.com${pullPath(pull)}/files?**`, (route) =>
     route.fulfill({
       headers: CORS,
       json: [
         {
           filename: greenhousePath,
+          sha: blob,
           status: 'modified',
           additions: 2,
           deletions: 2,
@@ -1025,24 +1010,19 @@ test('the Code tab highlights a hunk inside a docstring and can expand its conte
   const partialIsVisible = new Promise<void>((resolve) => {
     release = resolve;
   });
-  for (const [ref, text] of [
-    [ancestor, greenhouseBefore],
-    [head, greenhouseAfter],
-  ] as const) {
-    await page.route(`${api}/contents/${greenhousePath}?ref=${ref}`, async (route) => {
-      await partialIsVisible;
-      const bytes = Buffer.from(text);
-      await route.fulfill({
-        headers: CORS,
-        json: {
-          type: 'file',
-          encoding: 'base64',
-          size: bytes.length,
-          content: bytes.toString('base64'),
-        },
-      });
+  await page.route(`${api}/git/blobs/${blob}`, async (route) => {
+    await partialIsVisible;
+    const bytes = Buffer.from(greenhouseAfter);
+    await route.fulfill({
+      headers: CORS,
+      json: {
+        sha: blob,
+        encoding: 'base64',
+        size: bytes.length,
+        content: bytes.toString('base64'),
+      },
     });
-  }
+  });
   await openRoom(page);
   await cardChips(page, roots.sessions).first().click();
   const code = panel(page);
@@ -1054,7 +1034,6 @@ test('the Code tab highlights a hunk inside a docstring and can expand its conte
   const color = (token: Locator) => token.evaluate((element) => getComputedStyle(element).color);
   await expect(docLine.getByText('if', { exact: true })).toBeVisible({ timeout: 30_000 });
   const stringColor = await color(literal);
-  await shot(page, 'before');
   release();
   await expect(docLine.getByText(prose, { exact: true })).toHaveCSS('color', stringColor);
   const keyword = lines
@@ -1080,7 +1059,6 @@ const ZOOM_FILE = {
   status: 'modified',
   additions: 2,
   deletions: 1,
-  sha: 'f'.repeat(40),
   patch:
     "@@ -1,2 +1,3 @@\n import { Redis } from 'ioredis';\n-export const store = new Map();\n+export const store = new Redis();\n+export const ttl = 3600;",
 };

@@ -4,18 +4,19 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act } from 'react-dom/test-utils';
 import { renderPluginComponent } from '@mindroom/client-sdk/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { GitHubError, type Commit, type PullRequestFile, type ReviewComment } from './github';
+import {
+  GitHubError,
+  type Commit,
+  type PullRequestRef,
+  type PullRequestFile,
+  type ReviewComment,
+} from './github';
 import plugin from './index';
 import type { ReviewThread } from './reviewThreads';
 import { CodeTab, type ListState } from './CodeTab';
 import { fnv1a32 } from './diff/diffRendering';
 import { trapOptions } from './testing/focusTrapStandIn';
-import {
-  greenhouseAfter,
-  greenhouseBefore,
-  greenhousePatch,
-  greenhousePath,
-} from './testing/greenhouseDiff';
+import { greenhouseAfter, greenhousePatch, greenhousePath } from './testing/greenhouseDiff';
 
 vi.mock('focus-trap-react', async () => ({
   default: (await import('./testing/focusTrapStandIn')).FocusTrapStandIn,
@@ -297,6 +298,7 @@ const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(
 const commitRequests = () => fetchMock.mock.calls.filter(([url]) => url.includes('/commits/'));
 
 type Options = {
+  pullRequest?: PullRequestRef;
   themeKind?: 'light' | 'dark';
   files?: PullRequestFile[];
   threads?: ListState<ReviewThread>;
@@ -308,6 +310,7 @@ type Options = {
 
 // The panel keeps the chosen commit; this stands in for it.
 function Holder({
+  pullRequest = REF,
   files,
   threads,
   commits,
@@ -318,7 +321,7 @@ function Holder({
   const [chosen, setChosen] = useState(initial);
   return (
     <CodeTab
-      pullRequest={REF}
+      pullRequest={pullRequest}
       files={files ?? FILES}
       threads={threads ?? loaded<ReviewThread>([])}
       commits={commits ?? loaded(COMMITS)}
@@ -433,50 +436,120 @@ afterEach(() => {
 });
 
 describe('CodeTab', () => {
-  it('hydrates a renamed file at the old path in the selected commit’s first parent', async () => {
-    const oldPath = 'seedlings.py';
-    const sha = commit(2).sha;
-    const parent = 'c'.repeat(40);
-    const calls: string[] = [];
-    fetchMock.mockImplementation(async (url) => {
-      const request = new URL(url);
-      if (request.pathname.endsWith(`/commits/${sha}`)) {
-        return respond({
-          parents: [{ sha: parent }, { sha: 'd'.repeat(40) }],
-          files: [
-            {
-              filename: greenhousePath,
-              previous_filename: oldPath,
-              status: 'renamed',
-              additions: 2,
-              deletions: 2,
-              patch: greenhousePatch,
-            },
-          ],
-        });
-      }
-      const path = `${request.pathname}${request.search}`;
-      if (path.includes('/contents/')) calls.push(path);
-      const text = path.endsWith(`/contents/${oldPath}?ref=${parent}`)
-        ? greenhouseBefore
-        : path.endsWith(`/contents/${greenhousePath}?ref=${sha}`)
-        ? greenhouseAfter
-        : null;
-      return text === null
-        ? respond({}, 404)
-        : respond({
-            type: 'file',
-            encoding: 'base64',
-            size: text.length,
-            content: btoa(text),
-          });
+  describe('blob hydration', () => {
+    const request = { owner: 'meadow-labs', repo: 'seedling-demo', number: 17 };
+    const sha = 'a'.repeat(40);
+    const otherSha = 'b'.repeat(40);
+    const endpoint = `https://api.github.com/repos/${request.owner}/${request.repo}/git/blobs/`;
+    const tokenKey = 'mindroom.plugin:%40plugin-tester%3Aexample.org/pull-requests/githubToken';
+    const markKey = `mindroom.plugin:%40plugin-tester%3Aexample.org/pull-requests/viewed:${request.owner}/${request.repo}#${request.number}`;
+    const testFile = file({
+      path: greenhousePath,
+      sha,
+      patch: greenhousePatch,
+      additions: 2,
+      deletions: 2,
     });
-    const tab = await show({ commit: sha });
-    expect(await tab.findByTestId(`complete:${greenhousePath}`)).toBeTruthy();
-    expect(calls).toEqual([
-      `/repos/${REF.owner}/${REF.repo}/contents/${oldPath}?ref=${parent}`,
-      `/repos/${REF.owner}/${REF.repo}/contents/${greenhousePath}?ref=${sha}`,
-    ]);
+    const other = file({ ...testFile, path: 'seedlings.py', sha: otherSha });
+    const blobCalls = () =>
+      fetchMock.mock.calls.filter(([url]) => url.includes('/git/blobs/')).map(([url]) => url);
+    const response = (text = greenhouseAfter) =>
+      respond({ encoding: 'base64', size: text.length, content: btoa(text) });
+    // The real viewer only post-renders the items in its virtual window.
+    const setInWindow = (path: string, phase: 'mount' | 'unmount' = 'mount') =>
+      act(async () => {
+        const postRender = options().onPostRender as (
+          node: HTMLElement,
+          instance: unknown,
+          phase: string,
+          state: { item: ShownItem }
+        ) => void;
+        postRender?.(document.createElement('div'), null, phase, { item: itemOf(path)! });
+      });
+
+    it('loads only the files entry’s blob in the All commits view', async () => {
+      localStorage.setItem(tokenKey, 'e2e-token');
+      fetchMock.mockImplementation(async (url) =>
+        url === endpoint + sha ? response() : respond({}, 404)
+      );
+      const tab = await show({ files: [testFile], pullRequest: request });
+      expect(tab.getByTestId(`partial:${greenhousePath}`)).toBeTruthy();
+      expect(fetchMock).not.toHaveBeenCalled();
+      await setInWindow(greenhousePath);
+      expect(await tab.findByTestId(`complete:${greenhousePath}`)).toBeTruthy();
+      expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([endpoint + sha]);
+    });
+
+    it('uses the selected commit’s file blob without fetching a parent or a separate path', async () => {
+      localStorage.setItem(tokenKey, 'e2e-token');
+      const shaOfCommit = commit(2).sha;
+      fetchMock.mockImplementation(async (url) => {
+        if (url.endsWith(`/commits/${shaOfCommit}`))
+          return respond({
+            files: [
+              {
+                filename: greenhousePath,
+                previous_filename: 'orchard.py',
+                status: 'renamed',
+                sha,
+                additions: 2,
+                deletions: 2,
+                patch: greenhousePatch,
+              },
+            ],
+          });
+        return url === endpoint + sha ? response() : respond({}, 404);
+      });
+      const tab = await show({ commit: shaOfCommit, pullRequest: request });
+      await tab.findByTestId(`partial:${greenhousePath}`);
+      await setInWindow(greenhousePath);
+      expect(await tab.findByTestId(`complete:${greenhousePath}`)).toBeTruthy();
+      expect(blobCalls()).toEqual([endpoint + sha]);
+    });
+
+    it('does not fetch a viewed and folded file until it is unfolded', async () => {
+      localStorage.setItem(tokenKey, 'e2e-token');
+      localStorage.setItem(markKey, JSON.stringify({ [greenhousePath]: fnv1a32(greenhousePatch) }));
+      fetchMock.mockImplementation(async () => response());
+      const tab = await show({ files: [testFile, other], pullRequest: request });
+      expect(itemOf(greenhousePath)?.collapsed).toBe(true);
+      await setInWindow(greenhousePath);
+      await setInWindow(other.path);
+      await tab.findByTestId(`complete:${other.path}`);
+      expect(blobCalls()).toEqual([endpoint + otherSha]);
+      await click(foldToggle(tab, greenhousePath));
+      await tab.findByTestId(`complete:${greenhousePath}`);
+      expect(blobCalls()).toEqual([endpoint + otherSha, endpoint + sha]);
+    });
+
+    it('leaves anonymous files patch-only even in the virtual window', async () => {
+      const tab = await show({ files: [testFile], pullRequest: request });
+      await setInWindow(greenhousePath);
+      expect(tab.getByTestId(`partial:${greenhousePath}`)).toBeTruthy();
+      expect(blobCalls()).toEqual([]);
+    });
+
+    it('keeps other prepared diffs when one blob arrives or a viewed mark changes', async () => {
+      localStorage.setItem(tokenKey, 'e2e-token');
+      let release!: (value: Response) => void;
+      const pending = new Promise<Response>((resolve) => {
+        release = resolve;
+      });
+      fetchMock.mockImplementation(async (url) =>
+        url === endpoint + otherSha ? pending : response()
+      );
+      const tab = await show({ files: [testFile, other], pullRequest: request });
+      await setInWindow(greenhousePath);
+      await tab.findByTestId(`complete:${greenhousePath}`);
+      const first = itemOf(greenhousePath)!.fileDiff;
+      await setInWindow(other.path);
+      await act(async () => release(response()));
+      await tab.findByTestId(`complete:${other.path}`);
+      expect(itemOf(greenhousePath)!.fileDiff).toBe(first);
+      const second = itemOf(other.path)!.fileDiff;
+      await click(viewedBox(tab, greenhousePath));
+      expect(itemOf(other.path)!.fileDiff).toBe(second);
+    });
   });
 
   it('lists every file in the tree, patchless ones included', async () => {

@@ -8,8 +8,7 @@ import {
   fetchBehindBy,
   fetchChecks,
   fetchCommitFiles,
-  fetchComparisonBase,
-  fetchFileContent,
+  fetchDiffBlob,
   fetchCommits,
   fetchConversationComments,
   fetchHeadBranch,
@@ -59,7 +58,7 @@ const apiPull = {
   created_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-01-02T00:00:00Z',
   merged_at: null,
-  base: { ref: 'main', sha: 'base-tip' },
+  base: { ref: 'main' },
   head: { ref: 'topic' },
   additions: 3,
   deletions: 1,
@@ -167,7 +166,6 @@ describe('fetchPullRequest', () => {
       mergeable: null,
       mergeableState: null,
       autoMerge: null,
-      baseSha: 'base-tip',
       headSha: '',
       headRepo: null,
       headRepoId: '',
@@ -904,51 +902,52 @@ describe('the lists', () => {
   });
 });
 
-describe('diff content requests', () => {
-  it('finds the merge base by the two immutable PR refs through MindRoom', async () => {
+describe('fetchDiffBlob', () => {
+  const sha = 'b'.repeat(40);
+
+  it('reads the immutable Git Data blob through MindRoom', async () => {
     const upstream = vi.fn((url: string) =>
       Promise.resolve(
         json({
-          merge_base_commit: { sha: 'ancestor' },
-          base_commit: { sha: 'base-tip' },
+          encoding: 'base64',
+          size: 3,
+          content: 'w6kK\n',
         })
       )
     );
     const { server } = githubServer(upstream);
-    const via = { server, account: 'a', disconnected: vi.fn(), unreadable: vi.fn() };
-    expect(await fetchComparisonBase(ref, 'base-tip', 'head-tip', via)).toBe('ancestor');
-    expect(upstream.mock.calls[0]?.[0]).toBe(
-      'https://api.github.com/repos/a/b/compare/base-tip...head-tip?per_page=1'
-    );
-  });
-
-  it('decodes UTF-8 from GitHub JSON at the specified ref and path', async () => {
-    const fetchMock = stubRoutes({
-      '/contents/': { type: 'file', encoding: 'base64', size: 3, content: 'w6kK\n' },
-    });
-    expect(await fetchFileContent(ref, 'beds/seed #1.py', 'ancestor', 'tok')).toBe('é\n');
-    expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      'https://api.github.com/repos/a/b/contents/beds/seed%20%231.py?ref=ancestor'
-    );
+    const via = { server, account: 'gardener', disconnected: vi.fn(), unreadable: vi.fn() };
+    expect(await fetchDiffBlob(ref, sha, via)).toBe('é\n');
+    expect(upstream.mock.calls[0]?.[0]).toBe(`https://api.github.com/repos/a/b/git/blobs/${sha}`);
   });
 
   it.each([
-    ['an HTTP error', new Response(null, { status: 404 })],
-    ['a submodule', { type: 'file', submodule_git_url: 'https://example.org/repo' }],
-    ['a large file', { type: 'file', size: 1_000_000, encoding: 'base64', content: 'YQo=' }],
-    ['binary data', { type: 'file', size: 2, encoding: 'base64', content: 'AGE=' }],
+    ['404 (including submodule commit IDs)', new Response(null, { status: 404 })],
+    ['403', new Response(null, { status: 403 })],
+    ['oversized content', { size: 1_000_000, encoding: 'base64', content: 'YQo=' }],
+    ['binary data with a NUL', { size: 2, encoding: 'base64', content: 'AGE=' }],
+    ['invalid UTF-8', { size: 1, encoding: 'base64', content: '/w==' }],
+    ['a malformed response', { size: 2, encoding: 'base64', content: 'YQ==' }],
     [
       'an LFS pointer',
       {
-        type: 'file',
         size: 43,
         encoding: 'base64',
         content: btoa('version https://git-lfs.github.com/spec/v1\n'),
       },
     ],
-  ])('returns no content for %s', async (_case, body) => {
-    stubRoutes({ '/contents/': body });
-    expect(await fetchFileContent(ref, 'greenhouse.py', 'ancestor', undefined)).toBeNull();
+  ])('falls back on %s', async (_case, body) => {
+    stubRoutes({ '/git/blobs/': body });
+    expect(await fetchDiffBlob(ref, sha, 'blob-fixture')).toBeNull();
+  });
+
+  it('stops requesting blobs after GitHub replies with a secondary rate limit', async () => {
+    const fetchMock = stubRoutes({
+      '/git/blobs/': new Response(null, { status: 403, headers: { 'retry-after': '60' } }),
+    });
+    expect(await fetchDiffBlob(ref, sha, 'limited-blob-fixture')).toBeNull();
+    expect(await fetchDiffBlob(ref, 'c'.repeat(40), 'limited-blob-fixture')).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -956,7 +955,6 @@ describe('fetchCommitFiles', () => {
   it("maps one commit's files", async () => {
     const fetchMock = stubRoutes({
       '/commits/abc': {
-        parents: [{ sha: 'first-parent' }, { sha: 'other-parent' }],
         files: [
           { filename: 'a.ts', status: 'added', additions: 1, deletions: 0, patch: '@@', sha: 'c0' },
           // A file without a blob SHA.
@@ -964,31 +962,28 @@ describe('fetchCommitFiles', () => {
         ],
       },
     });
-    expect(await fetchCommitFiles(ref, 'abc', 'tok')).toEqual({
-      parentSha: 'first-parent',
-      files: [
-        {
-          path: 'a.ts',
-          previousPath: null,
-          status: 'added',
-          additions: 1,
-          deletions: 0,
-          patch: '@@',
-          sha: 'c0',
-          url: 'https://github.com/a/b/commit/abc',
-        },
-        {
-          path: 'lib',
-          previousPath: null,
-          status: 'modified',
-          additions: 0,
-          deletions: 0,
-          patch: null,
-          sha: null,
-          url: 'https://github.com/a/b/commit/abc',
-        },
-      ],
-    });
+    expect(await fetchCommitFiles(ref, 'abc', 'tok')).toEqual([
+      {
+        path: 'a.ts',
+        previousPath: null,
+        status: 'added',
+        additions: 1,
+        deletions: 0,
+        patch: '@@',
+        sha: 'c0',
+        url: 'https://github.com/a/b/commit/abc',
+      },
+      {
+        path: 'lib',
+        previousPath: null,
+        status: 'modified',
+        additions: 0,
+        deletions: 0,
+        patch: null,
+        sha: null,
+        url: 'https://github.com/a/b/commit/abc',
+      },
+    ]);
     expect(String(fetchMock.mock.calls[0]![0])).toBe(
       'https://api.github.com/repos/a/b/commits/abc'
     );
@@ -1011,7 +1006,6 @@ const writePull: PullRequest = {
   mergeable: true,
   mergeableState: 'clean',
   autoMerge: null,
-  baseSha: 'base-tip',
   headSha: 'head7',
   headRepo: 'fork/r',
   headRepoId: 'R_fork',

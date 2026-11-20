@@ -7,7 +7,7 @@
 // a viewed mark; the toolbar counts the viewed files and holds the display controls.
 import { usePluginTranslation } from '@mindroom/client-sdk/core';
 import { IconButton, IconTooltip, useThemeKind } from '@mindroom/client-sdk/ui';
-import type { CodeViewDiffItem, CodeViewItem } from '@pierre/diffs';
+import type { CodeViewDiffItem, CodeViewItem, PostRenderPhase } from '@pierre/diffs';
 import type { CodeViewAnnotationArgs, CodeViewHandle } from '@pierre/diffs/react';
 import type { GitStatus } from '@pierre/trees';
 import {
@@ -66,13 +66,12 @@ import {
   filePatch,
   pullRequestUrl,
   type Commit,
-  type PullRequest,
   type PullRequestFile,
   type PullRequestRef,
 } from './github';
 import { GitHubErrorState } from './GitHubErrorState';
 import { PullRequestDiffStat, PullRequestMetaLine } from './presentation';
-import { useCommitFiles, useComparisonBase, useDiffContents } from './queries';
+import { useCommitFiles, useDiffBlobs } from './queries';
 import type { ReviewThread } from './reviewThreads';
 import { pluginRootStyle } from './theme';
 
@@ -243,7 +242,6 @@ type Folds = {
 
 export function CodeTab({
   pullRequest,
-  revisions,
   files,
   threads,
   commits,
@@ -253,7 +251,6 @@ export function CodeTab({
   truncatedCommits,
 }: {
   pullRequest: PullRequestRef;
-  revisions?: Pick<PullRequest, 'baseSha' | 'headSha' | 'headRepo'>;
   /** The files of the pull request as a whole. */
   files: PullRequestFile[];
   threads: ListState<ReviewThread>;
@@ -271,6 +268,26 @@ export function CodeTab({
   const prefs = useCodePrefs();
   const viewed = useViewedFiles(pullRequest);
   const [treeOpen, setTreeOpen] = useState(true);
+  const [nearViewport, setNearViewport] = useState<ReadonlySet<string>>(() => new Set());
+  // Pierre only mounts items in its virtualized window (visible rows plus overscan).
+  const onDiffRender = useCallback(
+    (
+      _node: HTMLElement,
+      _instance: unknown,
+      phase: PostRenderPhase,
+      { item }: { item: { id: string } }
+    ) => {
+      if (phase === 'update') return;
+      setNearViewport((previous) => {
+        if (previous.has(item.id) === (phase === 'mount')) return previous;
+        const next = new Set(previous);
+        if (phase === 'mount') next.add(item.id);
+        else next.delete(item.id);
+        return next;
+      });
+    },
+    []
+  );
   const viewerRef = useRef<CodeViewHandle<ThreadGroup, undefined>>(null);
   const rowsRef = useRef(new Map<string, HTMLElement>());
 
@@ -283,7 +300,7 @@ export function CodeTab({
       ? commit
       : undefined;
   const commitFiles = useCommitFiles(pullRequest, shownCommit ?? '', shownCommit !== undefined);
-  const viewFiles = shownCommit === undefined ? files : commitFiles.data?.files;
+  const viewFiles = shownCommit === undefined ? files : commitFiles.data;
 
   // Viewed marks belong to the pull request as a whole: a file keeps its mark, against its patch
   // in the pull request, in a commit's view, and a file only a commit changes has none. A file
@@ -324,10 +341,8 @@ export function CodeTab({
     [foldKeyOf, folds.override, folds.choices, isViewedNow]
   );
 
-  // Even an identical patch can have different unchanged lines after a push. Keep Pierre's
-  // highlight cache separate by revision and theme, independently of folds and viewed marks.
-  const revision = shownCommit ?? `${revisions?.baseSha ?? ''}...${revisions?.headSha ?? ''}`;
-  const scope = `pull-request:${pullRequest.owner}/${pullRequest.repo}#${pullRequest.number}:${revision}:${themeKind}`;
+  // The highlighted lines depend on the theme, so the parse cache key carries it.
+  const scope = `pull-request:${pullRequest.owner}/${pullRequest.repo}#${pullRequest.number}:${themeKind}`;
   const { ignoreWhitespace, hideTests } = prefs;
   const parsedFiles = useMemo(() => {
     const patch = (viewFiles ?? [])
@@ -350,34 +365,41 @@ export function CodeTab({
         : parsedFiles,
     [parsedFiles, hideTests, testPaths]
   );
-  const hydrationTargets = useMemo(
+  const sourceByPath = useMemo(
+    () => new Map(viewFiles?.map((file) => [file.path, file])),
+    [viewFiles]
+  );
+  const targets = useMemo(
     () =>
-      shownPartialDiffs.filter(canHydrateDiff).map((diff) => {
+      shownPartialDiffs.filter(canHydrateDiff).flatMap((diff) => {
         const path = resolveFileDiffPath(diff);
-        return { path, previousPath: diff.prevName, enabled: !collapsedOf(path) };
+        const sha = sourceByPath.get(path)?.sha;
+        return sha ? [{ path, sha }] : [];
       }),
-    [shownPartialDiffs, collapsedOf]
+    [shownPartialDiffs, sourceByPath]
   );
-  const comparisonBase = useComparisonBase(
-    pullRequest,
-    revisions?.baseSha ?? '',
-    revisions?.headSha ?? '',
-    shownCommit === undefined && hydrationTargets.some(({ enabled }) => enabled)
+  const shas = useMemo(() => [...new Set(targets.map(({ sha }) => sha))], [targets]);
+  const enabledShas = useMemo(
+    () =>
+      new Set(
+        targets.flatMap(({ path, sha }) =>
+          nearViewport.has(path) && !collapsedOf(path) ? [sha] : []
+        )
+      ),
+    [targets, nearViewport, collapsedOf]
   );
-  const contents = useDiffContents(pullRequest, hydrationTargets, {
-    oldSha: shownCommit === undefined ? comparisonBase.data : commitFiles.data?.parentSha,
-    newSha: shownCommit ?? revisions?.headSha ?? '',
-    headRepo: shownCommit === undefined ? revisions?.headRepo ?? null : null,
-  });
+  const blobs = useDiffBlobs(pullRequest, shas, enabledShas);
   const shownDiffs = useMemo(
     () =>
-      shownPartialDiffs.map((file) =>
-        prepareFileDiff(file, {
-          contents: contents.get(resolveFileDiffPath(file)),
+      shownPartialDiffs.map((file) => {
+        const source = sourceByPath.get(resolveFileDiffPath(file));
+        return prepareFileDiff(file, {
+          source,
+          blob: source?.sha ? blobs.get(source.sha) : undefined,
           ignoreWhitespace,
-        })
-      ),
-    [shownPartialDiffs, contents, ignoreWhitespace]
+        });
+      }),
+    [shownPartialDiffs, sourceByPath, blobs, ignoreWhitespace]
   );
   const hiddenTests = hideTests ? testPaths.size : 0;
   // A file without a diff to show, as GitHub sends none for a binary or a very large file.
@@ -741,6 +763,7 @@ export function CodeTab({
                   overflow: prefs.wrap ? 'wrap' : 'scroll',
                   lineDiffType: 'none',
                   stickyHeaders: true,
+                  onPostRender: onDiffRender,
                 }}
                 renderCodeViewFooter={renderWithoutDiff}
                 renderHeaderPrefix={renderHeaderPrefix}

@@ -5,9 +5,8 @@ import { describe, expect, it } from 'vitest';
 import {
   getDiffLineStat,
   getRenderablePatch,
-  patchAgreesWithContents,
   prepareFileDiff,
-  type DiffContents,
+  reconstructOldFile,
 } from './diffRendering';
 import {
   greenhouseAfter,
@@ -16,38 +15,113 @@ import {
   greenhousePath,
 } from '../testing/greenhouseDiff';
 
-const greenhouse = `diff --git a/${greenhousePath} b/${greenhousePath}
---- a/${greenhousePath}
-+++ b/${greenhousePath}
-${greenhousePatch}
-`;
-
-function parsedFile(patch: string) {
-  const result = getRenderablePatch(patch, 'pr');
+const source = (patch = greenhousePatch, additions = 2, deletions = 2, sha = 'b'.repeat(40)) => ({
+  patch,
+  additions,
+  deletions,
+  sha,
+});
+const parse = (patch = greenhousePatch) => {
+  const name = greenhousePath;
+  const result = getRenderablePatch(
+    `diff --git a/${name} b/${name}\n--- a/${name}\n+++ b/${name}\n${patch}\n`,
+    'pr'
+  );
   if (result?.kind !== 'files' || !result.files[0]) throw new Error('not parsed');
   return result.files[0];
-}
+};
 
-const greenhouseFile = (contents?: DiffContents) =>
-  prepareFileDiff(parsedFile(greenhouse), { contents });
+const firstHunk = greenhousePatch.split('\n@@ -9')[0]!;
+const secondHunk = greenhousePatch.slice(firstHunk.length + 1);
 
-describe('patch agreement', () => {
+describe('reconstructOldFile', () => {
+  it('reconstructs the original full file from only the new blob and complete hunks', () => {
+    expect(reconstructOldFile(parse(), source(), greenhouseAfter)).toBe(greenhouseBefore);
+  });
+
   it.each([
-    ['matching', greenhouseBefore, greenhouseAfter, true],
-    ['wrong context', greenhouseBefore, greenhouseAfter.replace('east bed', 'west bed'), false],
-    ['wrong old ref', greenhouseAfter, greenhouseAfter, false],
-    ['wrong new ref', greenhouseBefore, greenhouseBefore, false],
-    ['unreported change', greenhouseBefore, greenhouseAfter.replace('fresh soil', 'water'), false],
-    ['wrong last newline', greenhouseBefore, greenhouseAfter.trimEnd(), false],
-  ])('checks %s contents', (_case, before, after, agrees) => {
-    expect(patchAgreesWithContents(greenhouseFile(), { before, after })).toBe(agrees);
+    ['wrong context', greenhousePatch, greenhouseAfter.replace('east bed', 'west bed')],
+    ['wrong addition', greenhousePatch, greenhouseBefore],
+    ['truncated raw hunk', greenhousePatch.replace('-9,6 +9,6', '-9,7 +9,7'), greenhouseAfter],
+    ['extra raw hunk lines', greenhousePatch.replace('-9,6 +9,6', '-9,5 +9,5'), greenhouseAfter],
+    ['omitted whole hunk', firstHunk, greenhouseAfter],
+    ['unordered hunks', `${secondHunk}\n${firstHunk}`, greenhouseAfter],
+    ['overlapping hunks', `${firstHunk}\n${firstHunk}`, greenhouseAfter],
+    [
+      'unequal old and new gaps',
+      greenhousePatch.replace('-9,6 +9,6', '-8,6 +9,6'),
+      greenhouseAfter,
+    ],
+    ['nonempty range at line zero', greenhousePatch.replace('-1,2', '-0,2'), greenhouseAfter],
+    ['wrong final newline', greenhousePatch, greenhouseAfter.trimEnd()],
+  ])('rejects %s', (_name, patch, blob) => {
+    expect(reconstructOldFile(parse(patch), source(patch), blob)).toBeNull();
+  });
+
+  it.each([
+    [1, 2],
+    [2, 1],
+  ])('rejects a file stat of +%d -%d for a complete +2 -2 patch', (additions, deletions) => {
+    expect(
+      reconstructOldFile(parse(), source(greenhousePatch, additions, deletions), greenhouseAfter)
+    ).toBeNull();
+  });
+
+  it.each([
+    ['insertion after line one', '@@ -1,0 +2 @@\n+bud', 1, 0, 'stem\nbud\nleaf\n', 'stem\nleaf\n'],
+    ['deletion after line one', '@@ -2 +1,0 @@\n-bud', 0, 1, 'stem\nleaf\n', 'stem\nbud\nleaf\n'],
+    ['insertion at start', '@@ -0,0 +1 @@\n+bud', 1, 0, 'bud\nleaf\n', 'leaf\n'],
+    [
+      'old without a newline',
+      '@@ -1 +1 @@\n-old\n\\ No newline at end of file\n+new',
+      1,
+      1,
+      'new\n',
+      'old',
+    ],
+    [
+      'new without a newline',
+      '@@ -1 +1 @@\n-old\n+new\n\\ No newline at end of file',
+      1,
+      1,
+      'new',
+      'old\n',
+    ],
+    [
+      'shared context without a newline',
+      '@@ -1,2 +1,2 @@\n-old\n+new\n stem\n\\ No newline at end of file',
+      1,
+      1,
+      'new\nstem',
+      'old\nstem',
+    ],
+    [
+      'CRLF context',
+      '@@ -1,2 +1,2 @@\n-old\r\n+new\r\n stem\r',
+      1,
+      1,
+      'new\r\nstem\r\n',
+      'old\r\nstem\r\n',
+    ],
+  ])('handles %s', (_name, patch, additions, deletions, blob, old) => {
+    expect(reconstructOldFile(parse(patch), source(patch, additions, deletions), blob)).toBe(old);
+  });
+
+  it('rejects an old-side EOF marker before unchanged tail lines', () => {
+    const patch = '@@ -1 +1 @@\n-old\n\\ No newline at end of file\n+new';
+    expect(reconstructOldFile(parse(patch), source(patch, 1, 1), 'new\nstem\n')).toBeNull();
+  });
+
+  it('caps the reconstructed side by UTF-8 byte length', () => {
+    const patch = `@@ -1 +1 @@\n-${'é'.repeat(65_536)}\n+bud`;
+    expect(reconstructOldFile(parse(patch), source(patch, 1, 1), 'bud\n')).toBeNull();
   });
 });
 
 describe('partial diff hydration', () => {
   it('highlights a hunk that starts inside a Python docstring as a string', async () => {
-    const partial = greenhouseFile();
-    const file = greenhouseFile({ before: greenhouseBefore, after: greenhouseAfter });
+    const partial = parse();
+    const file = prepareFileDiff(partial, { source: source(), blob: greenhouseAfter });
     const highlighter = await getSharedHighlighter({ themes: ['pierre-light'], langs: ['python'] });
     const highlighted = renderDiffWithHighlighter(file, highlighter, {
       theme: 'pierre-light',
@@ -68,17 +142,26 @@ describe('partial diff hydration', () => {
       })
     );
     expect(file.isPartial).toBe(false);
-    expect(file.cacheKey).not.toBe(partial.cacheKey);
+  });
+
+  it('changes the cache key for different blobs with the same patch', () => {
+    const partial = parse();
+    const fern = prepareFileDiff(partial, { source: source(), blob: greenhouseAfter });
+    const sage = prepareFileDiff(partial, {
+      source: source(greenhousePatch, 2, 2, 'c'.repeat(40)),
+      blob: greenhouseAfter.replace('fresh soil', 'fresh compost'),
+    });
+    expect(fern.isPartial).toBe(false);
+    expect(sage.isPartial).toBe(false);
+    expect(new Set([partial.cacheKey, fern.cacheKey, sage.cacheKey]).size).toBe(3);
   });
 
   it('hides whitespace after hydrating and keeps hunk offsets in the full file', () => {
-    const patch = greenhouse.replace('+    return COUNT + 2', '+    return  COUNT + 1');
-    const file = prepareFileDiff(parsedFile(patch), {
+    const patch = greenhousePatch.replace('+    return COUNT + 2', '+    return  COUNT + 1');
+    const file = prepareFileDiff(parse(patch), {
       ignoreWhitespace: true,
-      contents: {
-        before: greenhouseBefore,
-        after: greenhouseAfter.replace('return COUNT + 2', 'return  COUNT + 1'),
-      },
+      source: source(patch),
+      blob: greenhouseAfter.replace('return COUNT + 2', 'return  COUNT + 1'),
     });
     expect(file.isPartial).toBe(false);
     expect(getDiffLineStat([file])).toEqual({ additions: 1, deletions: 1 });
@@ -87,10 +170,9 @@ describe('partial diff hydration', () => {
     ]);
   });
 
-  it('leaves the entire partial diff alone when the contents do not match', () => {
-    expect(greenhouseFile({ before: greenhouseAfter, after: greenhouseAfter })).toEqual(
-      greenhouseFile()
-    );
+  it('keeps the exact same partial diff when the blob does not match', () => {
+    const partial = parse();
+    expect(prepareFileDiff(partial, { source: source(), blob: greenhouseBefore })).toBe(partial);
   });
 });
 

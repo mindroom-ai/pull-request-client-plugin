@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+  CancelledError,
   isCancelledError,
   useQueries,
   useQuery,
@@ -11,8 +12,7 @@ import {
   fetchBehindBy,
   fetchChecks,
   fetchCommitFiles,
-  fetchComparisonBase,
-  fetchFileContent,
+  fetchDiffBlob,
   fetchCommits,
   fetchConversationComments,
   fetchHeadBranch,
@@ -23,12 +23,12 @@ import {
   fetchReviews,
   GitHubError,
   GitHubWriteError,
+  isGitHubRateLimited,
   refused,
   type GitHubAuth,
   type PullRequest,
   type PullRequestRef,
 } from './github';
-import type { DiffContents } from './diff/diffRendering';
 import { useGitHubAccess, type AccessKey, type GitHubAccess } from './token';
 
 // A refusal GitHub gave twice would be the same again; only a failed request is worth another try.
@@ -52,7 +52,7 @@ export const pullRequestKey = (ref: PullRequestRef | undefined) =>
   ['pull-requests', 'pr', lower(ref?.owner), lower(ref?.repo), ref?.number] as const;
 
 /** What the keys of what `useRepository` reads of a pull request's repository start with. */
-export const repositoryKey = (ref: Pick<PullRequestRef, 'owner' | 'repo'> | undefined) =>
+export const repositoryKey = (ref: PullRequestRef | undefined) =>
   ['pull-requests', 'repo', lower(ref?.owner), lower(ref?.repo)] as const;
 
 // The token's value never goes in a key (keys show in devtools and error reports); how GitHub is
@@ -329,80 +329,74 @@ export const useCommitFiles = (ref: PullRequestRef | undefined, sha: string, ena
     fetchCommitFiles(r, sha, token, signal)
   );
 
-export function useComparisonBase(
-  ref: PullRequestRef,
-  baseSha: string,
-  headSha: string,
-  enabled: boolean
-) {
-  return useRefQuery(
-    ref,
-    enabled && baseSha !== '' && headSha !== '',
-    ['diff-base', baseSha, headSha],
-    (r, token, signal) => fetchComparisonBase(r, baseSha, headSha, token, signal),
-    NO_FOCUS_REFETCH
-  );
-}
+// Bound background reads across panels; a queued read can lose its last enabled observer.
+const MAX_BLOB_READS = 4;
+let blobReads = 0;
+const waitingBlobReads: (() => void)[] = [];
 
-// Bound background reads across panels. A query dropped while waiting skips its HTTP request.
-const MAX_CONTENT_READS = 4;
-let contentReads = 0;
-const waitingContentReads: (() => void)[] = [];
-
-async function withContentRead(load: () => Promise<string | null>): Promise<string | null> {
-  if (contentReads < MAX_CONTENT_READS) contentReads += 1;
-  else await new Promise<void>((start) => waitingContentReads.push(start));
+async function withBlobRead(load: () => Promise<string | null>): Promise<string | null> {
+  if (blobReads < MAX_BLOB_READS) blobReads += 1;
+  else await new Promise<void>((start) => waitingBlobReads.push(start));
   try {
     return await load();
   } finally {
-    const next = waitingContentReads.shift();
+    const next = waitingBlobReads.shift();
     if (next) next();
-    else contentReads -= 1;
+    else blobReads -= 1;
   }
 }
 
-type DiffContentTarget = { path: string; previousPath?: string; enabled: boolean };
-const fileContentAnswers = (results: { data?: string | null }[]) => results.map(({ data }) => data);
+const blobAnswers = (results: { data?: string | null }[]) => results.map(({ data }) => data);
 
-export function useDiffContents(
+export function useDiffBlobs(
   ref: PullRequestRef,
-  targets: readonly DiffContentTarget[],
-  { oldSha, newSha, headRepo }: { oldSha?: string | null; newSha: string; headRepo: string | null }
-) {
+  shas: readonly string[],
+  enabledShas: ReadonlySet<string>
+): ReadonlyMap<string, string> {
   const access = useGitHubAccess();
-  const [owner, repo] = headRepo?.split('/') ?? [];
-  const head = owner && repo ? { owner, repo } : ref;
-  const side = (repository: typeof head, path: string, sha: string, enabled: boolean) => ({
-    queryKey: [...repositoryKey(repository), access.key, 'diff-content', sha, path] as const,
-    queryFn: ({ signal }: { signal: AbortSignal }) =>
-      withContentRead(() => {
-        signal.throwIfAborted();
-        return fetchFileContent(repository, path, sha, access.authFor(access.key), signal);
-      }),
-    enabled: enabled && !access.pending,
-    staleTime: ({ state }: { state: { data: unknown } }) =>
-      state.data === null ? STALE_TIME : Infinity,
-    retry: false,
-    ...NO_FOCUS_REFETCH,
-  });
+  const client = useQueryClient();
   const data = useQueries({
-    queries:
-      oldSha && newSha
-        ? targets.flatMap(({ path, previousPath, enabled }) => [
-            side(ref, previousPath ?? path, oldSha, enabled),
-            side(head, path, newSha, enabled),
-          ])
-        : [],
-    combine: fileContentAnswers,
+    queries: shas.map((sha) => {
+      // Separate from PR/repository refreshes, but still under credential changes' namespace.
+      const queryKey = [
+        'pull-requests',
+        'blob',
+        lower(ref.owner),
+        lower(ref.repo),
+        sha,
+        access.key,
+      ] as const;
+      return {
+        queryKey,
+        queryFn: ({ signal }: { signal: AbortSignal }) => {
+          const auth = access.authFor(access.key);
+          if (auth === undefined || isGitHubRateLimited(auth)) return Promise.resolve(null);
+          return withBlobRead(() => {
+            signal.throwIfAborted();
+            if (!client.getQueryCache().find({ queryKey, exact: true })?.isActive()) {
+              throw new CancelledError({ revert: true });
+            }
+            // Check credentials again after waiting; getJson also rechecks the rate limit.
+            const current = access.authFor(access.key);
+            return current === undefined
+              ? Promise.resolve(null)
+              : fetchDiffBlob(ref, sha, current, signal);
+          });
+        },
+        enabled: access.via !== undefined && !access.pending && enabledShas.has(sha),
+        staleTime: Infinity,
+        retry: false,
+        ...NO_FOCUS_REFETCH,
+      };
+    }),
+    combine: blobAnswers,
   });
   return useMemo(() => {
-    const contents = new Map<string, DiffContents>();
-    targets.forEach(({ path }, index) => {
-      const before = data[2 * index];
-      const after = data[2 * index + 1];
-      if (typeof before === 'string' && typeof after === 'string')
-        contents.set(path, { before, after });
+    const contents = new Map<string, string>();
+    shas.forEach((sha, index) => {
+      const blob = data[index];
+      if (typeof blob === 'string') contents.set(sha, blob);
     });
     return contents;
-  }, [data, targets]);
+  }, [data, shas]);
 }

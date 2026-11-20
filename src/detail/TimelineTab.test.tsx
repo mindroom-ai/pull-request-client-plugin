@@ -43,7 +43,6 @@ const pull = (over: Partial<PullRequest> = {}): PullRequest => ({
   mergeable: true,
   mergeableState: null,
   autoMerge: null,
-  baseSha: 'base-tip',
   headSha: HEAD,
   headRepo: 'mindroom-ai/mindroom-chat',
   headRepoId: 'R_chat',

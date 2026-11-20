@@ -32,7 +32,6 @@ export type PullRequest = {
   mergeable: boolean | null;
   mergeableState: string | null;
   autoMerge: { method: 'merge' | 'squash' | 'rebase' } | null;
-  baseSha: string;
   headSha: string;
   headRepo: string | null;
   /** The head repository's GraphQL id, which reading and deleting its branch take; '' without one. */
@@ -112,7 +111,11 @@ function errorKind(response: Response, hasToken: boolean): GitHubErrorKind {
   if (status === 404 || (status === 401 && !hasToken)) return 'notFound';
   if (status === 401) return 'badToken';
   if (status === 429) return 'rateLimited';
-  if (status === 403 && response.headers.get('x-ratelimit-remaining') === '0') return 'rateLimited';
+  if (
+    status === 403 &&
+    (response.headers.get('x-ratelimit-remaining') === '0' || response.headers.has('retry-after'))
+  )
+    return 'rateLimited';
   return 'failed';
 }
 
@@ -219,10 +222,26 @@ async function githubFetch(
 
 /** When GitHub's rate limit resets, in milliseconds since the epoch; in a minute when it says not. */
 function resetTime(response: Response): number {
-  const header = response.headers.get('x-ratelimit-reset');
-  const seconds = header ? Number(header) : NaN;
-  return Number.isFinite(seconds) ? seconds * 1000 : Date.now() + 60_000;
+  const now = Date.now();
+  const readSeconds = (name: string) => Number(response.headers.get(name) ?? NaN);
+  const remaining = response.headers.get('x-ratelimit-remaining');
+  const reset = readSeconds('x-ratelimit-reset');
+  const retryAfter = readSeconds('retry-after');
+  if (Number.isFinite(retryAfter)) {
+    const retryAt = now + retryAfter * 1000;
+    return remaining === '0' && Number.isFinite(reset) ? Math.max(retryAt, reset * 1000) : retryAt;
+  }
+  return Number.isFinite(reset) ? reset * 1000 : now + 60_000;
 }
+
+function activeRateLimit(token: GitHubAuth | undefined): RateLimit | undefined {
+  const { budget, who } = budgetOf(token);
+  const limit = rateLimits.get(budget);
+  return limit && limit.who === who && Date.now() < limit.resetsAt ? limit : undefined;
+}
+
+export const isGitHubRateLimited = (token: GitHubAuth): boolean =>
+  activeRateLimit(token) !== undefined;
 
 async function getJson(
   path: string,
@@ -231,11 +250,9 @@ async function getJson(
   accept: string = JSON_MEDIA
 ): Promise<unknown> {
   const withToken = Boolean(token);
+  const limit = activeRateLimit(token);
+  if (limit) throw new GitHubError('rateLimited', limit.status);
   const { budget, who } = budgetOf(token);
-  const limit = rateLimits.get(budget);
-  if (limit && limit.who === who && Date.now() < limit.resetsAt) {
-    throw new GitHubError('rateLimited', limit.status);
-  }
   rateLimits.delete(budget);
   let response: Response;
   try {
@@ -438,7 +455,6 @@ export async function fetchPullRequest(
     mergeable: typeof raw.mergeable === 'boolean' ? raw.mergeable : null,
     mergeableState: textOrNull(raw.mergeable_state),
     autoMerge: autoMerge(record(raw.auto_merge)?.merge_method),
-    baseSha: text(base?.sha),
     headSha: text(head?.sha),
     headRepo: textOrNull(record(head?.repo)?.full_name),
     headRepoId: text(record(head?.repo)?.node_id),
@@ -528,66 +544,30 @@ export function filePatch(file: PullRequestFile): string | null {
   return `${head}${file.patch}\n`;
 }
 
-const repoPath = (ref: Pick<PullRequestRef, 'owner' | 'repo'>) => `/repos/${ref.owner}/${ref.repo}`;
+const repoPath = (ref: PullRequestRef) => `/repos/${ref.owner}/${ref.repo}`;
 
-/** The old side of a GitHub PR's three-dot diff is the merge base, not the base tip. */
-export async function fetchComparisonBase(
+// Whole-file highlighting runs on the UI thread.
+export const MAX_DIFF_BLOB_BYTES = 128 * 1024;
+
+/** GitHub supplies this blob SHA beside the patch, even when the PR comes from a fork. */
+export async function fetchDiffBlob(
   ref: PullRequestRef,
-  baseSha: string,
-  headSha: string,
-  token: GitHubAuth | undefined,
-  signal?: AbortSignal
-): Promise<string | null> {
-  try {
-    const raw = record(
-      await getJson(
-        `${repoPath(ref)}/compare/${encodeURIComponent(baseSha)}...${encodeURIComponent(
-          headSha
-        )}?per_page=1`,
-        token,
-        signal
-      )
-    );
-    return textOrNull(record(raw?.merge_base_commit)?.sha) || null;
-  } catch {
-    return null;
-  }
-}
-
-// Whole-file highlighting runs on the UI thread. Keep decoding, retention and highlighting cheap.
-const MAX_DIFF_FILE_BYTES = 128 * 1024;
-
-/** Read a small UTF-8 file as JSON so direct GitHub and the MindRoom proxy behave alike. */
-export async function fetchFileContent(
-  ref: Pick<PullRequestRef, 'owner' | 'repo'>,
-  path: string,
   sha: string,
-  token: GitHubAuth | undefined,
+  token: GitHubAuth,
   signal?: AbortSignal
 ): Promise<string | null> {
+  if (!/^[0-9a-f]{40}$/i.test(sha)) return null;
   try {
-    const segments = path.split('/');
-    if (segments.some((segment) => segment === '' || segment === '.' || segment === '..'))
-      return null;
-    const encodedPath = segments.map(encodeURIComponent).join('/');
-    const raw = record(
-      await getJson(
-        `${repoPath(ref)}/contents/${encodedPath}?ref=${encodeURIComponent(sha)}`,
-        token,
-        signal
-      )
-    );
+    const raw = record(await getJson(`${repoPath(ref)}/git/blobs/${sha}`, token, signal));
     if (
-      raw?.type !== 'file' ||
-      raw.submodule_git_url != null ||
-      raw.encoding !== 'base64' ||
+      raw?.encoding !== 'base64' ||
       typeof raw.size !== 'number' ||
-      raw.size > MAX_DIFF_FILE_BYTES ||
+      raw.size > MAX_DIFF_BLOB_BYTES ||
       typeof raw.content !== 'string'
     )
       return null;
     const encoded = raw.content.replace(/\s/g, '');
-    if (encoded.length > Math.ceil(MAX_DIFF_FILE_BYTES / 3) * 4) return null;
+    if (encoded.length > Math.ceil(MAX_DIFF_BLOB_BYTES / 3) * 4) return null;
     const bytes = Uint8Array.from(atob(encoded), (byte) => byte.charCodeAt(0));
     if (bytes.length !== raw.size || bytes.includes(0)) return null;
     const decoded = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
@@ -950,21 +930,18 @@ export function fetchCommits(
   });
 }
 
-/** The files one commit changed and the first parent GitHub diffs it against. */
+/** The files one commit changed, shaped like the pull request's. */
 export async function fetchCommitFiles(
   ref: PullRequestRef,
   sha: string,
   token: GitHubAuth | undefined,
   signal?: AbortSignal
-): Promise<{ files: PullRequestFile[]; parentSha: string | null }> {
+): Promise<PullRequestFile[]> {
   const raw = record(
     await getJson(`${repoPath(ref)}/commits/${encodeURIComponent(sha)}`, token, signal)
   );
   if (!raw) throw new GitHubError('failed', 200);
-  return {
-    files: mapFiles(raw.files, `https://github.com/${ref.owner}/${ref.repo}/commit/${sha}`),
-    parentSha: textOrNull(record(Array.isArray(raw.parents) ? raw.parents[0] : null)?.sha),
-  };
+  return mapFiles(raw.files, `https://github.com/${ref.owner}/${ref.repo}/commit/${sha}`);
 }
 
 export type MergeMethod = 'merge' | 'squash' | 'rebase';

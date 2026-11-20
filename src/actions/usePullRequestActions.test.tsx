@@ -30,7 +30,6 @@ const pull: PullRequest = {
   mergeable: true,
   mergeableState: 'clean',
   autoMerge: null,
-  baseSha: 'base-tip',
   headSha: 'head7',
   headRepo: 'o/r',
   headRepoId: 'R_or',

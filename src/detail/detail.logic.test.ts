@@ -105,7 +105,6 @@ const pullRequest: PullRequest = {
   mergeable: true,
   mergeableState: 'clean',
   autoMerge: null,
-  baseSha: 'base-tip',
   headSha: 'head',
   headRepo: 'a/b',
   headRepoId: 'R_ab',
