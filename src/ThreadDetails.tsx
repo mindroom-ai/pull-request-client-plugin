@@ -45,8 +45,14 @@ const PATH_MAX = 40;
 
 // A hover shows what GitHub answered a chip, however old: only a pull request it has no answer for
 // yet is asked for, so moving the pointer over cards spends none of the hourly limit. A refusal is an
-// answer too: without `retryOnMount` every hover would ask again for a pull request GitHub refused.
-export const ANSWERED_ONLY = { ...NO_FOCUS_REFETCH, refetchOnMount: false, retryOnMount: false };
+// answer too: without `retryOnMount` every hover would ask again for a pull request GitHub refused,
+// and the network coming back asks nothing either. (An answer the cache dropped is asked for again.)
+export const ANSWERED_ONLY = {
+  ...NO_FOCUS_REFETCH,
+  refetchOnMount: false,
+  retryOnMount: false,
+  refetchOnReconnect: false,
+};
 
 // How often the banner's button reads again a pull request that is still open or a draft.
 const UNSETTLED_INTERVAL = 5 * 60_000;

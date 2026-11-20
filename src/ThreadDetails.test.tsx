@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { onlineManager, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { Room } from 'matrix-js-sdk';
+import { act } from 'react-dom/test-utils';
 import { renderPluginComponent } from '@mindroom/client-sdk/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import plugin from './index';
@@ -211,6 +212,13 @@ describe('PullRequestLinkHoverCard', () => {
     await vi.waitFor(() => expect(client.isFetching()).toBe(0));
     expect(fetchMock.mock.calls.length).toBe(1);
     expect(second.container.textContent).toBe('example-repo #123');
+    // Nor when the network comes back while it shows.
+    await act(async () => {
+      onlineManager.setOnline(false);
+      onlineManager.setOnline(true);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(fetchMock.mock.calls.length).toBe(1);
   });
 });
 
