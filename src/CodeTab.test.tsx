@@ -531,11 +531,38 @@ describe('CodeTab', () => {
       expect(blobCalls()).toEqual([endpoint + otherSha, endpoint + sha]);
     });
 
-    it('leaves anonymous files patch-only even in the virtual window', async () => {
-      const tab = await show({ files: [testFile], pullRequest: request });
+    const observedBlobs = (client: QueryClient) =>
+      client
+        .getQueryCache()
+        .findAll({ queryKey: ['pull-requests', 'blob'] })
+        .flatMap((query) => (query.getObserversCount() > 0 ? [query.queryKey] : []));
+
+    it('leaves anonymous files patch-only with no blob observers even in the virtual window', async () => {
+      const client = new QueryClient();
+      const tab = await show({ files: [testFile], pullRequest: request }, client);
       await setInWindow(greenhousePath);
       expect(tab.getByTestId(`partial:${greenhousePath}`)).toBeTruthy();
       expect(blobCalls()).toEqual([]);
+      expect(observedBlobs(client)).toEqual([]);
+    });
+
+    it('observes only eligible blobs in the virtual window and keeps hydrated diffs after scrolling out', async () => {
+      localStorage.setItem(tokenKey, 'e2e-token');
+      const client = new QueryClient();
+      const folded = file({ ...testFile, path: 'folded.py', sha: 'c'.repeat(40) });
+      localStorage.setItem(markKey, JSON.stringify({ [folded.path]: fnv1a32(greenhousePatch) }));
+      fetchMock.mockImplementation(async () => response());
+      const tab = await show({ files: [testFile, other, folded], pullRequest: request }, client);
+      expect(observedBlobs(client)).toEqual([]);
+      await setInWindow(folded.path);
+      await setInWindow(greenhousePath);
+      await tab.findByTestId(`complete:${greenhousePath}`);
+      expect(observedBlobs(client)).toEqual([blobKey(sha)]);
+      const hydrated = itemOf(greenhousePath)!.fileDiff;
+      await setInWindow(greenhousePath, 'unmount');
+      expect(observedBlobs(client)).toEqual([]);
+      expect(itemOf(greenhousePath)!.fileDiff).toBe(hydrated);
+      expect(tab.getByTestId(`complete:${greenhousePath}`)).toBeTruthy();
     });
 
     it('caps reads at four and skips a queued file that leaves the window', async () => {

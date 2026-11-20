@@ -943,21 +943,50 @@ describe('fetchDiffBlob', () => {
     expect(upstream.mock.calls.map(([url]) => url)).toEqual(['https://api.github.com/graphql']);
   });
 
-  it('honors a rate limit reported inside a successful GraphQL response', async () => {
-    const upstream = vi.fn(async (_url: string) =>
-      json({ errors: [{ type: 'RATE_LIMITED' }] }, { headers: { 'retry-after': '60' } })
-    );
-    const { server } = githubServer(upstream);
-    const via = { server, account: 'limited-gardener', disconnected: vi.fn(), unreadable: vi.fn() };
-    vi.useFakeTimers({ now: Date.UTC(2026, 0, 1), toFake: ['Date'] });
-    try {
-      await expect(fetchDiffBlob(ref, sha, via)).rejects.toMatchObject({ kind: 'rateLimited' });
-      await expect(fetchDiffBlob(ref, sha, via)).rejects.toMatchObject({ kind: 'rateLimited' });
-      expect(upstream.mock.calls).toEqual([['https://api.github.com/graphql', expect.any(Object)]]);
-    } finally {
-      vi.useRealTimers();
+  it.each([200, 403])(
+    'keeps a GraphQL preflight limit (%d) off REST and existing GraphQL reads',
+    async (status) => {
+      const filesPath = '/repos/a/b/pulls/1/files?per_page=100&page=1';
+      const upstream = vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.endsWith(filesPath)) return json([]);
+        if (String(init?.body).includes('DiffBlobSize')) {
+          return json(
+            { errors: [{ type: 'RATE_LIMITED' }] },
+            {
+              status,
+              headers: {
+                'x-ratelimit-remaining': '0',
+                'x-ratelimit-reset': String(Date.now() / 1000 + 60),
+              },
+            }
+          );
+        }
+        return json({ data: { repository: apiRepository } });
+      });
+      const { server, githubRequests } = githubServer(upstream);
+      const via = {
+        server,
+        account: `limited-gardener-${status}`,
+        disconnected: vi.fn(),
+        unreadable: vi.fn(),
+      };
+      vi.useFakeTimers({ now: Date.UTC(2026, 0, 1), toFake: ['Date'] });
+      try {
+        await expect(fetchDiffBlob(ref, sha, via)).rejects.toMatchObject({ kind: 'rateLimited' });
+        await expect(fetchDiffBlob(ref, sha, via)).rejects.toMatchObject({ kind: 'rateLimited' });
+        expect(githubRequests().map(({ path }) => path)).toEqual(['/graphql']);
+        await expect(fetchPullRequestFiles(ref, via)).resolves.toEqual([]);
+        expect((await fetchRepository('a', 'b', via)).canWrite).toBe(true);
+        expect(githubRequests().map(({ path }) => path)).toEqual([
+          '/graphql',
+          filesPath,
+          '/graphql',
+        ]);
+      } finally {
+        vi.useRealTimers();
+      }
     }
-  });
+  );
 
   it('reads small raw UTF-8 directly with the token', async () => {
     const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response('é\n'));

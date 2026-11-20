@@ -328,7 +328,7 @@ export const useCommitFiles = (ref: PullRequestRef | undefined, sha: string, ena
     fetchCommitFiles(r, sha, token, signal)
   );
 
-// Bound background reads across panels; a queued read can lose its last enabled observer.
+// Bound background reads across panels.
 const MAX_BLOB_READS = 4;
 let blobReads = 0;
 const waitingBlobReads: (() => void)[] = [];
@@ -347,6 +347,10 @@ async function withBlobRead(load: () => Promise<string | null>): Promise<string 
 
 const blobAnswers = (results: { data?: string | null }[]) => results.map(({ data }) => data);
 
+// Separate from PR/repository refreshes, but still under credential changes' namespace.
+const diffBlobKey = (ref: PullRequestRef, sha: string, access: AccessKey) =>
+  ['pull-requests', 'blob', lower(ref.owner), lower(ref.repo), sha, access] as const;
+
 export function useDiffBlobs(
   ref: PullRequestRef,
   shas: readonly string[],
@@ -354,48 +358,41 @@ export function useDiffBlobs(
 ): ReadonlyMap<string, string> {
   const access = useGitHubAccess();
   const client = useQueryClient();
+  const hasAccess = access.via !== undefined;
+  const active = hasAccess && !access.pending;
+  const watched = useMemo(() => (active ? [...enabledShas] : []), [active, enabledShas]);
   const data = useQueries({
-    queries: shas.map((sha) => {
-      // Separate from PR/repository refreshes, but still under credential changes' namespace.
-      const queryKey = [
-        'pull-requests',
-        'blob',
-        lower(ref.owner),
-        lower(ref.repo),
-        sha,
-        access.key,
-      ] as const;
-      return {
-        queryKey,
-        queryFn: ({ signal }: { signal: AbortSignal }) => {
-          const auth = access.authFor(access.key);
-          checkGitHubReadLimit(auth);
-          return withBlobRead(async () => {
-            signal.throwIfAborted();
-            if (!client.getQueryCache().find({ queryKey, exact: true })?.isActive()) {
-              await client.cancelQueries({ queryKey, exact: true });
-              signal.throwIfAborted();
-            }
-            // Check credentials again after waiting; getJson also rechecks the rate limit.
-            const current = access.authFor(access.key);
-            if (current === undefined) throw new GitHubError('badToken', 0);
-            return fetchDiffBlob(ref, sha, current, signal);
-          });
-        },
-        enabled: access.via !== undefined && !access.pending && enabledShas.has(sha),
-        staleTime: Infinity,
-        retry: false,
-        ...NO_FOCUS_REFETCH,
-      };
-    }),
+    queries: watched.map((sha) => ({
+      queryKey: diffBlobKey(ref, sha, access.key),
+      queryFn: ({ signal }: { signal: AbortSignal }) => {
+        checkGitHubReadLimit(access.authFor(access.key));
+        return withBlobRead(async () => {
+          // Removing the last observer aborts the signal, including for work still queued.
+          signal.throwIfAborted();
+          const current = access.authFor(access.key);
+          if (current === undefined) throw new GitHubError('badToken', 0);
+          return fetchDiffBlob(ref, sha, current, signal);
+        });
+      },
+      staleTime: Infinity,
+      retry: false,
+      ...NO_FOCUS_REFETCH,
+    })),
     combine: blobAnswers,
   });
   return useMemo(() => {
     const contents = new Map<string, string>();
-    shas.forEach((sha, index) => {
+    if (!hasAccess) return contents;
+    watched.forEach((sha, index) => {
       const blob = data[index];
       if (typeof blob === 'string') contents.set(sha, blob);
     });
+    // Keep already hydrated files when they leave the window, without subscribing to them.
+    for (const sha of shas) {
+      if (contents.has(sha)) continue;
+      const blob = client.getQueryData<string | null>(diffBlobKey(ref, sha, access.key));
+      if (typeof blob === 'string') contents.set(sha, blob);
+    }
     return contents;
-  }, [data, shas]);
+  }, [access.key, client, data, hasAccess, ref, shas, watched]);
 }

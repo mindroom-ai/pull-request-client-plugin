@@ -133,6 +133,7 @@ export type GitHubViaServer = {
 export type GitHubAuth = string | GitHubViaServer;
 
 type RateLimit = { who: string; status: number; resetsAt: number };
+type ReadResource = 'core' | 'graphql';
 
 // The rate limit GitHub last answered, for requests with a token, for those through each MindRoom
 // server, and for those without either (which it counts against the address), while it lasts.
@@ -142,10 +143,14 @@ type RateLimit = { who: string; status: number; resetsAt: number };
 const rateLimits = new Map<string, RateLimit>();
 
 /** The budget a request spends, and who within it: a token's own, or a server's. */
-function budgetOf(token: GitHubAuth | undefined): { budget: string; who: string } {
-  if (token === undefined) return { budget: 'anonymous', who: '' };
-  if (typeof token === 'string') return { budget: 'token', who: token };
-  return { budget: `server:${token.server.origin}`, who: token.account };
+function budgetOf(
+  token: GitHubAuth | undefined,
+  resource: ReadResource
+): { budget: string; who: string } {
+  // Primary quotas are separate. Keep ambiguous throttling replies scoped to the API that sent them.
+  if (token === undefined) return { budget: `${resource}:anonymous`, who: '' };
+  if (typeof token === 'string') return { budget: `${resource}:token`, who: token };
+  return { budget: `${resource}:server:${token.server.origin}`, who: token.account };
 }
 
 type GitHubInit = {
@@ -233,15 +238,22 @@ function resetTime(response: Response): number {
     : now + 60_000;
 }
 
-export function checkGitHubReadLimit(token: GitHubAuth | undefined): void {
-  const { budget, who } = budgetOf(token);
+export function checkGitHubReadLimit(
+  token: GitHubAuth | undefined,
+  resource: ReadResource = 'core'
+): void {
+  const { budget, who } = budgetOf(token, resource);
   const limit = rateLimits.get(budget);
   if (limit && limit.who === who && Date.now() < limit.resetsAt)
     throw new GitHubError('rateLimited', limit.status);
 }
 
-function rateLimited(token: GitHubAuth | undefined, response: Response): GitHubError {
-  const { budget, who } = budgetOf(token);
+function rateLimited(
+  token: GitHubAuth | undefined,
+  resource: ReadResource,
+  response: Response
+): GitHubError {
+  const { budget, who } = budgetOf(token, resource);
   rateLimits.set(budget, { who, status: response.status, resetsAt: resetTime(response) });
   return new GitHubError('rateLimited', response.status);
 }
@@ -251,8 +263,9 @@ async function readGitHub(
   path: string,
   init: GitHubInit
 ): Promise<Response> {
-  checkGitHubReadLimit(token);
-  rateLimits.delete(budgetOf(token).budget);
+  const resource = path === '/graphql' ? 'graphql' : 'core';
+  checkGitHubReadLimit(token, resource);
+  rateLimits.delete(budgetOf(token, resource).budget);
   const { signal } = init;
   let response: Response;
   try {
@@ -272,7 +285,7 @@ async function readGitHub(
       const body = record(await response.json().catch(() => null));
       if (/secondary rate limit/i.test(text(body?.message))) kind = 'rateLimited';
     }
-    if (kind === 'rateLimited') throw rateLimited(token, response);
+    if (kind === 'rateLimited') throw rateLimited(token, resource, response);
     throw new GitHubError(kind, response.status);
   }
   return response;
@@ -604,7 +617,8 @@ async function readProxiedDiffBlob(
   });
   const answer = record(await metadata.json());
   const errors = list(answer?.errors);
-  if (errors.some((error) => error.type === 'RATE_LIMITED')) throw rateLimited(token, metadata);
+  if (errors.some((error) => error.type === 'RATE_LIMITED'))
+    throw rateLimited(token, 'graphql', metadata);
   if (errors.length > 0) {
     if (errors.every((error) => error.type === 'NOT_FOUND')) return null;
     throw new GitHubError('failed', metadata.status);
