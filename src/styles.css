@@ -1147,7 +1147,11 @@
   color: var(--pr-muted);
 }
 
-.mrpr-spin {
+/* Turn the drawing inside the icon, not the icon's box: a turning box sticks out past its row at 45°,
+   and in a scrolling list (the checks popover) that toggles the scrollbar four times a second. */
+.mrpr-spin > * {
+  transform-box: view-box;
+  transform-origin: center;
   animation: mrpr-spin 1s linear infinite;
 }
 @keyframes mrpr-spin {
@@ -1156,7 +1160,7 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .mrpr-spin {
+  .mrpr-spin > * {
     animation: none;
   }
 }

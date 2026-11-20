@@ -919,6 +919,63 @@ test("a chip on a card opens the thread and its pull request; the banner's menu 
   expect(warnings).toEqual([]);
 });
 
+test("the header's popovers hold still: the lines tooltip under the pointer, the checks list beside a spinner", async ({
+  page,
+}) => {
+  test.setTimeout(4 * 60_000);
+  const unanswered = await stubGitHub(page);
+  await openRoom(page);
+  await cardChips(page, roots.sessions).first().click();
+  await expect(panel(page).locator('.mrpr-panel-title')).toHaveText(PULLS.sessionStore.title, {
+    timeout: 30_000,
+  });
+
+  // The lines tooltip lets the pointer through to the stat, so a move over it keeps it open.
+  const stat = panel(page).getByRole('button', { name: /^Lines changed/ });
+  const box = (await stat.boundingBox())!;
+  const [x, y] = [box.x + box.width / 2, box.y + box.height / 2];
+  await page.mouse.move(x, y);
+  const tooltip = page.getByRole('dialog', { name: /^Lines changed/ });
+  await expect(tooltip).toBeVisible();
+  for (const dx of [-3, -1, 1, 3, 0]) {
+    await page.mouse.move(x + dx, y);
+    await page.waitForTimeout(50);
+    expect(
+      await page.evaluate(
+        ([px, py]) => !!document.elementFromPoint(px, py)?.closest('.mrpr-stat-button'),
+        [x + dx, y]
+      )
+    ).toBe(true);
+    await expect(tooltip).toHaveCount(1, { timeout: 0 });
+  }
+  await shot(page, 'lines-tooltip', { keepPointer: true });
+  await page.mouse.move(0, 0);
+  await expect(tooltip).toHaveCount(0);
+
+  // The running check's spinner turns inside its row, so the list never grows a scrollbar.
+  await panel(page)
+    .getByRole('button', { name: /^Open checks/ })
+    .click();
+  const list = page.locator('.mrpr-checks');
+  await expect(list.locator('.mrpr-spin')).toHaveCount(1);
+  const overflowed = await list.evaluate(
+    (element) =>
+      new Promise<number>((resolve) => {
+        let frames = 0;
+        let over = 0;
+        const tick = () => {
+          if (element.scrollHeight > element.clientHeight) over += 1;
+          frames += 1;
+          if (frames < 60) requestAnimationFrame(tick);
+          else resolve(over);
+        };
+        requestAnimationFrame(tick);
+      })
+  );
+  expect(overflowed).toBe(0);
+  expect(unanswered).toEqual([]);
+});
+
 // One changed file, so that the Code tab has a diff and a file tree.
 const ZOOM_FILE = {
   filename: 'src/session/store.ts',

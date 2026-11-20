@@ -72,7 +72,11 @@ export function ChangeBreakdownStat({
         <PullRequestDiffStat additions={additions} deletions={deletions} />
       </button>
       {query.isError ? null : (
+        // folds' PopOut layer covers the window. A tooltip lets the pointer through it, as the app's
+        // TipButton does: else the layer takes the pointer from the stat, whose pointer leave closes
+        // the tooltip, and the next move opens it again, over and over.
         <PopOut
+          style={{ pointerEvents: 'none' }}
           anchor={anchor}
           position="Bottom"
           align="End"

@@ -604,6 +604,10 @@ describe('PullRequestPanel', () => {
         'Code+5-1Tests+3-0Generated+10-10Docs+2-2Total+20-13'
       );
       expect(filesRequests()).toHaveLength(1);
+      // folds' PopOut layer covers the window. Over the stat it would take the pointer, the stat's
+      // pointer leave would close the tooltip and the next move open it again: a flicker.
+      const layer = document.querySelector('.mrpr-breakdown')?.closest('[style*="pointer-events"]');
+      expect((layer as HTMLElement | null)?.style.pointerEvents).toBe('none');
     });
 
     it('shows the counts and the order toggle on Timeline, with approvals of the head only', async () => {
