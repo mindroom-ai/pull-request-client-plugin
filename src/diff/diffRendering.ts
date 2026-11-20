@@ -7,7 +7,7 @@ import {
   parsePatchFiles,
   type FileDiffMetadata,
 } from '@pierre/diffs';
-import { MAX_DIFF_BLOB_BYTES, type PullRequestFile } from '../github';
+import { GIT_LFS_POINTER_HEADER, MAX_DIFF_BLOB_BYTES, type PullRequestFile } from '../github';
 
 export const DIFF_THEME_NAMES = {
   light: 'pierre-light',
@@ -146,13 +146,26 @@ export function reconstructOldFile(
       const hasMarker = rows[row + 1] === NO_NEWLINE;
       const text = line.slice(1) + (hasMarker ? '' : '\n');
       if (sign !== '+') {
-        if (oldEOF || oldRows >= oldCount) return null;
+        if (
+          oldEOF ||
+          oldRows >= oldCount ||
+          text === '' ||
+          text.includes('\0') ||
+          file.deletionLines[hunk.deletionLineIndex + oldRows] !== text
+        )
+          return null;
         old.push(text);
         oldRows += 1;
         oldMarker = oldEOF = hasMarker;
       }
       if (sign !== '-') {
-        if (newEOF || newRows >= newCount || lines[newStart + newRows] !== text) return null;
+        if (
+          newEOF ||
+          newRows >= newCount ||
+          lines[newStart + newRows] !== text ||
+          file.additionLines[hunk.additionLineIndex + newRows] !== text
+        )
+          return null;
         newRows += 1;
         newMarker = newEOF = hasMarker;
       }
@@ -179,6 +192,7 @@ export function reconstructOldFile(
     return null;
   old.push(lines.slice(newEnd).join(''));
   const contents = old.join('');
+  if (contents.startsWith(GIT_LFS_POINTER_HEADER)) return null;
   return new TextEncoder().encode(contents).length <= MAX_DIFF_BLOB_BYTES ? contents : null;
 }
 

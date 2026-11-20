@@ -58,6 +58,11 @@ describe('reconstructOldFile', () => {
     expect(reconstructOldFile(parse(patch), source(patch), blob)).toBeNull();
   });
 
+  it('rejects a parsed diff whose source is a different patch with the same coordinates', () => {
+    const different = greenhousePatch.replace('-COUNT = 1', '-COUNT = 0');
+    expect(reconstructOldFile(parse(different), source(), greenhouseAfter)).toBeNull();
+  });
+
   it.each([
     [1, 2],
     [2, 1],
@@ -110,6 +115,16 @@ describe('reconstructOldFile', () => {
   it('rejects an old-side EOF marker before unchanged tail lines', () => {
     const patch = '@@ -1 +1 @@\n-old\n\\ No newline at end of file\n+new';
     expect(reconstructOldFile(parse(patch), source(patch, 1, 1), 'new\nstem\n')).toBeNull();
+  });
+
+  it('rejects a phantom empty old line marked as missing a newline', () => {
+    const patch = ['@@ -1 +1 @@', '-', '\\ No newline at end of file', '+bud'].join('\n');
+    expect(reconstructOldFile(parse(patch), source(patch, 1, 1), 'bud\n')).toBeNull();
+  });
+
+  it('keeps a change from an LFS pointer patch-only even with a text blob', () => {
+    const patch = '@@ -1 +1 @@\n-version https://git-lfs.github.com/spec/v1\n+bud';
+    expect(reconstructOldFile(parse(patch), source(patch, 1, 1), 'bud\n')).toBeNull();
   });
 
   it('caps the reconstructed side by UTF-8 byte length', () => {

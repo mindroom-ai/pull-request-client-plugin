@@ -904,6 +904,7 @@ describe('the lists', () => {
 
 describe('fetchDiffBlob', () => {
   const sha = 'b'.repeat(40);
+  const oversized = 'a'.repeat(128 * 1024 + 1);
 
   it('reads the immutable Git Data blob through MindRoom', async () => {
     const upstream = vi.fn((url: string) =>
@@ -924,7 +925,7 @@ describe('fetchDiffBlob', () => {
   it.each([
     ['404 (including submodule commit IDs)', new Response(null, { status: 404 })],
     ['403', new Response(null, { status: 403 })],
-    ['oversized content', { size: 1_000_000, encoding: 'base64', content: 'YQo=' }],
+    ['oversized content', { size: oversized.length, encoding: 'base64', content: btoa(oversized) }],
     ['binary data with a NUL', { size: 2, encoding: 'base64', content: 'AGE=' }],
     ['invalid UTF-8', { size: 1, encoding: 'base64', content: '/w==' }],
     ['a malformed response', { size: 2, encoding: 'base64', content: 'YQ==' }],
@@ -941,12 +942,17 @@ describe('fetchDiffBlob', () => {
     expect(await fetchDiffBlob(ref, sha, 'blob-fixture')).toBeNull();
   });
 
-  it('stops requesting blobs after GitHub replies with a secondary rate limit', async () => {
-    const fetchMock = stubRoutes({
-      '/git/blobs/': new Response(null, { status: 403, headers: { 'retry-after': '60' } }),
-    });
-    expect(await fetchDiffBlob(ref, sha, 'limited-blob-fixture')).toBeNull();
-    expect(await fetchDiffBlob(ref, 'c'.repeat(40), 'limited-blob-fixture')).toBeNull();
+  it.each([
+    ['with Retry-After', new Response(null, { status: 403, headers: { 'retry-after': '60' } })],
+    [
+      'without Retry-After',
+      json({ message: 'You have exceeded a secondary rate limit.' }, { status: 403 }),
+    ],
+  ])('stops requesting blobs after a secondary rate limit %s', async (label, answer) => {
+    const token = `limited-blob-fixture-${label}`;
+    const fetchMock = stubRoutes({ '/git/blobs/': answer });
+    expect(await fetchDiffBlob(ref, sha, token)).toBeNull();
+    expect(await fetchDiffBlob(ref, 'c'.repeat(40), token)).toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

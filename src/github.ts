@@ -231,7 +231,10 @@ function resetTime(response: Response): number {
     const retryAt = now + retryAfter * 1000;
     return remaining === '0' && Number.isFinite(reset) ? Math.max(retryAt, reset * 1000) : retryAt;
   }
-  return Number.isFinite(reset) ? reset * 1000 : now + 60_000;
+  // A second limit can apply while the primary budget still has requests left.
+  return Number.isFinite(reset) && (remaining === null || remaining === '0')
+    ? reset * 1000
+    : now + 60_000;
 }
 
 function activeRateLimit(token: GitHubAuth | undefined): RateLimit | undefined {
@@ -267,7 +270,11 @@ async function getJson(
     throw new GitHubError('failed', 0);
   }
   if (!response.ok) {
-    const kind = errorKind(response, withToken);
+    let kind = errorKind(response, withToken);
+    if (kind === 'failed' && response.status === 403) {
+      const body = record(await response.json().catch(() => null));
+      if (/secondary rate limit/i.test(text(body?.message))) kind = 'rateLimited';
+    }
     if (kind === 'rateLimited') {
       rateLimits.set(budget, { who, status: response.status, resetsAt: resetTime(response) });
     }
@@ -548,6 +555,7 @@ const repoPath = (ref: PullRequestRef) => `/repos/${ref.owner}/${ref.repo}`;
 
 // Whole-file highlighting runs on the UI thread.
 export const MAX_DIFF_BLOB_BYTES = 128 * 1024;
+export const GIT_LFS_POINTER_HEADER = 'version https://git-lfs.github.com/spec/v1';
 
 /** GitHub supplies this blob SHA beside the patch, even when the PR comes from a fork. */
 export async function fetchDiffBlob(
@@ -571,7 +579,7 @@ export async function fetchDiffBlob(
     const bytes = Uint8Array.from(atob(encoded), (byte) => byte.charCodeAt(0));
     if (bytes.length !== raw.size || bytes.includes(0)) return null;
     const decoded = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
-    return decoded.startsWith('version https://git-lfs.github.com/spec/v1') ? null : decoded;
+    return decoded.startsWith(GIT_LFS_POINTER_HEADER) ? null : decoded;
   } catch {
     return null;
   }

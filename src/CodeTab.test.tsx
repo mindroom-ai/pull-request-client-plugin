@@ -529,6 +529,34 @@ describe('CodeTab', () => {
       expect(blobCalls()).toEqual([]);
     });
 
+    it('caps reads at four and skips a queued file that leaves the window', async () => {
+      localStorage.setItem(tokenKey, 'e2e-token');
+      const files = Array.from({ length: 6 }, (_, index) =>
+        file({
+          ...testFile,
+          path: `bed_${index}.py`,
+          sha: `${index + 1}`.repeat(40),
+        })
+      );
+      let release!: () => void;
+      const waiting = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      fetchMock.mockImplementation(async () => {
+        await waiting;
+        return response();
+      });
+      const tab = await show({ files, pullRequest: request });
+      for (const entry of files) await setInWindow(entry.path);
+      expect(blobCalls()).toEqual(files.slice(0, 4).map(({ sha }) => endpoint + sha));
+      await setInWindow(files[4]!.path, 'unmount');
+      await act(async () => release());
+      await tab.findByTestId(`complete:${files[5]!.path}`);
+      expect(blobCalls()).toEqual(
+        [...files.slice(0, 4), files[5]!].map(({ sha }) => endpoint + sha)
+      );
+    });
+
     it('keeps other prepared diffs when one blob arrives or a viewed mark changes', async () => {
       localStorage.setItem(tokenKey, 'e2e-token');
       let release!: (value: Response) => void;
