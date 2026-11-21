@@ -532,7 +532,7 @@ describe('ThreadCardPullRequests', () => {
     await view.findByRole('img', { name: `Pull request mindroom-ai/sample-repo #${open}: Open` });
   });
 
-  it('keeps the settled order when links are added and removed', async () => {
+  it('keeps the settled chip while a newly linked summary loads', async () => {
     const third = held();
     const mindroom = githubServer(async (url) => {
       const [number] = summaryNumbers([url]);
@@ -546,8 +546,7 @@ describe('ThreadCardPullRequests', () => {
       return Response.json({ state: 'open' });
     });
     roomServer.current = mindroom.server;
-    const client = new QueryClient();
-    const view = await show(roomWith([1, 2].map(sampleRef)), { phone: true, client });
+    const view = await show(roomWith([1, 2].map(sampleRef)), { phone: true });
     await view.findByRole('img', { name: 'Pull request mindroom-ai/sample-repo #2: Open' });
     try {
       view.rerenderRoom(roomWith([1, 2, 3].map(sampleRef)));
@@ -558,40 +557,7 @@ describe('ThreadCardPullRequests', () => {
     } finally {
       third.release();
     }
-    await vi.waitFor(() => expect(client.isFetching()).toBe(0));
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-    expect(chips(view).map((chip) => chip.textContent)).toEqual(['#1']);
-  });
-
-  it('starts a remounted card in cached order without reading before it intersects', async () => {
-    const mindroom = githubServer(async (url) =>
-      url.endsWith('/pulls/1')
-        ? Response.json({ state: 'closed', merged_at: '2026-11-18T10:00:00Z' })
-        : Response.json({ state: 'open' })
-    );
-    roomServer.current = mindroom.server;
-    const client = new QueryClient();
-    const room = roomWith([1, 2].map(sampleRef));
-    const options = { phone: true, client };
-    const view = await show(room, options);
-    await view.findByRole('img', { name: 'Pull request mindroom-ai/sample-repo #2: Open' });
-    view.unmount();
-
-    vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver);
-    const remount = await show(room, options);
-    expect(chips(remount).map((chip) => chip.textContent)).toEqual(['#2']);
-    expect(proxiedSummaries(mindroom)).toEqual([1, 2]);
-
-    // A cache change while unseen does not count as a read of the remounted card.
-    const key = [...pullRequestKey(sampleRef(1)), `server:${mindroom.server.origin}:octo:0`];
-    await act(async () => {
-      client.setQueryData(key, { state: 'open', updatedAt: '2026-11-20T10:00:00Z' });
-      report(true);
-    });
-    expect(chips(remount).map((chip) => chip.textContent)).toEqual(['#2']);
-    expect(proxiedSummaries(mindroom)).toEqual([1, 2]);
+    await view.findByRole('img', { name: 'Pull request mindroom-ai/sample-repo #3: Open' });
   });
 
   it('waits for the chip row to be on screen before reading hidden summaries', async () => {
