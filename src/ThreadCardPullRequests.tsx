@@ -80,7 +80,7 @@ function CardChips({
   } else if (previous) {
     // Keep the last settled order among the current links and leave new links at the end.
     const rank = (ref: PullRequestRef) => previous.get(pullRequestUrl(ref)) ?? previous.size;
-    ordered = pullRequests.toSorted((a, b) => rank(a) - rank(b));
+    ordered = [...pullRequests].sort((a, b) => rank(a) - rank(b));
   }
   useEffect(() => {
     if (settled) {
