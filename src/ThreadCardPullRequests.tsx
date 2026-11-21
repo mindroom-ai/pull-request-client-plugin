@@ -2,7 +2,7 @@
 // the open thread's menu order, with open pull requests first, and the count of the rest. A thread
 // without pull requests shows its worktree's branch instead. The app draws this inside the card's
 // button, so nothing here is a control or takes the focus.
-import { useState, type MouseEvent } from 'react';
+import { useEffect, useRef, useState, type MouseEvent } from 'react';
 import type { Room } from 'matrix-js-sdk';
 import {
   usePluginTranslation,
@@ -61,20 +61,32 @@ function CardChips({
   const { navigateRoomThread } = useRoomNavigate();
   const [element, setElement] = useState<HTMLElement | null>(null);
   const seen = useOnScreenOnce(element);
-  const { via } = useGitHubAccess();
+  const { via, pending } = useGitHubAccess();
   // Anonymously, use cached answers for the order and leave the hourly limit for the shown chips.
   const cacheOnly = via === undefined;
   const queries = usePullRequests(seen ? pullRequests : [], {
     ...CHIP_REFETCH,
     ...(cacheOnly && { enabled: false }),
     refetchOnMount: unlessRefused,
-    retryOnMount: false,
+    retryOnMount: unlessRefused,
+    refetchOnReconnect: unlessRefused,
   });
-  // Keep link order while summaries load, so partial answers do not move the chips.
-  const ordered =
-    !seen || queries.some((query) => query.isLoading)
-      ? pullRequests
-      : orderPullRequests(pullRequests, queries.map(answerOf));
+  const settled = seen && !pending && (cacheOnly || !queries.some((query) => query.isLoading));
+  const settledRanks = useRef<ReadonlyMap<string, number>>();
+  const previous = settledRanks.current;
+  let ordered = pullRequests;
+  if (settled) {
+    ordered = orderPullRequests(pullRequests, queries.map(answerOf));
+  } else if (previous) {
+    // Keep the last settled order among the current links and leave new links at the end.
+    const rank = (ref: PullRequestRef) => previous.get(pullRequestUrl(ref)) ?? previous.size;
+    ordered = pullRequests.toSorted((a, b) => rank(a) - rank(b));
+  }
+  useEffect(() => {
+    if (settled) {
+      settledRanks.current = new Map(ordered.map((ref, index) => [pullRequestUrl(ref), index]));
+    }
+  }, [ordered, settled]);
   const chips = ordered.slice(0, phone ? 1 : 2);
   const more = pullRequests.length - chips.length;
   const moreLabel = t('threadPullRequests.moreLabel', { count: more });

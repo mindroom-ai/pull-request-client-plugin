@@ -65,15 +65,20 @@ const show = async (
     client = new QueryClient({ defaultOptions: { queries: { retry: false } } }),
   }: { onParentClick?: () => void; phone?: boolean; client?: QueryClient } = {}
 ) => {
-  return renderPluginComponent(
+  const card = (room: Room) => (
     <QueryClientProvider client={client}>
       {/* The card's button, which opens the thread on a click that reaches it. */}
       <div data-testid="card" onClick={onParentClick}>
         <ThreadCardPullRequests room={room} threadId={THREAD} />
       </div>
-    </QueryClientProvider>,
-    { id: 'pull-requests', plugin, screenSize: phone ? 'Mobile' : 'Desktop' }
+    </QueryClientProvider>
   );
+  const view = await renderPluginComponent(card(room), {
+    id: 'pull-requests',
+    plugin,
+    screenSize: phone ? 'Mobile' : 'Desktop',
+  });
+  return { ...view, rerenderRoom: (room: Room) => view.rerender(card(room)) };
 };
 
 const chips = (view: Awaited<ReturnType<typeof show>>) =>
@@ -232,8 +237,13 @@ describe('ThreadCardPullRequests', () => {
     const mindroom = githubServer(async (url) => {
       if (url.includes('/pulls/')) {
         await summariesHeld;
-        if (url.endsWith(`/pulls/${hidden.number}`)) return Response.json({ state: 'closed' });
-        return Response.json({ title: 'Sample change', state: 'open', head: { sha: 'abc123' } });
+        const isHidden = url.endsWith(`/pulls/${hidden.number}`);
+        return Response.json({
+          title: 'Sample change',
+          state: 'open',
+          head: { sha: isHidden ? 'abc999' : 'abc123' },
+          updated_at: isHidden ? '2026-11-18T10:00:00Z' : '2026-11-19T10:00:00Z',
+        });
       }
       await checksHeld;
       if (url.includes('/check-runs?')) {
@@ -273,6 +283,7 @@ describe('ThreadCardPullRequests', () => {
     const requests = mindroom.githubRequests();
     expect(proxiedSummaries(mindroom)).toContain(hidden.number);
     expect(requests).toHaveLength(3 * links.length + 1);
+    expect(requests.some(({ path }) => path.includes('/commits/abc999/'))).toBe(false);
     expect(requests.every(({ method }) => method === 'GET')).toBe(true);
     expect(
       mindroom.server.request.mock.calls.filter(
@@ -521,6 +532,34 @@ describe('ThreadCardPullRequests', () => {
     await view.findByRole('img', { name: `Pull request mindroom-ai/sample-repo #${open}: Open` });
   });
 
+  it('keeps the settled chip while a newly linked summary loads', async () => {
+    const third = held();
+    const mindroom = githubServer(async (url) => {
+      const [number] = summaryNumbers([url]);
+      if (number === 1) {
+        return Response.json({ state: 'closed', merged_at: '2026-11-18T10:00:00Z' });
+      }
+      if (number === 3) {
+        await third.reply;
+        return Response.json({ state: 'open', updated_at: '2026-11-20T10:00:00Z' });
+      }
+      return Response.json({ state: 'open' });
+    });
+    roomServer.current = mindroom.server;
+    const view = await show(roomWith([1, 2].map(sampleRef)), { phone: true });
+    await view.findByRole('img', { name: 'Pull request mindroom-ai/sample-repo #2: Open' });
+    try {
+      view.rerenderRoom(roomWith([1, 2, 3].map(sampleRef)));
+      await vi.waitFor(() => expect(proxiedSummaries(mindroom)).toContain(3));
+      expect(chips(view).map((chip) => chip.textContent)).toEqual(['#2']);
+      view.rerenderRoom(roomWith([1, 3].map(sampleRef)));
+      expect(chips(view).map((chip) => chip.textContent)).toEqual(['#1']);
+    } finally {
+      third.release();
+    }
+    await view.findByRole('img', { name: 'Pull request mindroom-ai/sample-repo #3: Open' });
+  });
+
   it('waits for the chip row to be on screen before reading hidden summaries', async () => {
     vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver);
     const mindroom = githubServer(async () => Response.json({ state: 'closed' }));
@@ -539,16 +578,21 @@ describe('ThreadCardPullRequests', () => {
     expect(proxiedSummaries(mindroom)).toEqual([1, 2]);
   });
 
-  it.each([false, true])(
-    'does not retry a refused hidden summary on remount (prior answer: %s)',
-    async (priorAnswer) => {
+  it.each([
+    { status: 404, priorAnswer: false },
+    { status: 404, priorAnswer: true },
+    { status: 502, priorAnswer: false },
+  ])(
+    'handles a hidden $status on remount and reconnect (prior answer: $priorAnswer)',
+    async ({ status, priorAnswer }) => {
+      let failing = true;
       const mindroom = githubServer(async (url) =>
-        url.endsWith('/pulls/2')
-          ? Response.json({}, { status: 404 })
+        url.endsWith('/pulls/2') && failing
+          ? Response.json({}, { status })
           : Response.json({ state: 'open' })
       );
       roomServer.current = mindroom.server;
-      const client = new QueryClient();
+      const client = new QueryClient({ defaultOptions: { queries: { retryDelay: 0 } } });
       const key = [...pullRequestKey(sampleRef(2)), `server:${mindroom.server.origin}:octo:0`];
       if (priorAnswer) {
         client.setQueryData(key, { state: 'closed' }, { updatedAt: Date.now() - STALE_TIME - 1 });
@@ -557,10 +601,19 @@ describe('ThreadCardPullRequests', () => {
       const options = { phone: true, client };
       const view = await show(room, options);
       await vi.waitFor(() => expect(client.getQueryState(key)?.status).toBe('error'));
+      const hiddenReads = () => proxiedSummaries(mindroom).filter((number) => number === 2).length;
+      const expected = hiddenReads() + (status === 502 ? 1 : 0);
       view.unmount();
+      failing = false;
       await show(room, options);
       await vi.waitFor(() => expect(client.isFetching()).toBe(0));
-      expect(proxiedSummaries(mindroom).toSorted()).toEqual([1, 2]);
+      expect(hiddenReads()).toBe(expected);
+      await act(async () => {
+        onlineManager.setOnline(false);
+        onlineManager.setOnline(true);
+      });
+      await vi.waitFor(() => expect(client.isFetching()).toBe(0));
+      expect(hiddenReads()).toBe(expected);
     }
   );
 
@@ -576,13 +629,33 @@ describe('ThreadCardPullRequests', () => {
     ]);
   });
 
-  it('orders anonymous chips by cached answers without fetching hidden links', async () => {
+  it('keeps the cached anonymous chip while another reader fetches a shared summary', async () => {
     const client = new QueryClient();
     client.setQueryData([...pullRequestKey(sampleRef(2)), false], { state: 'open' });
-    const view = await show(roomWith([1, 2].map(sampleRef)), { phone: true, client });
+    const view = await show(roomWith([1, 2, 3].map(sampleRef)), { phone: true, client });
     await view.findByRole('img', { name: 'Pull request mindroom-ai/sample-repo #2: Open' });
-    expect(chips(view).map((chip) => chip.textContent)).toEqual(['#2']);
     expect(fetchMock).not.toHaveBeenCalled();
+
+    const third = held();
+    const queryKey = [...pullRequestKey(sampleRef(3)), false];
+    const read = client.fetchQuery({
+      queryKey,
+      queryFn: async () => {
+        await third.reply;
+        return { state: 'closed' };
+      },
+    });
+    try {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      expect(client.isFetching({ queryKey })).toBe(1);
+      expect(chips(view).map((chip) => chip.textContent)).toEqual(['#2']);
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      third.release();
+      await read;
+    }
   });
 
   it('shows no count when every chip shows', async () => {

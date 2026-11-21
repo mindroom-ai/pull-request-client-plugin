@@ -144,7 +144,7 @@ export type RefetchOptions = {
   refetchOnWindowFocus?: boolean | ((query: QueryState) => boolean);
   refetchOnMount?: boolean | ((query: QueryState) => boolean);
   refetchOnReconnect?: boolean | ((query: QueryState) => boolean);
-  retryOnMount?: boolean;
+  retryOnMount?: boolean | ((query: QueryState) => boolean);
   /** A pull request's query only: how often to read it again, per its answer (`query`). */
   refetchInterval?: (query: QueryState) => number | false;
   refetchIntervalInBackground?: boolean;
