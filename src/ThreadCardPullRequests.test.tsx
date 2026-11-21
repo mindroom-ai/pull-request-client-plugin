@@ -218,7 +218,8 @@ describe('ThreadCardPullRequests', () => {
       repo: 'sample-repo',
       number: i + 1,
     }));
-    const room = roomWith(links);
+    const hidden = { ...links[0]!, number: links.length + 1 };
+    const room = roomWith([...links, hidden]);
     let releaseSummaries = () => {};
     let releaseChecks = () => {};
     const summariesHeld = new Promise<void>((resolve) => (releaseSummaries = resolve));
@@ -226,6 +227,7 @@ describe('ThreadCardPullRequests', () => {
     const mindroom = githubServer(async (url) => {
       if (url.includes('/pulls/')) {
         await summariesHeld;
+        if (url.endsWith(`/pulls/${hidden.number}`)) return Response.json({ state: 'closed' });
         return Response.json({ title: 'Sample change', state: 'open', head: { sha: 'abc123' } });
       }
       await checksHeld;
@@ -264,7 +266,8 @@ describe('ThreadCardPullRequests', () => {
       expect(client.isFetching()).toBe(0);
     });
     const requests = mindroom.githubRequests();
-    expect(requests).toHaveLength(3 * links.length);
+    expect(proxiedSummaries(mindroom)).toContain(hidden.number);
+    expect(requests).toHaveLength(3 * links.length + 1);
     expect(requests.every(({ method }) => method === 'GET')).toBe(true);
     expect(
       mindroom.server.request.mock.calls.filter(
@@ -420,6 +423,40 @@ describe('ThreadCardPullRequests', () => {
     });
     expect(chips(view).map((chip) => chip.textContent)).toEqual(['#1']);
     expect(view.getByRole('img', { name: '2 more pull requests' }).textContent).toBe('+2');
+  });
+
+  it.each([
+    { screen: 'a phone', phone: true, states: ['merged', 'open'], shown: ['#2'] },
+    { screen: 'desktop', phone: false, states: ['merged', 'closed', 'open'], shown: ['#3', '#2'] },
+  ])('shows open pull requests first on $screen', async ({ phone, states, shown }) => {
+    const links = states.map((_state, index) => ({ number: index + 1 }));
+    const mindroom = githubServer(async (url) => {
+      const [number] = summaryNumbers([url]);
+      const state = states[number! - 1];
+      return Response.json({
+        state: state === 'merged' ? 'closed' : state,
+        merged_at: state === 'merged' ? '2026-11-18T10:00:00Z' : null,
+      });
+    });
+    roomServer.current = mindroom.server;
+    const view = await show(roomWith(links), { phone });
+    await vi.waitFor(() => expect(chips(view).map((chip) => chip.textContent)).toEqual(shown));
+    expect(view.getByRole('img', { name: '1 more pull request' }).textContent).toBe('+1');
+    expect(proxiedSummaries(mindroom).toSorted((a, b) => a - b)).toEqual(
+      links.map(({ number }) => number)
+    );
+  });
+
+  it('keeps link order and does not read hidden pull requests anonymously with an empty cache', async () => {
+    fetchMock.mockResolvedValue(
+      Response.json({ state: 'closed', merged_at: '2026-11-18T10:00:00Z' })
+    );
+    const view = await show(roomWith([{ number: 1 }, { number: 2 }]), { phone: true });
+    await view.findByRole('img', { name: 'Pull request mindroom-ai/mindroom-chat #1: Merged' });
+    expect(chips(view).map((chip) => chip.textContent)).toEqual(['#1']);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      'https://api.github.com/repos/mindroom-ai/mindroom-chat/pulls/1',
+    ]);
   });
 
   it('shows no count when every chip shows', async () => {

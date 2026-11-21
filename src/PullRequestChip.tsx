@@ -11,10 +11,10 @@ import { usePullRequestStatus } from './pullRequestStatus';
 import { BACKGROUND_READ, NO_FOCUS_REFETCH } from './queries';
 import { pluginRootStyle } from './theme';
 
-const CHIP_REFETCH = { ...NO_FOCUS_REFETCH, ...BACKGROUND_READ };
+export const CHIP_REFETCH = { ...NO_FOCUS_REFETCH, ...BACKGROUND_READ };
 
 /** Whether `element` has been on screen; at once where the browser cannot tell. */
-function useOnScreenOnce(element: Element | null): boolean {
+export function useOnScreenOnce(element: Element | null): boolean {
   const [seen, setSeen] = useState(() => typeof IntersectionObserver === 'undefined');
   useEffect(() => {
     if (seen || element === null) return undefined;

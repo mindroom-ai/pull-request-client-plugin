@@ -1,8 +1,8 @@
-// A thread's pull requests on its card in the Compact view: two chips (one on a phone) and the
-// count of the rest, or, for a thread without any, the branch of its worktree. The app draws this
-// inside the card's button, so nothing here is a control or takes the focus; the open thread's
-// pull requests menu has the same pull requests as items.
-import type { MouseEvent } from 'react';
+// A thread's card in the Compact view shows up to two pull request chips (one on a phone) in
+// the open thread's menu order, with open pull requests first, and the count of the rest. A thread
+// without pull requests shows its worktree's branch instead. The app draws this inside the card's
+// button, so nothing here is a control or takes the focus.
+import { useState, type MouseEvent } from 'react';
 import type { Room } from 'matrix-js-sdk';
 import {
   usePluginTranslation,
@@ -13,10 +13,12 @@ import { useRoomNavigate } from '@mindroom/client-sdk/room';
 import { useScreenSize } from '@mindroom/client-sdk/ui';
 import { BranchChip } from './BranchChip';
 import { pullRequestUrl, type PullRequestRef } from './github';
-import { PullRequestChip } from './PullRequestChip';
+import { CHIP_REFETCH, PullRequestChip, useOnScreenOnce } from './PullRequestChip';
+import { answerOf, usePullRequests } from './queries';
 import { pluginRootStyle } from './theme';
+import { orderPullRequests } from './ThreadDetails';
 import { useThreadPullRequests } from './threadPullRequests';
-import { RoomGitHub } from './token';
+import { RoomGitHub, useGitHubAccess } from './token';
 
 // Every thread of the Compact view has a card, most without links: those read only their links
 // and worktree. The branch takes no click of its own: a click on it opens the thread.
@@ -57,11 +59,19 @@ function CardChips({
   const phone = useScreenSize() === 'Mobile';
   const panel = useRoomSidePanel('pull-requests', 'pull-request');
   const { navigateRoomThread } = useRoomNavigate();
-  const chips = pullRequests.slice(0, phone ? 1 : 2);
+  const [element, setElement] = useState<HTMLElement | null>(null);
+  const seen = useOnScreenOnce(element);
+  const { via } = useGitHubAccess();
+  // Anonymously, use cached answers for the order and leave the hourly limit for the shown chips.
+  const queries = usePullRequests(pullRequests, {
+    ...CHIP_REFETCH,
+    ...((!seen || via === undefined) && { enabled: false }),
+  });
+  const chips = orderPullRequests(pullRequests, queries.map(answerOf)).slice(0, phone ? 1 : 2);
   const more = pullRequests.length - chips.length;
   const moreLabel = t('threadPullRequests.moreLabel', { count: more });
   return (
-    <span className="mrpr-thread-card-chips" style={pluginRootStyle()}>
+    <span ref={setElement} className="mrpr-thread-card-chips" style={pluginRootStyle()}>
       {chips.map((pullRequest) => (
         <span
           key={pullRequestUrl(pullRequest)}

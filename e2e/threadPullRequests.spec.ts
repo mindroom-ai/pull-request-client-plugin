@@ -22,10 +22,10 @@ import { touch } from '@mindroom/e2e/touch';
 // A thread's pull requests in a production build with this plugin, against the disposable
 // homeserver, with GitHub's API answered by the page (no request leaves the test). The links are
 // the room state events MindRoom's backend plugin writes; here the room's creator writes them. A
-// thread's card in the Compact view shows a chip per pull request, two at most (one on a phone) and
-// the count of the rest; a click on a chip opens the thread and the pull request in the side
-// panel; the open thread's banner has one button for its pull requests, in the color of their state
-// together (open, merged or closed), whose menu lists them and
+// thread's card in the Compact view shows up to two chips (one on a phone) in the pull requests
+// menu's order and the count of the rest; a click on a chip opens the thread and the pull request
+// in the side panel; the open thread's banner has one button for its pull requests, in the color
+// of their state together (open, merged or closed), whose menu lists them and
 // opens each in the panel, the panel's marked current; a mouse that rests on a chip on a card
 // opens its hover card beside it;
 // a link written or cleared while the room is open shows on its card at once, also after a gap in
@@ -628,7 +628,8 @@ const THREADS = {
       ['agent', 'Eleven pull requests so far, across the webapp and the API.'],
       ['lead', 'Keep them in one thread so I can review them in order.'],
     ],
-    pulls: ALL_PULLS,
+    // The oldest link is merged, but the card shows the open ones first.
+    pulls: [PULLS.rateLimit, ...ALL_PULLS.filter((pull) => pull !== PULLS.rateLimit)],
   },
   search: {
     topic: 'Search is slow in large workspaces',
@@ -652,7 +653,7 @@ const THREADS = {
       ['agent', 'Merged the rate limit per token and the changelog; closed the limit per IP.'],
       ['lead', 'Thanks. I will tag the release after lunch.'],
     ],
-    // A merged and a closed pull request show on the card, in their colors.
+    // The closed pull request and the more recently updated merged one show on the card.
     pulls: [PULLS.rateLimit, PULLS.ipRateLimit, PULLS.changelog],
   },
   checkout: {
@@ -860,8 +861,8 @@ test("each thread's card shows the chips of its pull requests", async ({ page })
   await expect(cardMore(page, roots.sessions)).toHaveCount(0);
   await expectChips(cardChips(page, roots.darkMode), THREADS.darkMode.pulls);
   await expectChips(cardChips(page, roots.checkout), THREADS.checkout.pulls);
-  // Three pull requests: the first two, then the count of the rest.
-  await expectChips(cardChips(page, roots.release), THREADS.release.pulls.slice(0, 2));
+  // Three pull requests: the closed one, the more recently updated merged one, and the count.
+  await expectChips(cardChips(page, roots.release), [PULLS.ipRateLimit, PULLS.changelog]);
   await expect(cardMore(page, roots.release)).toHaveText('+1');
   await expect(cardMore(page, roots.release)).toHaveAttribute('aria-label', '1 more pull request');
   // A thread without a link has no chips at all.
@@ -1844,9 +1845,10 @@ test("a chip's hover card shows its pull request on a card", async ({ page }) =>
   await expect(hoverCard(page)).toHaveCount(0);
 
   // A closed pull request lower in the room: its close, and no checks.
-  const [, ipRateLimit] = THREADS.release.pulls;
-  const release = cardChips(page, roots.release).nth(1);
+  const { ipRateLimit } = PULLS;
+  const release = cardChips(page, roots.release).first();
   await release.scrollIntoViewIfNeeded();
+  await expect(release).toHaveAttribute('aria-label', chipName(ipRateLimit), { timeout: 30_000 });
   await release.hover();
   await expect(hoverCard(page)).toContainText(ipRateLimit.title);
   await expect(hoverCard(page)).toContainText('Closed');
@@ -1958,7 +1960,8 @@ test('on a phone a card shows one chip and the count of the rest', async ({ brow
     await expectChips(cardChips(page, roots.darkMode), [PULLS.darkMode]);
     await expect(cardMore(page, roots.darkMode)).toHaveCount(0);
     await expectChips(cardChips(page, roots.checkout), [PULLS.checkoutClock]);
-    await expectChips(cardChips(page, roots.release), [PULLS.rateLimit]);
+    await expectChips(cardChips(page, roots.program), [PULLS.sessionStore]);
+    await expectChips(cardChips(page, roots.release), [PULLS.ipRateLimit]);
     await expect(cardMore(page, roots.release)).toHaveText('+2');
     await expect(cardMore(page, roots.release)).toHaveAttribute(
       'aria-label',
