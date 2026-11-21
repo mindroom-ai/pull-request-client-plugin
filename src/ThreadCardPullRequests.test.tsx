@@ -532,7 +532,7 @@ describe('ThreadCardPullRequests', () => {
     await view.findByRole('img', { name: `Pull request mindroom-ai/sample-repo #${open}: Open` });
   });
 
-  it('keeps the settled chip while a newly linked summary loads', async () => {
+  it('keeps the settled order when links are added and removed', async () => {
     const third = held();
     const mindroom = githubServer(async (url) => {
       const [number] = summaryNumbers([url]);
@@ -546,7 +546,8 @@ describe('ThreadCardPullRequests', () => {
       return Response.json({ state: 'open' });
     });
     roomServer.current = mindroom.server;
-    const view = await show(roomWith([1, 2].map(sampleRef)), { phone: true });
+    const client = new QueryClient();
+    const view = await show(roomWith([1, 2].map(sampleRef)), { phone: true, client });
     await view.findByRole('img', { name: 'Pull request mindroom-ai/sample-repo #2: Open' });
     try {
       view.rerenderRoom(roomWith([1, 2, 3].map(sampleRef)));
@@ -557,7 +558,40 @@ describe('ThreadCardPullRequests', () => {
     } finally {
       third.release();
     }
-    await view.findByRole('img', { name: 'Pull request mindroom-ai/sample-repo #3: Open' });
+    await vi.waitFor(() => expect(client.isFetching()).toBe(0));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(chips(view).map((chip) => chip.textContent)).toEqual(['#1']);
+  });
+
+  it('starts a remounted card in cached order without reading before it intersects', async () => {
+    const mindroom = githubServer(async (url) =>
+      url.endsWith('/pulls/1')
+        ? Response.json({ state: 'closed', merged_at: '2026-11-18T10:00:00Z' })
+        : Response.json({ state: 'open' })
+    );
+    roomServer.current = mindroom.server;
+    const client = new QueryClient();
+    const room = roomWith([1, 2].map(sampleRef));
+    const options = { phone: true, client };
+    const view = await show(room, options);
+    await view.findByRole('img', { name: 'Pull request mindroom-ai/sample-repo #2: Open' });
+    view.unmount();
+
+    vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver);
+    const remount = await show(room, options);
+    expect(chips(remount).map((chip) => chip.textContent)).toEqual(['#2']);
+    expect(proxiedSummaries(mindroom)).toEqual([1, 2]);
+
+    // A cache change while unseen does not count as a read of the remounted card.
+    const key = [...pullRequestKey(sampleRef(1)), `server:${mindroom.server.origin}:octo:0`];
+    await act(async () => {
+      client.setQueryData(key, { state: 'open', updatedAt: '2026-11-20T10:00:00Z' });
+      report(true);
+    });
+    expect(chips(remount).map((chip) => chip.textContent)).toEqual(['#2']);
+    expect(proxiedSummaries(mindroom)).toEqual([1, 2]);
   });
 
   it('waits for the chip row to be on screen before reading hidden summaries', async () => {
@@ -617,45 +651,26 @@ describe('ThreadCardPullRequests', () => {
     }
   );
 
-  it('keeps link order and does not read hidden pull requests anonymously with an empty cache', async () => {
-    fetchMock.mockResolvedValue(
-      Response.json({ state: 'closed', merged_at: '2026-11-18T10:00:00Z' })
-    );
-    const view = await show(roomWith([{ number: 1 }, { number: 2 }]), { phone: true });
-    await view.findByRole('img', { name: 'Pull request mindroom-ai/mindroom-chat #1: Merged' });
-    expect(chips(view).map((chip) => chip.textContent)).toEqual(['#1']);
-    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
-      'https://api.github.com/repos/mindroom-ai/mindroom-chat/pulls/1',
-    ]);
-  });
-
-  it('keeps the cached anonymous chip while another reader fetches a shared summary', async () => {
+  it('keeps anonymous link order and does not read a hidden pull request with a cached answer', async () => {
     const client = new QueryClient();
-    client.setQueryData([...pullRequestKey(sampleRef(2)), false], { state: 'open' });
-    const view = await show(roomWith([1, 2, 3].map(sampleRef)), { phone: true, client });
-    await view.findByRole('img', { name: 'Pull request mindroom-ai/sample-repo #2: Open' });
-    expect(fetchMock).not.toHaveBeenCalled();
-
-    const third = held();
-    const queryKey = [...pullRequestKey(sampleRef(3)), false];
-    const read = client.fetchQuery({
-      queryKey,
-      queryFn: async () => {
-        await third.reply;
-        return { state: 'closed' };
-      },
+    client.setQueryData([...pullRequestKey(sampleRef(3)), false], { state: 'open' });
+    const first = held();
+    fetchMock.mockImplementation(async (url) => {
+      if (!url.endsWith('/pulls/1')) return Response.json({ state: 'open' });
+      await first.reply;
+      return Response.json({ state: 'closed', merged_at: '2026-11-18T10:00:00Z' });
     });
+    const view = await show(roomWith([1, 2, 3].map(sampleRef)), { client });
     try {
-      await act(async () => {
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      });
-      expect(client.isFetching({ queryKey })).toBe(1);
-      expect(chips(view).map((chip) => chip.textContent)).toEqual(['#2']);
-      expect(fetchMock).not.toHaveBeenCalled();
+      expect(chips(view).map((chip) => chip.textContent)).toEqual(['#1', '#2']);
+      await view.findByRole('img', { name: 'Pull request mindroom-ai/sample-repo #2: Open' });
+      expect(chips(view).map((chip) => chip.textContent)).toEqual(['#1', '#2']);
     } finally {
-      third.release();
-      await read;
+      first.release();
     }
+    await view.findByRole('img', { name: 'Pull request mindroom-ai/sample-repo #1: Merged' });
+    expect(chips(view).map((chip) => chip.textContent)).toEqual(['#1', '#2']);
+    expect(summaryNumbers(fetchMock.mock.calls.map(([url]) => url)).sort()).toEqual([1, 2]);
   });
 
   it('shows no count when every chip shows', async () => {

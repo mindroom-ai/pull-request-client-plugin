@@ -1,8 +1,10 @@
-// A thread's card in the Compact view shows up to two pull request chips (one on a phone) in
-// the open thread's menu order, with open pull requests first, and the count of the rest. A thread
-// without pull requests shows its worktree's branch instead. The app draws this inside the card's
-// button, so nothing here is a control or takes the focus.
+// A thread's card in the Compact view shows up to two pull request chips (one on a phone) and
+// the count of the rest. With GitHub access it takes the menu's order from the first answers,
+// with open pull requests first. Anonymously it keeps link order. A thread without pull requests
+// shows its worktree's branch instead. The app draws this inside the card's button, so nothing
+// here is a control or takes the focus.
 import { useEffect, useRef, useState, type MouseEvent } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import type { Room } from 'matrix-js-sdk';
 import {
   usePluginTranslation,
@@ -14,7 +16,7 @@ import { useScreenSize } from '@mindroom/client-sdk/ui';
 import { BranchChip } from './BranchChip';
 import { pullRequestUrl, type PullRequestRef } from './github';
 import { CHIP_REFETCH, PullRequestChip, useOnScreenOnce } from './PullRequestChip';
-import { answerOf, unlessRefused, usePullRequests } from './queries';
+import { answerOf, cachedPullRequestAnswer, unlessRefused, usePullRequests } from './queries';
 import { pluginRootStyle } from './theme';
 import { orderPullRequests } from './ThreadDetails';
 import { useThreadPullRequests } from './threadPullRequests';
@@ -44,6 +46,9 @@ export function ThreadCardPullRequests({ room, threadId }: ThreadCardBadgeProps)
   );
 }
 
+const ranksOf = (refs: readonly PullRequestRef[]) =>
+  new Map(refs.map((ref, index) => [pullRequestUrl(ref), index]));
+
 function CardChips({
   room,
   threadId,
@@ -61,32 +66,38 @@ function CardChips({
   const { navigateRoomThread } = useRoomNavigate();
   const [element, setElement] = useState<HTMLElement | null>(null);
   const seen = useOnScreenOnce(element);
-  const { via, pending } = useGitHubAccess();
-  // Anonymously, use cached answers for the order and leave the hourly limit for the shown chips.
-  const cacheOnly = via === undefined;
-  const queries = usePullRequests(seen ? pullRequests : [], {
+  const { via, pending, key } = useGitHubAccess();
+  const client = useQueryClient();
+  const canRead = via !== undefined && !pending;
+  // Start from the cache without observing it, so a remount need not show link order first.
+  const [initialRanks] = useState(() => {
+    if (!canRead) return undefined;
+    const answers = pullRequests.map((ref) => cachedPullRequestAnswer(client, ref, key));
+    return ranksOf(orderPullRequests(pullRequests, answers));
+  });
+  const reading = seen && canRead;
+  const queries = usePullRequests(reading ? pullRequests : [], {
     ...CHIP_REFETCH,
-    ...(cacheOnly && { enabled: false }),
     refetchOnMount: unlessRefused,
     retryOnMount: unlessRefused,
     refetchOnReconnect: unlessRefused,
   });
-  const settled = seen && !pending && (cacheOnly || !queries.some((query) => query.isLoading));
   const settledRanks = useRef<ReadonlyMap<string, number>>();
-  const previous = settledRanks.current;
+  const ranks = settledRanks.current ?? initialRanks;
+  const firstSettle =
+    reading && !settledRanks.current && queries.every((query) => query.fetchStatus === 'idle');
   let ordered = pullRequests;
-  if (settled) {
+  // Only the first batch of reads can move the chips, not a cache change while offscreen.
+  if (firstSettle && queries.some((query) => query.isFetchedAfterMount)) {
     ordered = orderPullRequests(pullRequests, queries.map(answerOf));
-  } else if (previous) {
-    // Keep the last settled order among the current links and leave new links at the end.
-    const rank = (ref: PullRequestRef) => previous.get(pullRequestUrl(ref)) ?? previous.size;
+  } else if (via !== undefined && ranks) {
+    // Keep the order of existing links and put new links last, also after later reads settle.
+    const rank = (ref: PullRequestRef) => ranks.get(pullRequestUrl(ref)) ?? ranks.size;
     ordered = [...pullRequests].sort((a, b) => rank(a) - rank(b));
   }
   useEffect(() => {
-    if (settled) {
-      settledRanks.current = new Map(ordered.map((ref, index) => [pullRequestUrl(ref), index]));
-    }
-  }, [ordered, settled]);
+    if (firstSettle) settledRanks.current = ranksOf(ordered);
+  }, [firstSettle, ordered]);
   const chips = ordered.slice(0, phone ? 1 : 2);
   const more = pullRequests.length - chips.length;
   const moreLabel = t('threadPullRequests.moreLabel', { count: more });

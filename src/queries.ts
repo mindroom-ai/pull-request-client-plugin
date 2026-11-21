@@ -131,6 +131,16 @@ export const unlessRefused = (query: QueryState) => !isRefused(query.state);
 export const answerOf = <T>(query: { data: T | undefined; error: unknown }) =>
   isRefused(query) ? undefined : query.data;
 
+/** The answer already in the cache for this access, without a query observer. */
+export function cachedPullRequestAnswer(
+  client: QueryClient,
+  ref: PullRequestRef,
+  access: AccessKey
+) {
+  const state = client.getQueryState<PullRequest>(keyOf(ref, access));
+  return state && answerOf(state);
+}
+
 // Mark overview observers without changing the query key shared with foreground surfaces.
 export const BACKGROUND_READ = { meta: { mindroomPullRequestsBackground: true } } as const;
 
