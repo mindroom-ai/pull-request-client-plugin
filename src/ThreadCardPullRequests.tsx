@@ -73,7 +73,7 @@ function CardChips({
   const settledRanks = useRef<ReadonlyMap<string, number>>();
   const previous = settledRanks.current;
   const idle = queries.every((query) => query.fetchStatus === 'idle');
-  const answered = !queries.some((query) => query.isLoading);
+  const answered = queries.every((query) => !query.isPending);
   const settled = reading && !pending && (previous ? idle : answered);
   let ordered = pullRequests;
   if (settled) {

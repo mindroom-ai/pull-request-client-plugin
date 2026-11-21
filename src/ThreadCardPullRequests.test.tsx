@@ -532,6 +532,28 @@ describe('ThreadCardPullRequests', () => {
     await view.findByRole('img', { name: `Pull request mindroom-ai/sample-repo #${open}: Open` });
   });
 
+  it('keeps link order when the first summary is uncached and paused offline', async () => {
+    localStorage.setItem(
+      'mindroom.plugin:%40plugin-tester%3Aexample.org/pull-requests/githubToken',
+      'ghp_test'
+    );
+    const client = new QueryClient();
+    const first = [...pullRequestKey(sampleRef(1)), true];
+    client.setQueryData([...pullRequestKey(sampleRef(2)), true], { state: 'merged' });
+    try {
+      onlineManager.setOnline(false);
+      const view = await show(roomWith([1, 2].map(sampleRef)), { phone: true, client });
+      expect(client.getQueryState(first)).toMatchObject({
+        status: 'pending',
+        fetchStatus: 'paused',
+      });
+      expect(chips(view).map((chip) => chip.textContent)).toEqual(['#1']);
+    } finally {
+      onlineManager.setOnline(true);
+    }
+    await vi.waitFor(() => expect(client.getQueryState(first)?.fetchStatus).toBe('idle'));
+  });
+
   it.each(['fetching', 'paused'])(
     'uses stale cached order on remount while refreshes are %s',
     async (fetchStatus) => {
@@ -599,6 +621,9 @@ describe('ThreadCardPullRequests', () => {
       await act(async () => {
         onlineManager.setOnline(false);
         await client.refetchQueries({ queryKey: ['pull-requests', 'pr'] });
+        // A newer cached answer would move #1 ahead of #2 if paused reads counted as settled.
+        client.setQueryData(olderKey, { state: 'open', updatedAt: '2026-11-18T12:00:00Z' });
+        await new Promise((resolve) => setTimeout(resolve, 0));
       });
       expect([olderKey, newerKey].map((key) => client.getQueryState(key)?.fetchStatus)).toEqual([
         'paused',
@@ -709,7 +734,7 @@ describe('ThreadCardPullRequests', () => {
     }
   );
 
-  it('keeps anonymous link order and does not read a hidden pull request with a cached answer', async () => {
+  it('keeps anonymous link order and reads only the shown pull requests', async () => {
     const client = new QueryClient();
     client.setQueryData([...pullRequestKey(sampleRef(3)), false], { state: 'open' });
     const first = held();
@@ -718,7 +743,7 @@ describe('ThreadCardPullRequests', () => {
       await first.reply;
       return Response.json({ state: 'closed', merged_at: '2026-11-18T10:00:00Z' });
     });
-    const view = await show(roomWith([1, 2, 3].map(sampleRef)), { client });
+    const view = await show(roomWith([1, 2, 3, 4].map(sampleRef)), { client });
     try {
       expect(chips(view).map((chip) => chip.textContent)).toEqual(['#1', '#2']);
       await view.findByRole('img', { name: 'Pull request mindroom-ai/sample-repo #2: Open' });
