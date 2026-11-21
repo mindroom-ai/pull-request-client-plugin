@@ -70,7 +70,7 @@ function CardChips({
     retryOnMount: unlessRefused,
     refetchOnReconnect: unlessRefused,
   });
-  const settled = reading && !pending && !queries.some((query) => query.isLoading);
+  const settled = reading && !pending && queries.every((query) => query.fetchStatus === 'idle');
   const settledRanks = useRef<ReadonlyMap<string, number>>();
   const previous = settledRanks.current;
   let ordered = pullRequests;
@@ -81,11 +81,12 @@ function CardChips({
     const rank = (ref: PullRequestRef) => previous.get(pullRequestUrl(ref)) ?? previous.size;
     ordered = [...pullRequests].sort((a, b) => rank(a) - rank(b));
   }
+  const settledUrls = settled ? ordered.map(pullRequestUrl).join('\n') : undefined;
   useEffect(() => {
-    if (settled) {
-      settledRanks.current = new Map(ordered.map((ref, index) => [pullRequestUrl(ref), index]));
+    if (settledUrls !== undefined) {
+      settledRanks.current = new Map(settledUrls.split('\n').map((url, index) => [url, index]));
     }
-  }, [ordered, settled]);
+  }, [settledUrls]);
   const chips = ordered.slice(0, phone ? 1 : 2);
   const more = pullRequests.length - chips.length;
   const moreLabel = t('threadPullRequests.moreLabel', { count: more });

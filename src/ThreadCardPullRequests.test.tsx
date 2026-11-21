@@ -532,6 +532,56 @@ describe('ThreadCardPullRequests', () => {
     await view.findByRole('img', { name: `Pull request mindroom-ai/sample-repo #${open}: Open` });
   });
 
+  it('keeps the settled chip during paused and out-of-order summary refreshes', async () => {
+    const newer = held();
+    let refreshing = false;
+    const mindroom = githubServer(async (url) => {
+      const second = url.endsWith('/pulls/2');
+      if (second && refreshing) await newer.reply;
+      // Both refreshes are newer than the originals, but #2 is newest in both batches.
+      const day = (refreshing ? 18 : 16) + (second ? 2 : 1);
+      return Response.json({
+        state: 'open',
+        updated_at: `2026-11-${day}T10:00:00Z`,
+        title: refreshing ? 'Refreshed' : '',
+      });
+    });
+    roomServer.current = mindroom.server;
+    const client = new QueryClient();
+    const view = await show(roomWith([1, 2].map(sampleRef)), { phone: true, client });
+    const access = `server:${mindroom.server.origin}:octo:0`;
+    const olderKey = [...pullRequestKey(sampleRef(1)), access];
+    const newerKey = [...pullRequestKey(sampleRef(2)), access];
+    await view.findByRole('img', { name: 'Pull request mindroom-ai/sample-repo #2: Open' });
+    try {
+      refreshing = true;
+      await act(async () => {
+        onlineManager.setOnline(false);
+        await client.refetchQueries({ queryKey: ['pull-requests', 'pr'] });
+      });
+      expect([olderKey, newerKey].map((key) => client.getQueryState(key)?.fetchStatus)).toEqual([
+        'paused',
+        'paused',
+      ]);
+      expect(chips(view).map((chip) => chip.textContent)).toEqual(['#2']);
+      await act(async () => onlineManager.setOnline(true));
+      await vi.waitFor(() =>
+        expect(client.getQueryData(olderKey)).toMatchObject({ updatedAt: '2026-11-19T10:00:00Z' })
+      );
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      expect(client.getQueryState(newerKey)?.fetchStatus).toBe('fetching');
+      expect(chips(view).map((chip) => chip.textContent)).toEqual(['#2']);
+    } finally {
+      onlineManager.setOnline(true);
+      newer.release();
+    }
+    await view.findByRole('img', {
+      name: /Pull request mindroom-ai\/sample-repo #2: Open\s+Refreshed/,
+    });
+  });
+
   it('keeps the settled chip while a newly linked summary loads', async () => {
     const third = held();
     const mindroom = githubServer(async (url) => {
