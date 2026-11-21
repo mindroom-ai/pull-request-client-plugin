@@ -70,9 +70,11 @@ function CardChips({
     retryOnMount: unlessRefused,
     refetchOnReconnect: unlessRefused,
   });
-  const settled = reading && !pending && queries.every((query) => query.fetchStatus === 'idle');
   const settledRanks = useRef<ReadonlyMap<string, number>>();
   const previous = settledRanks.current;
+  const idle = queries.every((query) => query.fetchStatus === 'idle');
+  const answered = !queries.some((query) => query.isLoading);
+  const settled = reading && !pending && (previous ? idle : answered);
   let ordered = pullRequests;
   if (settled) {
     ordered = orderPullRequests(pullRequests, queries.map(answerOf));

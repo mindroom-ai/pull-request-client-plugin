@@ -532,17 +532,58 @@ describe('ThreadCardPullRequests', () => {
     await view.findByRole('img', { name: `Pull request mindroom-ai/sample-repo #${open}: Open` });
   });
 
+  it.each(['fetching', 'paused'])(
+    'uses stale cached order on remount while refreshes are %s',
+    async (fetchStatus) => {
+      const refresh = held();
+      let refreshing = false;
+      const mindroom = githubServer(async (url) => {
+        if (refreshing) await refresh.reply;
+        return Response.json(
+          url.endsWith('/pulls/1')
+            ? { state: 'closed', merged_at: '2026-11-18T10:00:00Z' }
+            : { state: 'open' }
+        );
+      });
+      roomServer.current = mindroom.server;
+      const client = new QueryClient();
+      const room = roomWith([1, 2].map(sampleRef));
+      const options = { phone: true, client };
+      const first = await show(room, options);
+      await first.findByRole('img', { name: 'Pull request mindroom-ai/sample-repo #2: Open' });
+      first.unmount();
+      await client.invalidateQueries({ queryKey: ['pull-requests', 'pr'], refetchType: 'none' });
+      const access = `server:${mindroom.server.origin}:octo:0`;
+      const keys = [1, 2].map((number) => [...pullRequestKey(sampleRef(number)), access]);
+      const statuses = () => keys.map((key) => client.getQueryState(key)?.fetchStatus);
+      try {
+        refreshing = true;
+        onlineManager.setOnline(fetchStatus !== 'paused');
+        const remount = await show(room, options);
+        await vi.waitFor(() => expect(statuses()).toEqual([fetchStatus, fetchStatus]));
+        expect(chips(remount).map((chip) => chip.textContent)).toEqual(['#2']);
+      } finally {
+        onlineManager.setOnline(true);
+        refresh.release();
+      }
+      await vi.waitFor(() => expect(statuses()).toEqual(['idle', 'idle']));
+    }
+  );
+
   it('keeps the settled chip during paused and out-of-order summary refreshes', async () => {
     const newer = held();
     let refreshing = false;
     const mindroom = githubServer(async (url) => {
       const second = url.endsWith('/pulls/2');
       if (second && refreshing) await newer.reply;
-      // Both refreshes are newer than the originals, but #2 is newest in both batches.
+      // Both refreshes are newer than the originals, and the second pull request has merged.
       const day = (refreshing ? 18 : 16) + (second ? 2 : 1);
+      const updatedAt = `2026-11-${day}T10:00:00Z`;
+      const merged = second && refreshing;
       return Response.json({
-        state: 'open',
-        updated_at: `2026-11-${day}T10:00:00Z`,
+        state: merged ? 'closed' : 'open',
+        updated_at: updatedAt,
+        merged_at: merged ? updatedAt : null,
         title: refreshing ? 'Refreshed' : '',
       });
     });
@@ -578,8 +619,9 @@ describe('ThreadCardPullRequests', () => {
       newer.release();
     }
     await view.findByRole('img', {
-      name: /Pull request mindroom-ai\/sample-repo #2: Open\s+Refreshed/,
+      name: /Pull request mindroom-ai\/sample-repo #1: Open\s+Refreshed/,
     });
+    expect(client.getQueryData(newerKey)).toMatchObject({ state: 'merged' });
   });
 
   it('keeps the settled chip while a newly linked summary loads', async () => {
