@@ -6,7 +6,8 @@ import { renderPluginComponent } from '@mindroom/client-sdk/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import plugin from './index';
 import PullRequestPanel from './PullRequestPanel';
-import { pullRequestKey, refreshPullRequest } from './queries';
+import { pullRequestKey, refreshPullRequest, STALE_TIME } from './queries';
+import { FakeIntersectionObserver, observers, report } from './testing/intersectionObserver';
 import { linkedRoom, type TestLink, type TestWorktree } from './testing/linkedRoom';
 import { githubServer } from './testing/mindroomServer';
 import { ThreadCardPullRequests } from './ThreadCardPullRequests';
@@ -58,9 +59,12 @@ const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(
 
 const show = async (
   room: Room,
-  { onParentClick = vi.fn(), phone = false }: { onParentClick?: () => void; phone?: boolean } = {}
+  {
+    onParentClick = vi.fn(),
+    phone = false,
+    client = new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+  }: { onParentClick?: () => void; phone?: boolean; client?: QueryClient } = {}
 ) => {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return renderPluginComponent(
     <QueryClientProvider client={client}>
       {/* The card's button, which opens the thread on a click that reaches it. */}
@@ -127,6 +131,7 @@ const proxiedSummaries = (mindroom: ReturnType<typeof githubServer>) =>
 beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   localStorage.clear();
+  observers.length = 0;
   page.panel = { isOpen: false, open: vi.fn() };
   page.panelReads = 0;
   page.navigateRoomThread.mockReset();
@@ -274,6 +279,50 @@ describe('ThreadCardPullRequests', () => {
         ([path, init]) => path === '/api/github/request' && init?.method === 'POST'
       )
     ).toHaveLength(requests.length);
+  });
+
+  it('cancels a queued summary when only an unseen card still links to it', async () => {
+    vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver);
+    const slots = held();
+    const mindroom = githubServer(async () => {
+      await slots.reply;
+      return Response.json({ state: 'closed' });
+    });
+    roomServer.current = mindroom.server;
+    const links = [1, 2, 3, 4, 5, 5].map((number, index) => ({
+      ...sampleRef(number),
+      thread: `$sample${index + 1}`,
+    }));
+    const room = roomWith(links);
+    const client = new QueryClient();
+    client.setQueryData(['pull-requests-github-status', mindroom.server.origin], {
+      connected: true,
+      login: 'octo',
+      via: 'app',
+    });
+    const wave = (omitFifth = false) => (
+      <QueryClientProvider client={client}>
+        {links
+          .filter((_link, index) => !omitFifth || index !== 4)
+          .map(({ thread }) => (
+            <ThreadCardPullRequests key={thread} room={room} threadId={thread} />
+          ))}
+      </QueryClientProvider>
+    );
+    const view = await renderPluginComponent(wave(), { id: 'pull-requests', plugin });
+    try {
+      const rows = [...view.container.querySelectorAll('.mrpr-thread-card-chips')].slice(0, 5);
+      await act(async () => report(true, (target) => rows.includes(target)));
+      const fifth = { queryKey: pullRequestKey(sampleRef(5)) };
+      await vi.waitFor(() => expect(client.isFetching(fifth)).toBe(1));
+      expect(proxiedSummaries(mindroom)).toEqual([1, 2, 3, 4]);
+      view.rerender(wave(true));
+      expect(client.isFetching(fifth)).toBe(0);
+    } finally {
+      slots.release();
+    }
+    await vi.waitFor(() => expect(client.isFetching()).toBe(0));
+    expect(proxiedSummaries(mindroom)).toEqual([1, 2, 3, 4]);
   });
 
   const interactiveSurfaces = ['side panel', 'thread actions menu', 'chip hover card'] as const;
@@ -447,6 +496,74 @@ describe('ThreadCardPullRequests', () => {
     );
   });
 
+  it.each([1, 2])('keeps link order while a summary loads, then shows open #%s', async (open) => {
+    const first = held();
+    const mindroom = githubServer(async (url) => {
+      const [number] = summaryNumbers([url]);
+      if (number === 1) await first.reply;
+      return Response.json(
+        number === open ? { state: 'open' } : { state: 'closed', merged_at: '2026-11-18T10:00:00Z' }
+      );
+    });
+    roomServer.current = mindroom.server;
+    const client = new QueryClient();
+    const view = await show(roomWith([1, 2].map(sampleRef)), { phone: true, client });
+    const second = [...pullRequestKey(sampleRef(2)), `server:${mindroom.server.origin}:octo:0`];
+    try {
+      await vi.waitFor(() => expect(client.getQueryState(second)?.status).toBe('success'));
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      expect(chips(view).map((chip) => chip.textContent)).toEqual(['#1']);
+    } finally {
+      first.release();
+    }
+    await view.findByRole('img', { name: `Pull request mindroom-ai/sample-repo #${open}: Open` });
+  });
+
+  it('waits for the chip row to be on screen before reading hidden summaries', async () => {
+    vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver);
+    const mindroom = githubServer(async () => Response.json({ state: 'closed' }));
+    roomServer.current = mindroom.server;
+    const client = new QueryClient();
+    const view = await show(roomWith([1, 2].map(sampleRef)), { phone: true, client });
+    await vi.waitFor(() => expect(mindroom.statusRequests()).toBe(1));
+    await vi.waitFor(() => expect(client.isFetching()).toBe(0));
+    expect(proxiedSummaries(mindroom)).toEqual([]);
+    const row = view.container.querySelector('.mrpr-thread-card-chips');
+    expect(row).not.toBeNull();
+    await act(async () => report(true, (target) => target === row));
+    await vi.waitFor(() => expect(proxiedSummaries(mindroom)).toEqual([1, 2]));
+    await act(async () => report(true));
+    await view.findByRole('img', { name: 'Pull request mindroom-ai/sample-repo #1: Closed' });
+    expect(proxiedSummaries(mindroom)).toEqual([1, 2]);
+  });
+
+  it.each([false, true])(
+    'does not retry a refused hidden summary on remount (prior answer: %s)',
+    async (priorAnswer) => {
+      const mindroom = githubServer(async (url) =>
+        url.endsWith('/pulls/2')
+          ? Response.json({}, { status: 404 })
+          : Response.json({ state: 'open' })
+      );
+      roomServer.current = mindroom.server;
+      const client = new QueryClient();
+      const key = [...pullRequestKey(sampleRef(2)), `server:${mindroom.server.origin}:octo:0`];
+      if (priorAnswer) {
+        client.setQueryData(key, { state: 'closed' }, { updatedAt: Date.now() - STALE_TIME - 1 });
+      }
+      const room = roomWith([1, 2].map(sampleRef));
+      const options = { phone: true, client };
+      const view = await show(room, options);
+      await vi.waitFor(() => expect(client.getQueryState(key)?.status).toBe('error'));
+      view.unmount();
+      await show(room, options);
+      await vi.waitFor(() => expect(client.isFetching()).toBe(0));
+      expect(proxiedSummaries(mindroom).toSorted()).toEqual([1, 2]);
+    }
+  );
+
   it('keeps link order and does not read hidden pull requests anonymously with an empty cache', async () => {
     fetchMock.mockResolvedValue(
       Response.json({ state: 'closed', merged_at: '2026-11-18T10:00:00Z' })
@@ -457,6 +574,15 @@ describe('ThreadCardPullRequests', () => {
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
       'https://api.github.com/repos/mindroom-ai/mindroom-chat/pulls/1',
     ]);
+  });
+
+  it('orders anonymous chips by cached answers without fetching hidden links', async () => {
+    const client = new QueryClient();
+    client.setQueryData([...pullRequestKey(sampleRef(2)), false], { state: 'open' });
+    const view = await show(roomWith([1, 2].map(sampleRef)), { phone: true, client });
+    await view.findByRole('img', { name: 'Pull request mindroom-ai/sample-repo #2: Open' });
+    expect(chips(view).map((chip) => chip.textContent)).toEqual(['#2']);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('shows no count when every chip shows', async () => {

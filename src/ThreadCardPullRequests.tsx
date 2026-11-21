@@ -14,7 +14,7 @@ import { useScreenSize } from '@mindroom/client-sdk/ui';
 import { BranchChip } from './BranchChip';
 import { pullRequestUrl, type PullRequestRef } from './github';
 import { CHIP_REFETCH, PullRequestChip, useOnScreenOnce } from './PullRequestChip';
-import { answerOf, usePullRequests } from './queries';
+import { answerOf, unlessRefused, usePullRequests } from './queries';
 import { pluginRootStyle } from './theme';
 import { orderPullRequests } from './ThreadDetails';
 import { useThreadPullRequests } from './threadPullRequests';
@@ -63,11 +63,19 @@ function CardChips({
   const seen = useOnScreenOnce(element);
   const { via } = useGitHubAccess();
   // Anonymously, use cached answers for the order and leave the hourly limit for the shown chips.
-  const queries = usePullRequests(pullRequests, {
+  const cacheOnly = via === undefined;
+  const queries = usePullRequests(seen ? pullRequests : [], {
     ...CHIP_REFETCH,
-    ...((!seen || via === undefined) && { enabled: false }),
+    ...(cacheOnly && { enabled: false }),
+    refetchOnMount: unlessRefused,
+    retryOnMount: false,
   });
-  const chips = orderPullRequests(pullRequests, queries.map(answerOf)).slice(0, phone ? 1 : 2);
+  // Keep link order while summaries load, so partial answers do not move the chips.
+  const ordered =
+    !seen || queries.some((query) => query.isLoading)
+      ? pullRequests
+      : orderPullRequests(pullRequests, queries.map(answerOf));
+  const chips = ordered.slice(0, phone ? 1 : 2);
   const more = pullRequests.length - chips.length;
   const moreLabel = t('threadPullRequests.moreLabel', { count: more });
   return (

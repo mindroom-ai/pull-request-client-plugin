@@ -6,6 +6,7 @@ import { renderPluginComponent } from '@mindroom/client-sdk/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import plugin from './index';
 import { PullRequestChip } from './PullRequestChip';
+import { FakeIntersectionObserver, observers, report } from './testing/intersectionObserver';
 import { githubServer } from './testing/mindroomServer';
 import { GitHubServerContext } from './token';
 
@@ -43,38 +44,6 @@ const requested = (part: string) => fetchMock.mock.calls.some(([url]) => url.inc
 // Where `usePluginStorage` keeps the GitHub token of the test's account.
 const TOKEN_KEY = 'mindroom.plugin:%40plugin-tester%3Aexample.org/pull-requests/githubToken';
 const saveToken = () => localStorage.setItem(TOKEN_KEY, 'ghp_test');
-
-/** The chips' observers, which report only when a test tells them to (`report`). */
-const observers: FakeIntersectionObserver[] = [];
-class FakeIntersectionObserver {
-  readonly targets = new Set<Element>();
-  readonly callback: IntersectionObserverCallback;
-  constructor(callback: IntersectionObserverCallback) {
-    this.callback = callback;
-    observers.push(this);
-  }
-  observe(target: Element) {
-    this.targets.add(target);
-  }
-  unobserve(target: Element) {
-    this.targets.delete(target);
-  }
-  disconnect() {
-    this.targets.clear();
-  }
-}
-
-/** Reports to each observer that its elements are on screen, or not. */
-const report = (isIntersecting: boolean) => {
-  for (const observer of observers) {
-    const entries = [...observer.targets].map(
-      (target) => ({ target, isIntersecting } as IntersectionObserverEntry)
-    );
-    if (entries.length > 0) {
-      observer.callback(entries, observer as unknown as IntersectionObserver);
-    }
-  }
-};
 
 /**
  * GitHub with the pull request `pr`, whose head commit has the check runs `runs`, and its reviews
