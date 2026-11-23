@@ -250,8 +250,8 @@ describe('HeaderActions', () => {
     writeAnswer = async () =>
       respond({ message: 'Resource not accessible by personal access token' }, 403);
     const view = await show();
-    await waitUntil(() => expect(view.getByRole('button', { name: 'Merge' })));
-    await click(view.getByRole('button', { name: 'Merge' }));
+    await waitUntil(() => expect(view.getByRole('button', { name: 'Squash and merge' })));
+    await click(view.getByRole('button', { name: 'Squash and merge' }));
     await click(view.getByRole('button', { name: 'Confirm merge?' }));
     await waitUntil(() =>
       expect(view.getByRole('status').textContent).toContain('Could not merge this pull request')
@@ -312,7 +312,7 @@ describe('HeaderActions', () => {
   it('keeps its status region in place, so that what it says next is announced', async () => {
     writeAnswer = () => hold(() => respond({ message: 'Pull Request is not mergeable' }, 405));
     const view = await show();
-    await waitUntil(() => expect(view.getByRole('button', { name: 'Merge' })));
+    await waitUntil(() => expect(view.getByRole('button', { name: 'Squash and merge' })));
     const region = view.getByRole('status');
     expect(region.textContent).toBe('');
     await openMenu(view);
@@ -330,8 +330,8 @@ describe('HeaderActions', () => {
   it("shows GitHub's reason for a refusal after the title", async () => {
     writeAnswer = async () => respond({ message: 'Pull Request is not mergeable' }, 405);
     const view = await show();
-    await waitUntil(() => expect(view.getByRole('button', { name: 'Merge' })));
-    await click(view.getByRole('button', { name: 'Merge' }));
+    await waitUntil(() => expect(view.getByRole('button', { name: 'Squash and merge' })));
+    await click(view.getByRole('button', { name: 'Squash and merge' }));
     await click(view.getByRole('button', { name: 'Confirm merge?' }));
     await waitUntil(() =>
       expect(view.getByRole('status').textContent).toContain('Pull Request is not mergeable')
@@ -346,8 +346,8 @@ describe('HeaderActions', () => {
     await openMenu(view);
     const methods = view.getAllByRole('menuitemradio');
     expect(methods.map((method) => method.textContent)).toEqual([
-      'Merge',
       'Squash and merge',
+      'Merge',
       'Rebase and merge',
     ]);
     expect(methods[0].getAttribute('aria-checked')).toBe('true');
@@ -369,7 +369,7 @@ describe('HeaderActions', () => {
         client.getQueryState(['pull-requests', 'pr', 'o', 'r', 7, true, 'checks', 'head7'])
       ).toMatchObject({ status: 'success' })
     );
-    expect(view.getByRole('button', { name: 'Merge' })).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Squash and merge' })).toBeTruthy();
     await openMenu(view);
     expect(view.getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
       'Convert to draft',
@@ -396,8 +396,8 @@ describe('HeaderActions', () => {
   it('offers auto-merge while the checks run', async () => {
     checkRuns = [{ name: 'ci', status: 'in_progress', conclusion: null }];
     const view = await show(blocked);
-    await waitUntil(() => expect(view.getByRole('button', { name: 'Auto-merge (merge)' })));
-    await click(view.getByRole('button', { name: 'Auto-merge (merge)' }));
+    await waitUntil(() => expect(view.getByRole('button', { name: 'Auto-merge (squash)' })));
+    await click(view.getByRole('button', { name: 'Auto-merge (squash)' }));
     expect(view.getByRole('button', { name: 'Confirm auto-merge?' })).toBeTruthy();
     expect(writes()).toEqual([]);
   });
@@ -405,7 +405,7 @@ describe('HeaderActions', () => {
   it('shows the Conflicts badge on a conflicting pull request, and no merge', async () => {
     const view = await show({ ...open, mergeableState: 'dirty' });
     await waitUntil(() => expect(view.getByText('Conflicts')).toBeTruthy());
-    expect(view.queryByRole('button', { name: 'Merge' })).toBeNull();
+    expect(view.queryByRole('button', { name: 'Squash and merge' })).toBeNull();
   });
 
   it('closes on the second click of its menu row', async () => {
@@ -596,7 +596,7 @@ describe('HeaderActions', () => {
   it('draws no Merge button on a merged pull request', async () => {
     const view = await show(merged);
     await waitUntil(() => expect(moreActions(view)).toBeTruthy());
-    expect(view.queryByRole('button', { name: 'Merge' })).toBeNull();
+    expect(view.queryByRole('button', { name: 'Squash and merge' })).toBeNull();
   });
 
   it('refreshes the pull request without a write', async () => {
@@ -619,7 +619,7 @@ describe('HeaderActions', () => {
     await openMenu(view);
     await click(row(view, 'Convert to draft'));
     expect(writes()).toHaveLength(1);
-    expect(isOff(view.getByRole('button', { name: 'Merge' }))).toBe(true);
+    expect(isOff(view.getByRole('button', { name: 'Squash and merge' }))).toBe(true);
     expect(view.getByRole('status').textContent).toBe('Converting to draft...');
     // The menu still opens, with what starts no action: its actions and Refresh are off.
     expect(isOff(moreActions(view))).toBe(false);
@@ -631,19 +631,21 @@ describe('HeaderActions', () => {
     expect(isOff(row(view, 'Copy checkout command'))).toBe(false);
     await click(moreActions(view));
     // Nor does the merge arm meanwhile.
-    await click(view.getByRole('button', { name: 'Merge' }));
+    await click(view.getByRole('button', { name: 'Squash and merge' }));
     expect(view.queryByRole('button', { name: 'Confirm merge?' })).toBeNull();
     expect(writes()).toHaveLength(1);
     await answerHeld();
-    await waitUntil(() => expect(isOff(view.getByRole('button', { name: 'Merge' }))).toBe(false));
+    await waitUntil(() =>
+      expect(isOff(view.getByRole('button', { name: 'Squash and merge' }))).toBe(false)
+    );
     expect(isOff(moreActions(view))).toBe(false);
   });
 
   it('the pending primary control says so', async () => {
     writeAnswer = () => hold(() => respond({ merged: true }));
     const view = await show();
-    await waitUntil(() => expect(view.getByRole('button', { name: 'Merge' })));
-    await click(view.getByRole('button', { name: 'Merge' }));
+    await waitUntil(() => expect(view.getByRole('button', { name: 'Squash and merge' })));
+    await click(view.getByRole('button', { name: 'Squash and merge' }));
     await click(view.getByRole('button', { name: 'Confirm merge?' }));
     const pending = view.getByRole('button', { name: 'Merging...' });
     expect(isOff(pending)).toBe(true);
@@ -662,9 +664,9 @@ describe('HeaderActions', () => {
     it('announces a merge that runs and that it is done, though the header shows both', async () => {
       writeAnswer = () => hold(() => respond({ merged: true }));
       const view = await show();
-      await waitUntil(() => expect(view.getByRole('button', { name: 'Merge' })));
+      await waitUntil(() => expect(view.getByRole('button', { name: 'Squash and merge' })));
       const region = status(view);
-      await click(view.getByRole('button', { name: 'Merge' }));
+      await click(view.getByRole('button', { name: 'Squash and merge' }));
       await click(view.getByRole('button', { name: 'Confirm merge?' }));
       expect(status(view)).toBe(region);
       expect(region.textContent).toBe('Merging...');
@@ -724,8 +726,8 @@ describe('HeaderActions', () => {
     it('moves the focus to More actions when a merge takes the focused control away', async () => {
       writeAnswer = () => hold(() => respond({ merged: true }));
       const view = await show();
-      await waitUntil(() => expect(view.getByRole('button', { name: 'Merge' })));
-      const merge = view.getByRole('button', { name: 'Merge' });
+      await waitUntil(() => expect(view.getByRole('button', { name: 'Squash and merge' })));
+      const merge = view.getByRole('button', { name: 'Squash and merge' });
       merge.focus();
       await click(merge);
       await click(view.getByRole('button', { name: 'Confirm merge?' }));

@@ -1442,14 +1442,14 @@ describe('fetchRepository', () => {
     });
   });
 
-  it('keeps the merge methods in order', async () => {
+  it('orders squash ahead of merge and rebase when all are allowed', async () => {
     const all = { mergeCommitAllowed: true, squashMergeAllowed: true, rebaseMergeAllowed: true };
     vi.stubGlobal('fetch', () =>
       Promise.resolve(json({ data: { repository: { ...apiRepository, ...all } } }))
     );
     expect((await fetchRepository('o', 'r', 'tok')).mergeMethods).toEqual([
-      'merge',
       'squash',
+      'merge',
       'rebase',
     ]);
   });

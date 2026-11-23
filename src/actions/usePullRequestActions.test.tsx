@@ -243,11 +243,11 @@ describe('usePullRequestActions', () => {
     expect(fetchMock.mock.calls[0]![0]).toBe(GRAPHQL);
     expect(actions.repo).toEqual({
       canWrite: true,
-      mergeMethods: ['merge', 'squash', 'rebase'],
+      mergeMethods: ['squash', 'merge', 'rebase'],
       autoMergeAllowed: true,
       defaultBranch: 'main',
     });
-    expect(actions.method).toBe('merge');
+    expect(actions.method).toBe('squash');
   });
 
   it('does not ask again for a repository GitHub refused, also in a panel opened again', async () => {
@@ -741,7 +741,7 @@ describe('usePullRequestActions', () => {
     it('starts on it when auto-merge is armed while the pull request shows', async () => {
       const view = await show(refA, pull);
       await loaded();
-      expect(actions.method).toBe('merge');
+      expect(actions.method).toBe('squash');
       view.rerender(ui(refA, armed('rebase')));
       expect(actions.method).toBe('rebase');
     });
@@ -757,11 +757,11 @@ describe('usePullRequestActions', () => {
     });
 
     it('does not start another pull request on it', async () => {
-      const view = await show(refA, armed('squash'));
+      const view = await show(refA, armed('rebase'));
       await loaded();
-      expect(actions.method).toBe('squash');
+      expect(actions.method).toBe('rebase');
       view.rerender(ui(refB, { ...pull, url: 'https://github.com/o/r/pull/8' }));
-      expect(actions.method).toBe('merge');
+      expect(actions.method).toBe('squash');
     });
 
     it('falls back when the repository no longer allows the armed method', async () => {

@@ -874,7 +874,7 @@ describe('PullRequestPanel', () => {
         'polite',
       ]);
       expect(view.getByRole('menuitem', { name: 'Open on GitHub' })).toBeTruthy();
-      expect(view.queryByRole('button', { name: 'Merge' })).toBeNull();
+      expect(view.queryByRole('button', { name: 'Squash and merge' })).toBeNull();
       expect(fetchMock.mock.calls.filter(([url]) => url === GRAPHQL)).toEqual([]);
     });
 
@@ -901,7 +901,7 @@ describe('PullRequestPanel', () => {
       const view = await show();
       expect(await view.findByRole('button', { name: 'More actions' })).toBeTruthy();
       expect(view.getAllByText('Merged')).toHaveLength(1);
-      expect(view.queryByRole('button', { name: 'Merge' })).toBeNull();
+      expect(view.queryByRole('button', { name: 'Squash and merge' })).toBeNull();
     });
 
     // As T3 Code: only a branch GitHub found mergeable, not one it is still computing (null).
@@ -1047,13 +1047,13 @@ describe('with the GitHub account connected in MindRoom', () => {
     await signedInAs(view, 'Signed in as octo through MindRoom');
     // Nothing of it in the panel itself: once it works, it does not ask for attention.
     expect(view.queryByText(/through MindRoom/)).toBeNull();
-    await click(await view.findByRole('button', { name: 'Merge' }));
+    await click(await view.findByRole('button', { name: 'Squash and merge' }));
     await click(await view.findByRole('button', { name: 'Confirm merge?' }));
     await waitUntil(() =>
       expect(mindroom.githubRequests()).toContainEqual({
         method: 'PUT',
         path: '/repos/mindroom-ai/mindroom-chat/pulls/200/merge',
-        body: { merge_method: 'merge', sha: 'abc123' },
+        body: { merge_method: 'squash', sha: 'abc123' },
         accept: 'application/vnd.github+json',
       })
     );
@@ -1078,7 +1078,7 @@ describe('with the GitHub account connected in MindRoom', () => {
     expect(view.getByText('Use a token in this browser')).toBeTruthy();
     expect(view.getByText('Refresh')).toBeTruthy();
     expect(view.queryByText('Close pull request')).toBeNull();
-    expect(view.queryByRole('button', { name: 'Merge' })).toBeNull();
+    expect(view.queryByRole('button', { name: 'Squash and merge' })).toBeNull();
   });
 
   it('says so when MindRoom cannot remove the token chosen from the menu, and keeps it', async () => {
@@ -1261,7 +1261,7 @@ describe('with the GitHub account connected in MindRoom', () => {
       expect(control.getAttribute('aria-disabled')).toBe('true');
       expect(control.getAttribute('aria-live')).toBe('polite');
       control.focus();
-      expect(view.queryByRole('button', { name: 'Merge' })).toBeNull();
+      expect(view.queryByRole('button', { name: 'Squash and merge' })).toBeNull();
       expect(pullReads()).toBe(1);
       await later(999);
       expect(pullReads()).toBe(1);
@@ -1271,10 +1271,12 @@ describe('with the GitHub account connected in MindRoom', () => {
       await later(1999);
       expect(pullReads()).toBe(2);
       await later(1);
-      await settle(() => expect(view.getByRole('button', { name: 'Merge' })).toBeTruthy());
+      await settle(() =>
+        expect(view.getByRole('button', { name: 'Squash and merge' })).toBeTruthy()
+      );
       expect(pullReads()).toBe(3);
       expect(view.queryByText(CHECKING)).toBeNull();
-      expect(document.activeElement).toBe(view.getByRole('button', { name: 'Merge' }));
+      expect(document.activeElement).toBe(view.getByRole('button', { name: 'Squash and merge' }));
     });
 
     it('stops after three reads again, and offers Merge as GitHub answers then', async () => {
@@ -1290,7 +1292,9 @@ describe('with the GitHub account connected in MindRoom', () => {
         await later(ms);
         await settle(() => expect(pullReads()).toBe(reads));
       }
-      await settle(() => expect(view.getByRole('button', { name: 'Merge' })).toBeTruthy());
+      await settle(() =>
+        expect(view.getByRole('button', { name: 'Squash and merge' })).toBeTruthy()
+      );
       expect(view.queryByText(CHECKING)).toBeNull();
       await later(60_000);
       expect(pullReads()).toBe(4);
@@ -1353,7 +1357,7 @@ describe('with the GitHub account connected in MindRoom', () => {
     );
     roomServer.current = mindroom.server;
     const view = await show();
-    await click(await view.findByRole('button', { name: 'Merge' }));
+    await click(await view.findByRole('button', { name: 'Squash and merge' }));
     await click(await view.findByRole('button', { name: 'Confirm merge?' }));
     await waitUntil(() =>
       expect(view.getByRole('status').textContent).toContain(
@@ -1404,7 +1408,7 @@ describe('with the GitHub account connected in MindRoom', () => {
     );
     roomServer.current = mindroom.server;
     const view = await show();
-    await click(await view.findByRole('button', { name: 'Merge' }));
+    await click(await view.findByRole('button', { name: 'Squash and merge' }));
     await click(await view.findByRole('button', { name: 'Confirm merge?' }));
     await waitUntil(() =>
       expect(view.getByRole('status').textContent).toContain(
@@ -1456,7 +1460,7 @@ describe('with the GitHub account connected in MindRoom', () => {
     roomServer.current = mindroom.server;
     fetchMock.mockImplementation(github);
     const view = await show();
-    expect(await view.findByRole('button', { name: 'Merge' })).toBeTruthy();
+    expect(await view.findByRole('button', { name: 'Squash and merge' })).toBeTruthy();
     expect(mindroom.server.request).not.toHaveBeenCalled();
     expect(view.queryByText(/through MindRoom/)).toBeNull();
     await toggleMore(view);
@@ -1471,7 +1475,7 @@ describe('with the GitHub account connected in MindRoom', () => {
     expect(mindroom.githubRequests()).toEqual([]);
     expect(fetchMock).toHaveBeenCalled();
     expect(fetchMock.mock.calls.filter(([url]) => url === GRAPHQL)).toEqual([]);
-    expect(view.queryByRole('button', { name: 'Merge' })).toBeNull();
+    expect(view.queryByRole('button', { name: 'Squash and merge' })).toBeNull();
     expect(view.queryByText(/through MindRoom/)).toBeNull();
   });
 
@@ -1479,12 +1483,14 @@ describe('with the GitHub account connected in MindRoom', () => {
     const mindroom = githubServer(github);
     roomServer.current = mindroom.server;
     const view = await show();
-    expect(await view.findByRole('button', { name: 'Merge' })).toBeTruthy();
+    expect(await view.findByRole('button', { name: 'Squash and merge' })).toBeTruthy();
     mindroom.connected(false);
-    await click(view.getByRole('button', { name: 'Merge' }));
+    await click(view.getByRole('button', { name: 'Squash and merge' }));
     await click(await view.findByRole('button', { name: 'Confirm merge?' }));
     // The write failed, and the panel reads the pull request anonymously, with no writes.
-    await waitUntil(() => expect(view.queryByRole('button', { name: 'Merge' })).toBeNull());
+    await waitUntil(() =>
+      expect(view.queryByRole('button', { name: 'Squash and merge' })).toBeNull()
+    );
     await waitUntil(() => expect(fetchMock).toHaveBeenCalled());
     expect(view.queryByText(/through MindRoom/)).toBeNull();
   });
@@ -2098,7 +2104,7 @@ describe('with the GitHub account connected in MindRoom', () => {
     const view = await show();
     await signedInAs(view, 'Signed in as pat-login through MindRoom');
     mindroom.unreadable(true);
-    await click(await view.findByRole('button', { name: 'Merge' }));
+    await click(await view.findByRole('button', { name: 'Squash and merge' }));
     await click(await view.findByRole('button', { name: 'Confirm merge?' }));
     expect(await view.findByText(UNREADABLE)).toBeTruthy();
     expect(view.queryByText(/through MindRoom/)).toBeNull();
@@ -2181,7 +2187,7 @@ describe('with the GitHub account connected in MindRoom', () => {
     await saveInMindroom(mindroom);
     roomServer.current = mindroom.server;
     const view = await show();
-    await click(await view.findByRole('button', { name: 'Merge' }));
+    await click(await view.findByRole('button', { name: 'Squash and merge' }));
     await click(await view.findByRole('button', { name: 'Confirm merge?' }));
     await waitUntil(() =>
       expect(view.getByRole('status').textContent).toContain(
@@ -2198,7 +2204,7 @@ describe('with the GitHub account connected in MindRoom', () => {
     await saveInMindroom(mindroom);
     roomServer.current = mindroom.server;
     const view = await show();
-    await click(await view.findByRole('button', { name: 'Merge' }));
+    await click(await view.findByRole('button', { name: 'Squash and merge' }));
     await click(await view.findByRole('button', { name: 'Confirm merge?' }));
     await waitUntil(() =>
       expect(view.getByRole('status').textContent).toContain(

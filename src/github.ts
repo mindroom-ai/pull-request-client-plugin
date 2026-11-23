@@ -997,7 +997,7 @@ export type MergeMethod = 'merge' | 'squash' | 'rebase';
 export type Repository = {
   /** Whether the viewer may merge, close and change the repository's pull requests. */
   canWrite: boolean;
-  /** The methods the repository allows, in GitHub's order. */
+  /** The methods the repository allows, squash first. */
   mergeMethods: MergeMethod[];
   autoMergeAllowed: boolean;
   defaultBranch: string;
@@ -1027,8 +1027,8 @@ export async function fetchRepository(
   const raw = record(data?.repository);
   if (!raw) throw new GitHubWriteError('failed', 200);
   const allowed: [MergeMethod, unknown][] = [
-    ['merge', raw.mergeCommitAllowed],
     ['squash', raw.squashMergeAllowed],
+    ['merge', raw.mergeCommitAllowed],
     ['rebase', raw.rebaseMergeAllowed],
   ];
   return {

@@ -48,13 +48,16 @@ export function primaryControl(
   return repo.canWrite ? 'merge' : null;
 }
 
-/** The viewer's choice, else the method they used last, else the repository's first. */
+/**
+ * The viewer's choice, else the method they used last, else squash when allowed, else the
+ * repository's first.
+ */
 export function resolveMergeMethod(
   allowed: MergeMethod[],
   chosen: MergeMethod | null,
   last: MergeMethod | null
 ): MergeMethod | null {
-  for (const method of [chosen, last]) {
+  for (const method of [chosen, last, 'squash' as const]) {
     if (method && allowed.includes(method)) return method;
   }
   return allowed[0] ?? null;

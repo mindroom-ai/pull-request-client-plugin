@@ -2307,7 +2307,7 @@ test("a viewer who can write merges the panel's pull request with two clicks", a
   await expect(panel(page).locator('.mrpr-panel-title')).toHaveText(tokenEndpoint.title, {
     timeout: 30_000,
   });
-  const merge = panel(page).getByRole('button', { name: 'Merge', exact: true });
+  const merge = panel(page).getByRole('button', { name: 'Squash and merge', exact: true });
   await expect(merge).toBeVisible({ timeout: 30_000 });
   await expect(
     panel(page).getByRole('button', { name: 'Open checks: All checks have passed' })
@@ -2319,14 +2319,13 @@ test("a viewer who can write merges the panel's pull request with two clicks", a
   await panel(page).getByRole('button', { name: 'More actions' }).click();
   const menu = page.getByRole('menu', { name: 'More actions' });
   await expect(menu.getByRole('menuitemradio')).toHaveText([
-    'Merge',
     'Squash and merge',
+    'Merge',
     'Rebase and merge',
   ]);
-  await expect(menu.getByRole('menuitemradio', { name: 'Merge', exact: true })).toHaveAttribute(
-    'aria-checked',
-    'true'
-  );
+  await expect(
+    menu.getByRole('menuitemradio', { name: 'Squash and merge', exact: true })
+  ).toHaveAttribute('aria-checked', 'true');
   await shot(page, 'actions-menu', { keepPointer: true });
   await page.keyboard.press('Escape');
   await expect(menu).toHaveCount(0);
@@ -2347,7 +2346,7 @@ test("a viewer who can write merges the panel's pull request with two clicks", a
     {
       method: 'PUT',
       pathname: `/repos/acme/${tokenEndpoint.repo}/pulls/${tokenEndpoint.number}/merge`,
-      body: { merge_method: 'merge', sha: headSha(tokenEndpoint) },
+      body: { merge_method: 'squash', sha: headSha(tokenEndpoint) },
     },
   ]);
   await expect(merge).toHaveCount(0);
@@ -2424,7 +2423,7 @@ test("a merge GitHub refuses shows GitHub's reason under the header", async ({ p
   const warnings = listenerWarnings(page);
   await openRoom(page);
   await openTokenEndpoint(page);
-  const merge = panel(page).getByRole('button', { name: 'Merge', exact: true });
+  const merge = panel(page).getByRole('button', { name: 'Squash and merge', exact: true });
   await merge.click();
   await panel(page).getByRole('button', { name: 'Confirm merge?' }).click();
   const result = panel(page).locator('.mrpr-action-result');
@@ -2454,14 +2453,16 @@ test('the merge method chosen in the menu names Merge, and holds for the next pu
   await openTokenEndpoint(page);
   const more = panel(page).getByRole('button', { name: 'More actions' });
   const menu = page.getByRole('menu', { name: 'More actions' });
-  await expect(panel(page).getByRole('button', { name: 'Merge', exact: true })).toBeVisible();
+  await expect(
+    panel(page).getByRole('button', { name: 'Squash and merge', exact: true })
+  ).toBeVisible();
   await more.click();
-  await menu.getByRole('menuitemradio', { name: 'Squash and merge' }).click();
+  await menu.getByRole('menuitemradio', { name: 'Merge', exact: true }).click();
   await expect(menu).toHaveCount(0);
-  const squash = panel(page).getByRole('button', { name: 'Squash and merge', exact: true });
-  await expect(squash).toBeVisible();
+  const merge = panel(page).getByRole('button', { name: 'Merge', exact: true });
+  await expect(merge).toBeVisible();
   await more.click();
-  await expect(menu.getByRole('menuitemradio', { name: 'Squash and merge' })).toHaveAttribute(
+  await expect(menu.getByRole('menuitemradio', { name: 'Merge', exact: true })).toHaveAttribute(
     'aria-checked',
     'true'
   );
@@ -2471,7 +2472,7 @@ test('the merge method chosen in the menu names Merge, and holds for the next pu
   // The thread's other pull request, whose checks still run, auto-merges with it.
   await (await openPrMenu(page)).nth(0).click();
   await expect(panel(page).locator('.mrpr-panel-title')).toHaveText(PULLS.sessionStore.title);
-  await expect(panel(page).getByRole('button', { name: 'Auto-merge (squash)' })).toBeVisible({
+  await expect(panel(page).getByRole('button', { name: 'Auto-merge (merge)' })).toBeVisible({
     timeout: 30_000,
   });
 
@@ -2479,7 +2480,7 @@ test('the merge method chosen in the menu names Merge, and holds for the next pu
   await page.goto(`/home/${encodeURIComponent(roomId)}`);
   await expect(card(page, roots.sessions)).toBeVisible({ timeout: 120_000 });
   await openTokenEndpoint(page);
-  await expect(squash).toBeVisible();
+  await expect(merge).toBeVisible();
   expect(writes).toEqual([]);
   expect(unanswered).toEqual([]);
   expect(warnings).toEqual([]);
@@ -2496,7 +2497,7 @@ test('a pull request closed with two clicks reopens from the menu', async ({ pag
   const more = panel(page).getByRole('button', { name: 'More actions' });
   const menu = page.getByRole('menu', { name: 'More actions' });
   const badge = panel(page).locator('.mrpr-badge-state');
-  const merge = panel(page).getByRole('button', { name: 'Merge', exact: true });
+  const merge = panel(page).getByRole('button', { name: 'Squash and merge', exact: true });
   const pull = `/repos/acme/${tokenEndpoint.repo}/pulls/${tokenEndpoint.number}`;
 
   await more.click();
@@ -2550,13 +2551,13 @@ test("a branch behind its base updates from the base branch's warning", async ({
   await shot(page, 'actions-updated');
 
   // And a merge sends that new head, not the old one, which GitHub would refuse.
-  await panel(page).getByRole('button', { name: 'Merge', exact: true }).click();
+  await panel(page).getByRole('button', { name: 'Squash and merge', exact: true }).click();
   await panel(page).getByRole('button', { name: 'Confirm merge?' }).click();
   await expect(panel(page).locator('.mrpr-badge-state')).toHaveText('Merged', { timeout: 30_000 });
   expect(writes[1]).toEqual({
     method: 'PUT',
     pathname: `${pull}/merge`,
-    body: { merge_method: 'merge', sha: updatedSha(tokenEndpoint) },
+    body: { merge_method: 'squash', sha: updatedSha(tokenEndpoint) },
   });
   expect(unanswered).toEqual([]);
   expect(warnings).toEqual([]);
@@ -2615,7 +2616,7 @@ test("on a phone the panel's header has the controls", async ({ browser, baseURL
     await expect(panel(page).locator('.mrpr-panel-title')).toHaveText(PULLS.sessionStore.title, {
       timeout: 30_000,
     });
-    await expect(panel(page).getByRole('button', { name: 'Auto-merge (merge)' })).toBeVisible({
+    await expect(panel(page).getByRole('button', { name: 'Auto-merge (squash)' })).toBeVisible({
       timeout: 30_000,
     });
     await expect(panel(page).getByRole('button', { name: 'More actions' })).toBeVisible();
@@ -2750,7 +2751,7 @@ test("without a token, the GitHub account connected in MindRoom reads and merges
     timeout: 30_000,
   });
   await expect(panel(page).getByRole('button', { name: 'Forget token' })).toHaveCount(0);
-  const merge = panel(page).getByRole('button', { name: 'Merge', exact: true });
+  const merge = panel(page).getByRole('button', { name: 'Squash and merge', exact: true });
   await expect(merge).toBeVisible({ timeout: 30_000 });
   await expect(panel(page).getByText(/^Loading/)).toHaveCount(0);
   // Once it works the panel's body says nothing of it; More actions says as whom it goes.
@@ -2770,7 +2771,7 @@ test("without a token, the GitHub account connected in MindRoom reads and merges
     {
       method: 'PUT',
       pathname: `/repos/acme/${tokenEndpoint.repo}/pulls/${tokenEndpoint.number}/merge`,
-      body: { merge_method: 'merge', sha: headSha(tokenEndpoint) },
+      body: { merge_method: 'squash', sha: headSha(tokenEndpoint) },
     },
   ]);
   // Every request went through MindRoom: the page itself asked GitHub nothing.

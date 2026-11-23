@@ -45,7 +45,7 @@ const pullRequest: PullRequest = {
 
 const repository: Repository = {
   canWrite: true,
-  mergeMethods: ['merge', 'squash', 'rebase'],
+  mergeMethods: ['squash', 'merge', 'rebase'],
   autoMergeAllowed: true,
   defaultBranch: 'main',
 };
@@ -132,16 +132,24 @@ describe('primaryControl', () => {
 });
 
 describe('resolveMergeMethod', () => {
-  it('takes the chosen method', () => {
+  it('takes the chosen method over last and default', () => {
+    expect(resolveMergeMethod(['squash', 'merge', 'rebase'], 'merge', 'rebase')).toBe('merge');
     expect(resolveMergeMethod(['merge', 'squash'], 'squash', 'merge')).toBe('squash');
   });
 
-  it('falls to the last method when the chosen one is not allowed', () => {
-    expect(resolveMergeMethod(['merge', 'squash'], 'rebase', 'squash')).toBe('squash');
+  it('falls to the last method over the default when the chosen one is not allowed', () => {
+    expect(resolveMergeMethod(['squash', 'merge'], 'rebase', 'merge')).toBe('merge');
+    expect(resolveMergeMethod(['squash', 'merge', 'rebase'], null, 'rebase')).toBe('rebase');
   });
 
-  it("falls to the repository's first method when neither is allowed", () => {
-    expect(resolveMergeMethod(['squash', 'rebase'], null, 'merge')).toBe('squash');
+  it('prefers squash when neither chosen nor last is allowed, even if merge comes first', () => {
+    expect(resolveMergeMethod(['merge', 'squash', 'rebase'], null, null)).toBe('squash');
+    expect(resolveMergeMethod(['merge', 'squash'], 'rebase', null)).toBe('squash');
+  });
+
+  it("falls to the repository's first method when squash is not allowed", () => {
+    expect(resolveMergeMethod(['merge', 'rebase'], null, null)).toBe('merge');
+    expect(resolveMergeMethod(['rebase'], null, 'squash')).toBe('rebase');
   });
 
   it('is null when the repository allows none', () => {
