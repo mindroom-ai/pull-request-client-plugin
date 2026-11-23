@@ -1,152 +1,169 @@
-# Pull requests for MindRoom Chat
+# Pull Requests
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![CI](https://github.com/mindroom-ai/pull-request-client-plugin/actions/workflows/ci.yml/badge.svg)](https://github.com/mindroom-ai/pull-request-client-plugin/actions/workflows/ci.yml)
+[![Client SDK](https://img.shields.io/badge/MindRoom%20Chat%20SDK-66-blue)](https://github.com/mindroom-ai/mindroom-chat/blob/main/docs/client-plugins.md)
 
-A [MindRoom Chat](https://github.com/mindroom-ai/mindroom-chat) client plugin for GitHub pull requests. Click a pull request link in a room's message, and the pull request opens in a side panel of the room, which reads it from GitHub and, for a viewer who may write to its repository, merges it and changes its state there; a second click, while the panel shows that pull request, opens it on GitHub. On a phone, the click shows a small card with the pull request: its repository and number, state, title and author, and from the card, the pull request opens in the side panel. The side panel shows:
+<picture>
+  <source media="(prefers-reduced-motion: no-preference)" srcset="https://raw.githubusercontent.com/mindroom-ai/mindroom/main/assets/logo/logo-mark-animated.svg" />
+  <img src="https://raw.githubusercontent.com/mindroom-ai/mindroom/main/assets/logo/logo-mark.svg" alt="MindRoom Logo" align="right" width="120" />
+</picture>
 
-- The header, which takes the place of the room's title row (the panel's `title: 'own'`): a top row with the repository and number, the Draft, Merged, Closed and Auto-merge badges, the More actions menu and the panel's Close; the title; the author, when it was updated and the files and lines changed (split into code, tests, generated files and docs in a tooltip); the base branch (with a warning when the branch is behind it or conflicts) and the head branch, ended by the primary action for a viewer who may write (below). More actions holds Open on GitHub and Copy checkout command (the `gh pr checkout` command, which the entry says it copied) for everyone, and Forget token with a browser token. The checks' summary, which opens the list of checks, ends the tab bar. On Summary and Timeline the header scrolls away with the tab, under the top row and the tab bar, which stay; once it is out of view the top row shows the number and title, a button that scrolls back up to the header. While an action runs or its line shows, the header stays in place. The Code tab scrolls in itself under a header that stays.
-- Summary: the reviewers and their verdicts (no row when there are none), the labels, the description, the checks, and the conversation (comments, reviews and review threads) with a filter for bots and a Newest or Oldest first order.
-- Timeline: the opening, each commit, each verdict, the review threads, the comments and the merge or close, in time order; choosing a commit shows its diff in the Code tab.
-- Code: the changed files as a tree beside their diffs, in T3 Code's file order and in a column whose edge drags its width (kept in the browser), with the review threads at their lines (and those not on the diff above it), a commit selector, viewed marks kept in the browser, and controls to hide test files and whitespace changes, show the diffs split or stacked, wrap lines, and collapse or expand all files.
+A [MindRoom Chat](https://github.com/mindroom-ai/mindroom-chat) client plugin that brings GitHub pull requests and git worktree branches directly into rooms — with status chips on Compact thread cards, rich hover and thread-detail previews, a thread header PR menu, and an in-room side panel for reviewing summaries, timelines, changed files, syntax-highlighted diffs, and merge actions.
 
-A mouse resting on a pull request link in a room's message (on a screen with a fine pointer), or the keyboard's focus on it, shows a small hover card once it has rested there 150 ms, in place of the link's address as its tooltip: the rows of the open thread's pull requests menu for that pull request, its state icon, repository and number, its state and checks in words, its title, and the lines and files it changes and when it was updated. It reads GitHub as that menu does: with a token or MindRoom's connection, an answer older than two minutes is read again as the card opens; without either, only a pull request with no answer yet is asked for, once, and a refusal is not asked again while it is cached, also when the network comes back. A pen or a tap shows no hover card, and a click does what it did. The card needs MindRoom Chat's client SDK 66.
+Click any pull request link or chip to open it beside the conversation (click again while it is open to jump to GitHub). The pull request card and diff viewer are adapted from [T3 Code](https://github.com/pingdotgg/t3code) (MIT, see [NOTICE](NOTICE)).
 
-A pull request's state has GitHub's colors, the same in every theme, wherever it shows: green for open, purple for merged, red for closed and gray for a draft.
+## Screenshots
 
-The card, the panel, the chips and the details grow and shrink with the client's page zoom, as the client's own interface does; the Files column keeps the width it was dragged to.
+| Compact cards & hover preview (dark)                                                | Compact cards & hover preview (light)                                                 |
+| ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| ![Compact cards and PR hover preview in dark mode](docs/screenshots/hover-dark.png) | ![Compact cards and PR hover preview in light mode](docs/screenshots/hover-light.png) |
 
-The card and most of the panel are ported from [T3 Code](https://github.com/pingdotgg/t3code) (MIT, see [NOTICE](NOTICE)); each ported file names its T3 Code source in its first line.
+| Side panel — Summary & actions (dark)                                              | Side panel — File tree & Code diff (light)                                          |
+| ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| ![PR side panel Summary tab in dark mode](docs/screenshots/panel-summary-dark.png) | ![PR side panel Code diff tab in light mode](docs/screenshots/panel-code-light.png) |
 
-## Actions
+| Phone 390px — Thread PR menu                                    | Phone 390px — PR side panel                              |
+| --------------------------------------------------------------- | -------------------------------------------------------- |
+| ![Phone thread header PR menu](docs/screenshots/phone-menu.png) | ![Phone PR side panel](docs/screenshots/phone-panel.png) |
 
-With a stored GitHub token whose account may write to the repository (GitHub's `viewerPermission` is write, maintain or admin), the panel's header has T3 Code's pull request actions. Without a token, or for an account that may only read, the header has no action, and More actions only what applies without one; without a token, the panel does not ask GraphQL either.
+## Why it's useful
 
-- One primary control: Merge, labeled with the merge method (Merge, Squash and merge or Rebase and merge); Auto-merge with the method instead, while the checks run or fail, the repository allows auto-merge and GitHub would not merge at once (GitHub refuses to turn auto-merge on for a pull request it can merge now, so there the control is Merge and the menu has no Enable auto-merge); Ready for review for a draft; and a Conflicts badge for a branch that conflicts with its base. While GitHub still computes whether an open pull request merges (its `mergeable` is null, for about a second after the base moved), the primary control is off (it keeps the focus) and says `Checking whether it can merge...` in place of Merge or Auto-merge, the menu leaves both out, and the panel reads the pull request again after 1 s, 2 s and 4 s, at most three times, while it shows that pull request with the same access and no action runs (a read already under way, as the one after an action, is joined, not replaced); after that the controls go by GitHub's last answer. Another access, or the pull request changed on GitHub (its update time or head), starts the reads afresh. A merged or closed pull request, or one with auto-merge on, keeps its badge and has no primary control.
-- A More actions menu, in the header's top row: the merge method, when the repository allows more than one (the last one chosen is kept for the account; a pull request with auto-merge on starts on the method it is armed with, so Merge now merges as its badge says), then what applies of Merge now, Enable auto-merge, Disable auto-merge, Ready for review, Convert to draft, Close pull request, Reopen pull request and Delete branch, and Refresh. Delete branch shows for a merged or closed pull request whose branch is in the same repository, is not its default branch and still ends at the pull request's last commit, and asks in a dialog first. The panel asks GitHub where the branch points now, so a branch that is gone (deleted here or elsewhere), was pushed to since, or was made anew under the same name is not offered; and GitHub deletes it only while it still points at that commit (`updateRefs` with the commit as `beforeOid`), so a push in between is refused. A branch found already gone counts as deleted. The same read tells the pull request's state on GitHub at that moment: the branch of a pull request that was opened again since the panel read it is not deleted (deleting it would close the pull request), and the line says so.
-- In the base branch's warning, for a branch that is behind its base and that GitHub found mergeable: Update branch, which merges the base into the branch, and Update with rebase. GitHub may make the branch's new commit after it answers, and its answer names the pull request's head: with a new head the line says the branch was updated (or rebased), and the read after it gives the panel that head, which a merge then sends; with the head the panel had, the line says only that the update was requested, and Refresh in the menu shows the new head once GitHub has made it.
+- **PR status & worktree branches at a glance:** Compact thread cards display linked PRs with GitHub's native state colors (open, draft, merged, closed) and CI check marks, or the thread's git worktree branch when no PR is linked yet.
+- **Rich hover & thread details:** Hover any PR chip or link for an instant preview card (reviewers, labels, checks, branch status, diff stats), or open the thread header PR menu to browse every linked PR.
+- **Review diffs without leaving chat:** The in-room side panel includes **Summary**, **Timeline**, and **Code** tabs with a resizable file tree, split or stacked syntax-highlighted diffs, inline review threads, commit selector, and per-file viewed marks.
+- **Merge, update, and manage PRs in place:** Maintainers with write access can merge (merge, squash, or rebase), toggle auto-merge, update branches behind base, mark drafts ready, close or reopen PRs, and safely delete merged branches right from the panel.
+- **Flexible GitHub authentication:** Public repos work read-only out of the box; private repos and write actions work seamlessly through MindRoom's GitHub connection or a personal access token stored in the browser.
 
-Merge, Merge now, auto-merge and Close take two clicks: the first turns the button into "Confirm merge?" (or "Confirm auto-merge?", "Confirm close?"), and a second within 3 s runs it; Escape, a click elsewhere or the focus leaving it disarms it. The rest run at once. One action runs at a time per pull request, also across a panel closed and opened again, and every control waits while it does; a line under the header says what runs, then why GitHub refused (with a hint when the token may lack write access, when GitHub's rate limit is used up or when GitHub answered with an error of its own, and GitHub's reason after it), or that a branch was updated, rebased or deleted. The line is a status region, which also tells a screen reader what the header shows by itself: that a merge runs (the button says "Merging...") and that the pull request was merged, closed, reopened and so on. If GitHub took an action but the pull request could not be read again after it, the line shows the outcome ("Pull request merged") until the panel has read it, since the header then still shows the pull request from before. While an action runs, Merge is off for a click but keeps the focus, and More actions opens with its actions and Refresh off, so Open on GitHub, Copy checkout command and the token's entries stay at hand; if the action takes the focused control away (a merged pull request has no Merge), the focus goes to More actions. An outcome stays with its pull request until dismissed, so one that came while the panel showed another shows when that one is shown again. After every action, whatever came of it, the panel loads the pull request again, asking GitHub rather than the browser's cache, and the controls wait until that read is in, so they never offer the pull request as it was before the action. They wait for the pull request alone: its files, checks and comments are read again as well, without holding the controls. Merge, auto-merge and the updates send the head commit the panel shows, so GitHub refuses them if the branch moved since.
+## Quick start
 
-## Pull requests of a thread
+### Bundled by default
 
-A thread can be linked to the pull requests it works on. MindRoom's backend plugin `pull-requests` writes the links into the room's state, one state event per thread and pull request, which this plugin only reads:
+Official MindRoom Chat builds (web, Mac, iOS, and Docker) already bundle `pull-request-client-plugin` out of the box.
 
-- type: `com.mindroom.thread.pull_request`
-- state key: `["<thread root event ID>","<owner>/<repo>#<number>"]` as compact JSON (no spaces), with the owner and repository in lower case
-- content: `{"url","set_by","set_at"}`: the pull request's URL, `https://github.com/<owner>/<repo>/pull/<number>` with the owner and repository in lower case, who linked it, and when (UTC, ISO 8601); a pull request that was unlinked has the content `{}`
+- **Per-user toggle:** Enable or disable the plugin in **Settings → Plugins** (synced across devices).
+- **Deployment override:** Disable it across a deployment in MindRoom Chat's `config.json`:
 
-A linked pull request shows as a chip: its state's icon, its number and, while a GitHub token is stored, the mark of its checks, with the repository's name before the number when the room's links span more than one repository.
-
-- On a thread's card in the Compact view: up to two chips (one on a phone), then `+N` for the rest. With a token or MindRoom's GitHub connection, the card reads every linked pull request's summary once the chip row has been on screen. When the reads settle, the chips follow the open thread's menu order, with open pull requests first. Anonymously, the card shows the first links in link order, as before. A click on a chip opens the thread and the pull request in the side panel; elsewhere on the card, the click opens the thread as before. These chips take no focus, since the card is one button.
-- In the open thread's banner, beside its More button: one button with the icon and colour of its pull requests' state together and, past one, their count (the branch icon for a thread with only a worktree), named and tooltipped "Pull requests (N): Open". The state is T3 Code's thread badge's: draft when every pull request is a draft, open while any is open, merged when every one is merged, else closed; a pull request GitHub refused counts for nothing, and while one still loads, or the room's MindRoom server has not said yet whether GitHub is connected there, the button keeps the plain icon unless those answered already make it open (not at all in the second case), so its colour never changes once shown. It opens a menu of the thread's details rows (below), each pull request an item that opens it in the side panel, or on GitHub where the page has no side panel; while the panel is open, the item of the pull request it shows is current. The thread's worktree comes last, as an item that does nothing. Escape and a click outside close the menu, a long list scrolls inside it, and the button asks GitHub for no checks. With a token or the GitHub account connected in MindRoom it asks for each pull request no surface has loaded yet (a refusal is not asked again when it shows again), and asks again for an answer more than two minutes old when the page shows again (the tab, or the app resumed) or its window is focused, every five minutes while the page shows and the pull request is open or a draft (not once it is merged or closed), and when its menu opens, so a pull request merged meanwhile shows as merged. With a token GitHub allows 5,000 requests an hour, and the browser's own read of a pull request unchanged since, which GitHub answers with a 304, costs none of it; a read through MindRoom is an ordinary request. A read that fails keeps the answer before, while one GitHub refuses (not found, or the token refused) counts for nothing and is not asked again by itself. Without either it asks GitHub nothing, to keep the anonymous hourly limit, and takes its colour from what the chips and the menu's rows read. The menu's rows ask with the same requests.
-
-A pointer that rests on a chip on a card for 150 ms opens a card with the pull request at a glance. It opens only where the pointer can hover finely (`(hover: hover) and (pointer: fine)`, a mouse or a trackpad): on a touch screen, a tap on a chip does what it did before. The card shows:
-
-- the repository and the number, the state, and the Auto-merge badge
-- the title, in three lines at most
-- the author, when the pull request was opened, and when it was updated, merged or closed
-- the head and base branches, with a warning when the branch conflicts with its base or is behind it
-- the lines, files, commits and comments
-- the checks' summary, when the chip shows their mark (an open pull request, with a token)
-- each reviewer's latest verdict, and the reviewers and teams still asked for a review, in one line: an avatar with the verdict on its corner as in the panel, six at most and the count of the rest, with a token
-- the first five labels, each cut to one short line, and the count of the rest
-- a note that a click opens the pull request in the side panel, when it does
-
-Until GitHub sent the pull request, the card shows the repository, the number and that it loads; when GitHub refused, why. It only reads: it takes no pointer and no focus, and closes when the pointer leaves, on a click and on Escape. It opens below the chip, or above it when the chip is in the lower half of the window, and stays inside the window as its content arrives.
-
-A thread's agent can also work in a git worktree, in its workspace or outside it. MindRoom's backend plugin `thread-worktree` records it in the room's state, one state event per thread, which this plugin only reads:
-
-- type: `com.mindroom.thread.worktree`
-- state key: the thread's root event ID, as it is (not JSON)
-- content: `{"path","branch","repo","set_by","set_at"}`: the worktree's directory, relative to the agent's workspace or absolute for one outside it (POSIX separators, no `..` part), its branch and its repository's name (each empty when it has none), who set it, and when; a thread without a worktree has the content `{}`
-
-The worktree shows as its branch: the branch icon and the branch's name, or the last part of the path when the branch is empty, with the path, the repository and the branch in its tooltip. In a room whose links, or whose worktrees, span several repositories, the repository's name comes before the branch's, as on a pull request chip, so its threads can be told apart; the two names share the room the branch has alone. A path the backend plugin reads as no worktree shows none, and a branch or repository it reads as none is left out.
-
-- On a thread's card in the Compact view: in the place of the chips, when no pull request is linked to the thread; with linked pull requests, the card shows only their chips. A click on the branch opens the thread, as anywhere else on the card.
-- In the open thread's pull requests menu: after its pull requests, as in the details.
-
-## Thread details
-
-A thread with a linked pull request or a worktree has details, which MindRoom Chat shows in the hover card of its card in the Compact view, when a pointer rests on the card, as the first group of the thread's menu, and in the open thread's pull requests menu. They are rows of text, with no control and no link:
-
-- Each pull request linked to the thread, including those the card does not show, with a line between them. Open pull requests come first, then drafts, closed and merged ones, each group by newest activity first, with unanswered pull requests last. Each row shows its state's icon, its repository and number (without the owner, as on a chip) and, once GitHub has answered, its state in words and, while a GitHub token is stored, its checks in a few words; then its title (two lines at most); then the lines and files it changes, when it was updated, and `this worktree` when its head branch is the thread's worktree's branch.
-- The thread's worktree, under a line and its label: its branch, when it has one and no linked pull request is on it, and its path, shortened in the middle, whole in its tooltip.
-
-The details share the card's summary requests and the chips' checks requests. A hover asks only for summaries and checks it has not already read, including those of hidden pull requests, and does not ask again after a refusal. The menu's details load as the hover card's do, except that with a token or the GitHub account connected in MindRoom the menu asks again for an answer (a pull request's or its checks') more than two minutes old when it opens (see the button above).
-
-## Build it into a client
-
-The plugin is built into a MindRoom Chat client by listing its directory in `MINDROOM_CLIENT_PLUGINS` when the client is built or run (see "Client plugins" in the client's `docs/architecture.md`):
-
-```sh
-MINDROOM_CLIENT_PLUGINS=/path/to/pull-request-client-plugin just build
+```json
+{
+  "plugins": {
+    "pull-requests": {
+      "enabled": false
+    }
+  }
+}
 ```
 
-Run `npm install` here first. `.npmrc` sets `legacy-peer-deps`, so that the Pierre packages' React peer range installs no second React; React, folds and TanStack Query come from the client.
+### Companion backend plugins
 
-## Tests and types
+Pair this client plugin with MindRoom's backend plugins to populate thread cards and menus automatically:
 
-Every pull request and every push to `main` runs the unit tests, the type check and Prettier against the client's `main` (`.github/workflows/ci.yml`).
+- [`pull-request-plugin`](https://github.com/mindroom-ai/pull-request-plugin) — links pull requests agents create to Matrix threads.
+- [`thread-worktree-plugin`](https://github.com/mindroom-ai/thread-worktree-plugin) — ties each Matrix thread to its active git worktree so branch chips appear on cards and in menus.
 
-The tests run with the client's vitest, from the client's checkout:
+### Custom builds & Docker
 
-```sh
-MINDROOM_CLIENT_PLUGINS=/path/to/pull-request-client-plugin nix develop -c npx vitest run /path/to/pull-request-client-plugin/src
+To build MindRoom Chat with a local checkout of this plugin, install dependencies here once (`.npmrc` sets `legacy-peer-deps` so `@pierre/*` shares the client's React) and pass its absolute path via `MINDROOM_CLIENT_PLUGINS` (see [`docs/client-plugins.md`](https://github.com/mindroom-ai/mindroom-chat/blob/main/docs/client-plugins.md)). Requires MindRoom Chat client SDK `66` or later:
+
+```bash
+git clone https://github.com/mindroom-ai/pull-request-client-plugin.git
+cd pull-request-client-plugin
+npm ci
+
+cd /path/to/mindroom-chat
+MINDROOM_CLIENT_PLUGINS=/abs/path/to/pull-request-client-plugin npx vite build
 ```
 
-The `/src` filter matters: without it, vitest also collects the client's own tests through the `.mindroom-chat` link.
+For Docker builds, copy the plugin into your build context and pass `--build-arg`:
 
-`npm run typecheck` uses the client's TypeScript and its source types. For that, link the client's checkout as `.mindroom-chat` in this directory (it is git-ignored):
+```bash
+docker build -f docker/Dockerfile \
+  --build-arg MINDROOM_CLIENT_PLUGINS=/src/plugins/pull-request-client-plugin \
+  -t mindroom-chat .
+```
 
-```sh
+## Connecting GitHub
+
+- **Public repositories (no auth):** Read-only views work immediately without a token (subject to GitHub's 60 req/hr unauthenticated limit).
+- **MindRoom GitHub connection (recommended):** In rooms backed by a MindRoom server, connect GitHub in MindRoom via the GitHub App or save a token in MindRoom (`Save in MindRoom at <host>` in the panel's token form) so every device shares access without storing tokens in the browser.
+- **Browser personal access token:** Enter a GitHub token in the PR panel to store it in `localStorage` for the signed-in account on that browser (overrides MindRoom's connection while set).
+
+### Fine-grained PAT permissions
+
+Every fine-grained token automatically includes **Metadata: Read**. Grant these repository permissions:
+
+| Permission      | Read-only access                                                                                                                         | Write actions (optional)                                                 |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| Pull requests   | **Read** — PR metadata, files, commits, reviews, review comments, and conversation comments (`GET /pulls/{n}/*`, `/issues/{n}/comments`) | **Read & write** — merge, auto-merge, draft/ready, close, reopen, update |
+| Contents        | **Read** — per-commit files, behind-base comparison, and blobs (`GET /commits/{ref}`, `/compare/{basehead}`, `/git/blobs/{sha}`)         | **Read & write** — merge, update branch, delete merged branch            |
+| Commit statuses | **Read** — head commit statuses (`GET /commits/{ref}/status`)                                                                            | —                                                                        |
+
+> **Note on check runs:** GitHub does not offer a fine-grained PAT permission for `/commits/{ref}/check-runs` (GitHub Actions). Fine-grained tokens show commit statuses only; MindRoom's GitHub App (**Checks: Read**) or a classic PAT (no scope for public repos, `repo` scope for private repos) shows check runs too.
+
+<details>
+<summary><b>Pull request actions &amp; merge rules</b></summary>
+
+- **Primary header action (write access required):** Shows **Merge** (Merge, Squash and merge, or Rebase and merge), **Auto-merge** when checks are pending/failing and the repo allows auto-merge while GitHub would not merge immediately, **Ready for review** for drafts, or a **Conflicts** badge when conflicting. While GitHub computes mergeability (`mergeable: null`), the button shows `Checking whether it can merge...` and re-polls after 1 s, 2 s, and 4 s.
+- **More actions menu:** Holds **Open on GitHub**, **Copy checkout command** (`gh pr checkout`), merge method selection (remembered per account), **Merge now**, **Enable/Disable auto-merge**, **Ready for review / Convert to draft**, **Close / Reopen pull request**, **Delete branch**, **Refresh**, and token controls.
+- **Updating branches:** When a mergeable branch is behind base, the base-branch warning offers **Update branch** (merge) and **Update with rebase**.
+- **Safety confirmations:** **Merge**, **Merge now**, **Auto-merge**, and **Close** require a second confirmation click within 3 seconds (`Confirm merge?`, etc.; Escape or blur disarms). **Delete branch** only appears for merged or closed same-repo non-default branches still at the PR's head SHA, asks in a dialog, and enforces `beforeOid` so concurrent pushes are never lost.
+- **Execution &amp; refresh:** One action runs at a time per PR; Merge, Auto-merge, and Update pass the displayed head SHA so stale requests fail safely. After every action, the panel fetches fresh PR state and reports outcomes or GitHub's refusal reason in a status line beneath the header.
+
+</details>
+
+<details>
+<summary><b>Thread chips, worktrees &amp; Matrix state</b></summary>
+
+- **Linked pull requests (`com.mindroom.thread.pull_request`):** Written by [`pull-request-plugin`](https://github.com/mindroom-ai/pull-request-plugin) into room state with compact JSON key `["<thread_root_event_id>","<owner>/<repo>#<number>"]` (lowercased) and content `{"url","set_by","set_at"}` (`{}` when unlinked).
+- **Compact card chips:** Show up to 2 PR chips on desktop (1 on phone) plus `+N`, sorted open-first once summaries load (prefixing repo names when links span multiple repos). On fine-pointer devices, hovering a chip or message PR link for 150 ms opens a read-only preview card; clicking opens the side panel (on phone, tapping a message link opens an inline card first).
+- **Thread worktrees (`com.mindroom.thread.worktree`):** Written by [`thread-worktree-plugin`](https://github.com/mindroom-ai/thread-worktree-plugin) with state key `<thread_root_event_id>` and content `{"path","branch","repo","set_by","set_at"}` (`{}` when cleared). Shown as a branch chip on cards with no linked PRs, and below PRs in thread details and the thread header menu (marking matching PRs with `this worktree`).
+- **Thread header button &amp; details:** Displays one status-colored PR button (draft if all draft, open if any open, merged if all merged, else closed) that opens a scrollable menu of every linked PR and the worktree; Compact card hover and thread menus show the same details.
+- **Panel polish:** Scales with MindRoom Chat page zoom, persists dragged file-tree width and per-file viewed marks in browser storage, shows a lines breakdown tooltip (code, tests, generated, docs), and offers diff options (split/stacked, wrap lines, hide tests, hide whitespace, collapse/expand all).
+
+</details>
+
+<details>
+<summary><b>GitHub auth &amp; MindRoom proxy details</b></summary>
+
+- **Precedence order:**
+  1. **Browser token (`localStorage`):** Always comes first when set; requests go directly to `https://api.github.com` (`GET` REST + `POST /graphql` for merge settings, `viewerPermission`, and branch checks) and MindRoom is not queried.
+  2. **MindRoom server connection:** In rooms with a MindRoom server (`useMindroomServerStatus`), checks `GET /api/github/status` and proxies reads/writes through `POST /api/github/request` without exposing credentials to the page. A token saved in MindRoom (`PUT /api/github/token`) takes precedence over the GitHub App (`DELETE /api/github/token` falls back to the App if connected).
+  3. **Anonymous:** Falls back to public reads with no GraphQL or write actions, pausing requests until reset if rate-limited.
+- **GitHub App permissions:** Configure MindRoom's GitHub App with **Pull requests: Read &amp; write**, **Contents: Read &amp; write**, **Checks: Read**, **Commit statuses: Read**, and **Metadata: Read**, installed on target repositories (see MindRoom's [`docs/tools/project-management.md`](https://github.com/mindroom-ai/mindroom/blob/main/docs/tools/project-management.md)).
+- **Cache isolation &amp; refresh:** Query caches are keyed per auth identity and credential generation so switching accounts or credentials never leaks stale data. Authenticated thread menus refresh stale (> 2 min) open/draft PRs on open, window focus, and every 5 minutes while visible.
+
+</details>
+
+<details>
+<summary><b>Development, tests &amp; screenshots</b></summary>
+
+Link a local `mindroom-chat` checkout with installed `node_modules` at `.mindroom-chat` (git-ignored):
+
+```bash
 ln -s /path/to/mindroom-chat .mindroom-chat
 ```
 
-`tsconfig.json` resolves `@mindroom/client-sdk/*` to `.mindroom-chat/src/client-sdk/*` and the shared packages through `.mindroom-chat/node_modules`; for the end-to-end specs in `e2e/`, `@mindroom/e2e/*` to the client's `e2e/helpers/` and `@playwright/test` to the client's copy.
+Typecheck and Prettier formatting check (matching `.github/workflows/ci.yml`, from this repository):
 
-The end-to-end spec `e2e/threadPullRequests.spec.ts` runs in the client's Playwright against a production build with this plugin, on an e2e slot of its own (the client's `docs/development.md`, "A client plugin in its own repository"). From the client's checkout, with absolute directories:
-
-```sh
-E2E_PLUGIN_DIRS=/path/to/pull-request-client-plugin MINDROOM_CLIENT_PLUGINS=/path/to/pull-request-client-plugin just e2e-slot 3 --preview npx playwright test --project=pull-request-client-plugin
+```bash
+npm run typecheck
+.mindroom-chat/node_modules/.bin/prettier --check src e2e README.md package.json tsconfig.json
 ```
 
-The page answers GitHub's API itself, so no request leaves the test. With `MRPR_SHOTS=<directory>` (an absolute one: the run's working directory is the slot's snapshot), it saves screenshots of a thread's pull requests: the Compact view in the light and dark themes, the hover card of a chip on a card in both themes, a hover card with six reviewers and five labels, the open thread's pull requests button (`menu-button.png`), its tooltip, its menu of eleven pull requests, an item under the pointer and the panel one of them opened (`menu-tooltip-*.png`, `menu-open-*.png`, `menu-hover-*.png`, `menu-panel-*.png`, in both themes), the menu marking that one current (`menu-current.png`), the same on a phone (`phone-menu-*.png`), and the Compact view on a phone; of a thread's branch on its card and in the open thread's menu (`branch-menu.png`); and of the panel's actions: the header with Merge (`actions-open.png`), the More actions menu (`actions-menu.png`), the armed Confirm merge? (`actions-confirm.png`), the header after the merge (`actions-merged.png`), the dialog before the branch goes (`actions-delete-dialog.png`), the line with GitHub's reason for a refused merge (`actions-refused.png`), the header of a closed pull request (`actions-closed.png`), the base branch's warning with Update branch (`actions-behind.png`), the header after the update (`actions-updated.png`), the line after an update GitHub has not made yet (`actions-update-requested.png`) and the header with its controls on a phone (`actions-phone.png`); and of the panel with the GitHub account connected in MindRoom (`mindroom-connected.png`) and its More actions menu, which says as whom (`mindroom-connected-menu.png`), whose stand-in server the page answers too; and of the panel's Summary and Code tabs at a page zoom of 100 % and 150 % (`zoom-100-summary.png`, `zoom-100-code.png`, `zoom-150-summary.png`, `zoom-150-code.png`).
+Unit tests (from `.mindroom-chat`):
 
-## GitHub through MindRoom
+```bash
+export MINDROOM_CLIENT_PLUGINS=/abs/path/to/pull-request-client-plugin
+MINDROOM_CLIENT_PLUGIN_TESTS_ONLY=1 npx vitest run "$MINDROOM_CLIENT_PLUGINS/src"
+```
 
-In a room with a MindRoom server (the one `useMindroomServerStatus` gives the room; until the room knows whether it has one, the plugin reads nothing unless a token is stored), the plugin can read and write GitHub as the GitHub account the person connected in MindRoom, with no token in the browser: MindRoom adds the account's token to each request, and the token never reaches the page. MindRoom connects an account in one of two ways, both the person's own: a personal access token saved in MindRoom (which comes first), or the GitHub App connection (Connect GitHub). The plugin chooses how to reach GitHub in this order:
+Playwright end-to-end tests and screenshot capture (from `.mindroom-chat`, using synthetic stubbed GitHub API responses):
 
-1. A token stored in the browser (see "GitHub token") always comes first, and MindRoom is asked nothing.
-2. Else, when the room has a MindRoom server, the plugin asks it once (`GET /api/github/status`) whether the person's GitHub is connected, and again when the tab regains focus five minutes later at the earliest, half a minute while it is not connected, and on Try again. While it says so, every read and write goes through `POST /api/github/request`, and the panel's body says nothing of it: once it works, it stays out of the way. The header's `More actions` menu (shown then also to a viewer who cannot write, with `Refresh` and these alone) ends with a muted line, `Signed in as <login> through MindRoom`, over `Use a token in this browser`, which opens the token form to use a token of the browser's instead (`Cancel` closes it). With the token saved in MindRoom (the status's `via`; a server that does not say it knows the App alone) the menu also offers `Remove token from MindRoom` (`DELETE /api/github/token`), after which MindRoom goes with the App connection when there is one (the status's `app_connected`), else the plugin reads without either. The token form also stays where it showed before, as an override.
-3. Else the plugin reads without a token, as before, and offers no writes. In a room without a MindRoom server nothing changes: no request goes to MindRoom.
+```bash
+E2E_PLUGIN_DIRS=/abs/path/to/pull-request-client-plugin \
+MINDROOM_CLIENT_PLUGINS=/abs/path/to/pull-request-client-plugin \
+MRPR_SHOTS=/abs/path/to/shots-out \
+  just e2e-slot 3 --preview npx playwright test --project=pull-request-client-plugin
+```
 
-Everything this README says of a stored token holds for the connection too: the checks marks, the reviewers in the hover card, the GraphQL reads and the panel's actions, which show as soon as GitHub says the account may write. What was read through MindRoom is kept apart, by the GitHub login, from what was read with a token, without one or as another login, and the plugin reads everything again when the status names another connection, or none: each part under the keys of the new one, while what was read stays under its own, as each read goes only with the access its key names. GitHub's rate limit through MindRoom is held to the account it limited. When MindRoom answers that the account is no longer connected (`409 github_not_connected`), the plugin reads without it again, until the status is asked again. When GitHub refuses the connected account, the plugin says to connect GitHub again in MindRoom.
-
-For this, MindRoom's GitHub connection has to be set up and the person has to connect:
-
-- a GitHub App with the repository permissions Pull requests: Read and write, Contents: Read and write, Checks: Read and Metadata: Read (and Commit statuses: Read for the commit statuses), installed on the repositories, as MindRoom's `docs/tools/project-management.md` ("GitHub In Client Plugins") describes;
-- Connect GitHub in MindRoom, by the person who uses the plugin.
-
-The App reaches only the repositories it is installed on: for any other, GitHub does not find the pull request, and the plugin says the App may not be installed there, and offers the token form.
-
-### A token saved in MindRoom
-
-In a room with a MindRoom server, the token form offers `Only this browser` (the default: localStorage, as in a room without one, where the form offers no choice) or `Save in MindRoom at <host>`, which names the host of the room's MindRoom server, where the token goes, for every device the person signs in on. The room's server is the newest that a MindRoom account published there, and a client that lists no trusted servers takes any, so the plugin never sends a token there unless the person chose that server by its name; when the room's server changes while the form is open, the choice goes back to `Only this browser`. Saving in MindRoom sends the token once (`PUT /api/github/token`, which follows no redirect, nor does `DELETE`); MindRoom checks it with GitHub and keeps it for the person's account alone. The save counts only once the answer says MindRoom uses the token now (`connected` and `via: "token"`); the plugin then asks the status again, which also says whether the App is connected. Each credential MindRoom may use reads under keys of its own: the key carries a count for the server (`server:<origin>:<login>:<generation>`) that goes up when a save or a removal starts and when the status names another connection, so a token never shares what the App, or another token, of the same login read, and nothing is read again under the keys before. From the start of a save or a removal until its outcome is known, the reads under way through that server are cancelled and none starts, as nobody knows which credential one would go with; what was read before stays on screen meanwhile. Once MindRoom answered, the parts read under the new keys; when the request failed without an answer, also because MindRoom took longer than 30 seconds for it, the status is asked first, with the same limit, which every status request has (and nothing goes through MindRoom when that fails too); when MindRoom refused it (a 4xx, or `502 github_unreachable`), nothing changed and the keys before stay. A status or a `409 github_not_connected` that MindRoom answers to a request sent before the save (or a removal) started, or before a status named another connection, changes nothing. One save or removal runs at a time for a server: `Save` and `Remove token from MindRoom` are off, and ignored, while either runs, and so is the form's `Cancel` while it saves. While it saves, the form says `Saving...`. Until MindRoom saved it, the token is in the page in the form's field alone, and stays there when the save fails, to try again; once saved, the field is cleared. It is never kept in the browser's storage, the query keys, their data, the errors or the logs. When GitHub refuses the token (`400 github_token_rejected`), the form says `GitHub refused this token.`; a server without the route (404 or 405) says `This MindRoom server cannot save tokens yet. Use Only this browser.` Saving in MindRoom forgets a token stored in this browser, which would otherwise come first and hide it; the form says so while one is stored (`Saving it removes the token stored in this browser, in every room.`). When GitHub refuses the saved token later, or does not find the pull request with it, the plugin says so (`GitHub refused the token saved in MindRoom.`) and offers `Remove token from MindRoom` there too, as nothing else loads then; MindRoom keeps the token until the person saves another or removes it. When MindRoom cannot read the token saved there (`503 github_token_unreadable`, to the status or to a request), asking again does not mend it, so the plugin keeps that as a state of its own: nothing goes through MindRoom, the parts read without either, and the panel (also while the pull request still loads that way, and beside the error when it does not read) says `MindRoom cannot read the token saved there. Save a new one or remove it.` with the token form (`Only this browser` chosen, as always: the answer that asks for a token is the server's own) and `Remove token from MindRoom`, but no `Try again`, except beside a read that failed of itself (no answer, or an error of GitHub's own), which keeps its message and `Try again`. While the panel shows no pull request, it keeps the error it showed while it reads the pull request again with the same access (as a refused save starts it; read with another, it says it loads), so the token form there stays, with what was typed in it and what came of the save. The panel has one token form, in one place for the pull request and the server, whether the pull request loads, failed or shows. It shows once something calls for it (the error, a part a token would let load, the token MindRoom cannot read, `Use a token in this browser`) and then stays, whatever the reads and the status do, until the person presses `Cancel` (offered once nothing calls for it any more, when the form shows without a hint), a save or removal started from it succeeds, the person presses `Forget token`, or another pull request or server shows: meanwhile what was typed in it, where it saves and what came of a save or removal stay, `MindRoom could not remove the token.` among them. Any other 503 is a failed status as before. Beside `Remove token from MindRoom`, the panel says `Then MindRoom uses your GitHub App connection.` while there is one, and after the removal `Token removed from MindRoom.`, a live region, which takes the focus once, when the focus was on the button or fell with it (not when the person moved it elsewhere meanwhile, nor again when a later save fails). In the panel that line shows at its top, above whatever the panel shows next (the pull request read with the App, or anonymously, or the error when it no longer reads), until a token is saved again or the panel closes. Where the pressed control goes with what surrounded it (`Save` in the form opened by `Use a token in this browser`, or the menu's `Remove token from MindRoom`, which goes with the menu), the focus goes to the pull request's title, or to the token field while no pull request shows.
-
-## GitHub token
-
-Public pull requests need no token. For a private repository, or to avoid GitHub's rate limit for requests without one, a person can enter a GitHub token in the plugin's panel. The token is kept in the browser's localStorage for the signed-in account, where any script running on the page can read it. In a room with a MindRoom server it can be saved in MindRoom instead (see "A token saved in MindRoom"): then it is in the page only in the form's field until it is saved, and in no browser storage. Requests go to `https://api.github.com` and nowhere else; the token is sent only there, and only when one is stored. The plugin reads with `GET`, and asks GraphQL (`POST https://api.github.com/graphql`, only with a token) for the repository's merge settings and whether the account may write, and for where the branch of a merged or closed pull request points; it writes only when a person runs one of the panel's actions.
-
-With a token or MindRoom's connection, a thread card asks for one summary per linked pull request once its chip row has been on screen. The shown chips share those requests; only shown open or draft chips ask for checks, up to two more requests each. These reads can run again when the card or chip shows after its answer is more than two minutes old, but not when the tab regains focus. A chip's hover card asks for reviews when it opens, usually one request (one per 100 reviews), and uses that answer for two minutes; a chip that is only on screen asks for none. Anonymously, the first links show in link order. Only those chips ask for their summaries, and they ask for no checks or reviews. GitHub allows 60 anonymous requests an hour for the address, shared with the panel. After GitHub answers with its rate limit, the plugin asks it nothing more until the limit resets.
-
-Use a fine-grained token with read-only access to these permissions of the repositories, as GitHub's [permissions required for fine-grained personal access tokens](https://docs.github.com/en/rest/authentication/permissions-required-for-fine-grained-personal-access-tokens) lists them for the endpoints the plugin calls (every fine-grained token also has Metadata: read):
-
-| Permission            | What the panel reads with it                                                                                                                                                                                                                                                                                |
-| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Pull requests: read   | the pull request (`GET /repos/{owner}/{repo}/pulls/{pull_number}`), its files, commits, reviews and review comments (`.../files`, `.../commits`, `.../reviews`, `.../comments`), and its conversation comments (`GET /repos/{owner}/{repo}/issues/{issue_number}/comments`, which Issues: read also allows) |
-| Contents: read        | one commit's files (`GET /repos/{owner}/{repo}/commits/{ref}`) and how far the branch is behind its base (`GET /repos/{owner}/{repo}/compare/{basehead}`)                                                                                                                                                   |
-| Commit statuses: read | the commit statuses of the head commit (`GET /repos/{owner}/{repo}/commits/{ref}/status`)                                                                                                                                                                                                                   |
-
-For the panel's actions, the token needs write access: a fine-grained token with Pull requests: Read and write (merge, auto-merge, ready for review, draft, close, reopen and update branch) and Contents: Read and write (merge, update branch and delete branch), or a classic token with the `repo` scope. A token with read-only access keeps the panel read-only in effect: the header shows the actions when the account may write, since GitHub's `viewerPermission` is the account's and not the token's, but GitHub refuses each one, and the line under the header says the token may not have write access.
-
-GitHub has no fine-grained permission for check runs (`GET /repos/{owner}/{repo}/commits/{ref}/check-runs`, where GitHub Actions reports), so with a fine-grained token the panel shows the commit statuses and leaves the check runs out. A classic personal access token shows them: with no scope for a public repository, and with the `repo` scope for a private one, which also lets the token write to every repository its owner can.
+</details>
