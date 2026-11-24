@@ -11,7 +11,6 @@
     "isolatedModules": true,
     "typeRoots": ["./.mindroom-chat/node_modules/@types"],
     "types": ["node"],
-    "baseUrl": ".",
     "paths": {
       "@mindroom/client-sdk/*": ["./.mindroom-chat/src/client-sdk/*"],
       "@mindroom/e2e/*": ["./.mindroom-chat/e2e/helpers/*"],
