@@ -48,6 +48,7 @@ export const en = {
     noCommitChanges: 'This commit has no file changes.',
     onlyTests: 'Only test files changed, and test files are hidden.',
     onlyWhitespace: 'Only whitespace changed, and whitespace changes are hidden.',
+    contextUnavailable: 'Full context unavailable for {{path}}.',
   },
   thread: {
     comments_one: '{{count}} comment',

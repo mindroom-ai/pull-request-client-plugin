@@ -406,41 +406,51 @@ export function CodeTab({
     () => new Set((viewFiles ?? []).map((file) => file.path).filter(isTestFile)),
     [viewFiles]
   );
+  const shownPartialDiffs = useMemo(
+    () =>
+      hideTests
+        ? parsedFiles.filter((fileDiff) => !testPaths.has(resolveFileDiffPath(fileDiff)))
+        : parsedFiles,
+    [parsedFiles, hideTests, testPaths]
+  );
   const sourceByPath = useMemo(
     () => new Map(viewFiles?.map((file) => [file.path, file])),
     [viewFiles]
   );
-  const preparedFiles = useMemo(
+  const shownDiffs = useMemo(
     () =>
-      parsedFiles.map((parsed) =>
+      shownPartialDiffs.map((parsed) =>
         prepareFileDiff(parsed, {
           ignoreWhitespace,
           sha: sourceByPath.get(resolveFileDiffPath(parsed))?.sha,
         })
       ),
-    [parsedFiles, sourceByPath, ignoreWhitespace]
+    [shownPartialDiffs, sourceByPath, ignoreWhitespace]
   );
   const cacheKeyByPath = useMemo(
-    () => new Map(preparedFiles.map((file) => [resolveFileDiffPath(file), file.cacheKey])),
-    [preparedFiles]
+    () => new Map(shownDiffs.map((file) => [resolveFileDiffPath(file), file.cacheKey])),
+    [shownDiffs]
   );
-  const shownDiffs = useMemo(
-    () =>
-      hideTests
-        ? preparedFiles.filter((fileDiff) => !testPaths.has(resolveFileDiffPath(fileDiff)))
-        : preparedFiles,
-    [preparedFiles, hideTests, testPaths]
-  );
+
+  const [expandNotice, setExpandNotice] = useState<{ scope: string; path: string } | null>(null);
+  const expandFailurePath = expandNotice?.scope === scope ? expandNotice.path : null;
 
   // Abort in-flight blob reads on unmount or when the diff view, credentials, theme, or
   // whitespace mode changes — not on unrelated file-list refreshes that retain existing items.
   const sessionRef = useRef<{
+    scope: string;
     controller: AbortController;
     inFlight: Map<string, Promise<string | null>>;
+    unavailableShas: Set<string>;
   } | null>(null);
   useLayoutEffect(() => {
     const controller = new AbortController();
-    const session = { controller, inFlight: new Map<string, Promise<string | null>>() };
+    const session = {
+      scope,
+      controller,
+      inFlight: new Map<string, Promise<string | null>>(),
+      unavailableShas: new Set<string>(),
+    };
     sessionRef.current = session;
     return () => {
       controller.abort();
@@ -468,31 +478,49 @@ export function CodeTab({
       const parsed = parsedFilesByPath.get(path);
       const source = sources.get(path);
       const expectedKey = cacheKeys.get(path);
+      if (expectedKey === undefined || fileDiff.cacheKey !== expectedKey) {
+        throw new Error('Diff expansion cancelled');
+      }
+      const fail = (error: unknown) => {
+        if (!signal.aborted && path && loaderRef.current.cacheKeyByPath.get(path) === expectedKey) {
+          setExpandNotice({ scope: session.scope, path });
+        }
+        return error;
+      };
       if (
         !parsed ||
         !canHydrateDiff(parsed) ||
         !source?.sha ||
-        expectedKey === undefined ||
-        fileDiff.cacheKey !== expectedKey ||
         currentAccess.via === undefined ||
         currentAccess.pending
       ) {
-        throw new Error('Diff cannot be expanded');
+        throw fail(new Error('Diff cannot be expanded'));
       }
       const { sha } = source;
+      if (session.unavailableShas.has(sha)) throw fail(new Error('Diff blob unavailable'));
       const pending =
         session.inFlight.get(sha) ??
         loadDiffBlob(ref, sha, currentAccess, signal).finally(() => {
           session.inFlight.delete(sha);
         });
       session.inFlight.set(sha, pending);
-      const blob = await pending;
+      let blob: string | null;
+      try {
+        blob = await pending;
+      } catch (error) {
+        throw fail(error);
+      }
       signal.throwIfAborted();
       if (loaderRef.current.cacheKeyByPath.get(path) !== expectedKey) {
         throw new Error('Diff expansion cancelled');
       }
-      const old = blob === null ? null : reconstructOldFile(parsed, source, blob);
-      if (blob === null || old === null) throw new Error('Diff cannot be expanded');
+      if (blob === null) {
+        session.unavailableShas.add(sha);
+        throw fail(new Error('Diff blob unavailable'));
+      }
+      const old = reconstructOldFile(parsed, source, blob);
+      if (old === null) throw fail(new Error('Diff blob mismatch'));
+      setExpandNotice(null);
       return {
         oldFile: { name: parsed.prevName ?? parsed.name, contents: old },
         newFile: { name: parsed.name, contents: blob },
@@ -814,7 +842,8 @@ export function CodeTab({
       {commits.status === 'error' ||
       threads.status === 'error' ||
       truncatedReviewComments !== undefined ||
-      truncatedCommits !== undefined ? (
+      truncatedCommits !== undefined ||
+      expandFailurePath !== null ? (
         <div className="mrpr-code-notices">
           {commits.status === 'error' ? (
             <GitHubErrorState compact error={commits.error} onRetry={commits.retry} />
@@ -833,6 +862,11 @@ export function CodeTab({
               label={t('truncated.commits', { count: truncatedCommits })}
               href={`${pullRequestUrl(pullRequest)}/commits`}
             />
+          ) : null}
+          {expandFailurePath !== null ? (
+            <p role="status" className="mrpr-status mrpr-note">
+              {t('code.contextUnavailable', { path: expandFailurePath })}
+            </p>
           ) : null}
         </div>
       ) : null}

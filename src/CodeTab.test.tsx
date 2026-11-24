@@ -20,7 +20,7 @@ import {
   type FileDiffContentsLoader,
   type FileDiffMetadata,
 } from '@pierre/diffs';
-import { fnv1a32, getDiffLineStat } from './diff/diffRendering';
+import { fnv1a32, getDiffLineStat, prepareFileDiff } from './diff/diffRendering';
 import { trapOptions } from './testing/focusTrapStandIn';
 import {
   greenhouseAfter,
@@ -39,6 +39,11 @@ vi.mock('focus-trap-react', async () => ({
 vi.mock('@mindroom/client-sdk/ui', async (importOriginal) => {
   const ui = await importOriginal<typeof import('@mindroom/client-sdk/ui')>();
   return { ...ui, useMarkdownHtml: (markdown: string) => markdown };
+});
+
+vi.mock('./diff/diffRendering', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./diff/diffRendering')>();
+  return { ...actual, prepareFileDiff: vi.fn(actual.prepareFileDiff) };
 });
 
 // jsdom has no custom elements, layout or ResizeObserver, which Pierre's tree and diff view need:
@@ -608,28 +613,68 @@ describe('CodeTab', () => {
         }
         return respond({}, 404);
       });
-      await show({
+      const tab = await show({
         files: [noSha, oversized, lfs, mismatch, flaky],
         pullRequest: request,
       });
+      const expand = async (diff: FileDiffMetadata) => {
+        let error: unknown;
+        let result: Awaited<ReturnType<FileDiffContentsLoader>> | undefined;
+        await act(async () => {
+          try {
+            result = await loader()!(diff);
+          } catch (caught) {
+            error = caught;
+          }
+        });
+        if (error !== undefined) throw error;
+        return result!;
+      };
 
-      await expect(loader()!(itemOf(noSha.path)!.fileDiff)).rejects.toThrow();
+      await expect(expand(itemOf(noSha.path)!.fileDiff)).rejects.toThrow();
       expect(blobCalls()).toEqual([]);
-      await expect(loader()!(itemOf(oversized.path)!.fileDiff)).rejects.toThrow();
-      await expect(loader()!(itemOf(lfs.path)!.fileDiff)).rejects.toThrow();
-      await expect(loader()!(itemOf(mismatch.path)!.fileDiff)).rejects.toThrow();
-      await expect(loader()!(itemOf(flaky.path)!.fileDiff)).rejects.toThrow();
-      expect(itemOf(flaky.path)!.fileDiff.isPartial).toBe(true);
+      expect(tab.getByRole('status').textContent).toBe('Full context unavailable for no-sha.py.');
 
-      // A subsequent click after the transient failure succeeds cleanly.
-      await expect(loader()!(itemOf(flaky.path)!.fileDiff)).resolves.toEqual({
+      await expect(expand(itemOf(oversized.path)!.fileDiff)).rejects.toThrow();
+      expect(tab.getByRole('status').textContent).toBe('Full context unavailable for huge.py.');
+      // Repeat click on a deterministic unavailable SHA reuses the session cache without re-fetching.
+      const callsAfterOversized = blobCalls().length;
+      await expect(expand(itemOf(oversized.path)!.fileDiff)).rejects.toThrow();
+      expect(blobCalls()).toHaveLength(callsAfterOversized);
+      expect(tab.getByRole('status').textContent).toBe('Full context unavailable for huge.py.');
+
+      await expect(expand(itemOf(lfs.path)!.fileDiff)).rejects.toThrow();
+      expect(tab.getByRole('status').textContent).toBe('Full context unavailable for lfs.py.');
+
+      await expect(expand(itemOf(mismatch.path)!.fileDiff)).rejects.toThrow();
+      expect(tab.getByRole('status').textContent).toBe('Full context unavailable for mismatch.py.');
+
+      // A transient 500 shows the notice, then retrying once the server recovers clears it.
+      await expect(expand(itemOf(flaky.path)!.fileDiff)).rejects.toThrow();
+      expect(itemOf(flaky.path)!.fileDiff.isPartial).toBe(true);
+      expect(tab.getByRole('status').textContent).toBe('Full context unavailable for flaky.py.');
+      await expect(expand(itemOf(flaky.path)!.fileDiff)).resolves.toEqual({
         oldFile: { name: flaky.path, contents: greenhouseBefore },
         newFile: { name: flaky.path, contents: greenhouseAfter },
       });
+      expect(tab.queryByRole('status')).toBeNull();
 
-      // Removing auth before invoking rejects without mutating the diff.
+      // An upstream 401 auth failure rejects and shows the notice; switching commits clears it.
+      fetchMock.mockImplementationOnce(async () => respond({}, 401));
+      await expect(expand(itemOf(flaky.path)!.fileDiff)).rejects.toThrow();
+      expect(tab.getByRole('status').textContent).toBe('Full context unavailable for flaky.py.');
+      fetchMock.mockImplementationOnce(async () =>
+        respond({ sha: commit(2).sha, files: COMMIT_FILES })
+      );
+      await chooseCommit(tab, /^Commit 2/);
+      expect(await tab.findByText('2 files')).toBeTruthy();
+      expect(tab.queryByRole('status')).toBeNull();
+      await chooseCommit(tab, 'All commits');
+
+      // Removing the stored token before invoking rejects cleanly without mutating the diff.
       localStorage.removeItem(tokenKey);
-      await expect(loader()!(itemOf(flaky.path)!.fileDiff)).rejects.toThrow();
+      await expect(expand(itemOf(flaky.path)!.fileDiff)).rejects.toThrow();
+      expect(itemOf(flaky.path)!.fileDiff.isPartial).toBe(true);
     });
 
     it('deduplicates concurrent requests for the same SHA, caps concurrency at four, and aborts queued reads on unmount', async () => {
@@ -919,6 +964,26 @@ describe('CodeTab', () => {
       expect(prFiles?.gcTime).toBe(60_000);
       expect(commitFiles?.gcTime).toBe(60_000);
       probe.unmount();
+    });
+
+    it('skips prepareFileDiff for hidden test files when hideTests and ignoreWhitespace are enabled', async () => {
+      const prepareMock = vi.mocked(prepareFileDiff);
+      const sourceFile = file({
+        path: 'src/app.ts',
+        patch: '@@ -1 +1 @@\n-  const a = 1;\n+const a = 2;',
+      });
+      const testDiff = file({
+        path: 'src/app.test.ts',
+        patch: '@@ -1 +1 @@\n-  expect(1).toBe(1);\n+expect(1).toBe(1);',
+      });
+      const tab = await show({ files: [sourceFile, testDiff], pullRequest: request });
+      await click(tab.getByRole('button', { name: 'Hide test files' }));
+      prepareMock.mockClear();
+
+      await click(tab.getByRole('button', { name: 'Hide whitespace changes' }));
+      expect(prepareMock.mock.calls.map(([diff, opts]) => [diff.name, opts])).toEqual([
+        ['src/app.ts', { ignoreWhitespace: true, sha: null }],
+      ]);
     });
   });
 
