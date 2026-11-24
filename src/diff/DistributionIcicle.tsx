@@ -1,11 +1,11 @@
-// Dynamic-depth SVG Icicle flamegraph for Line Distribution: responsive viewBox, hover/focus
-// inspect summary, readable folder/file contrast, and bounded Tab stops for wide-enough rects.
+// Dynamic-depth SVG Icicle flamegraph for Line Distribution: responsive page-zoomed viewBox,
+// hover/focus inspect summary, opaque kind fills, and keyboard-accessible interactive nodes.
 import { usePluginTranslation } from '@mindroom/client-sdk/core';
 import { useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useRootFontSize } from '../rootFontSize';
 import {
   ICICLE_DEFAULT_WIDTH,
   ICICLE_MAX_DEPTH,
-  ICICLE_MIN_TAB_WIDTH,
   ICICLE_ROW_HEIGHT,
   buildIcicleTree,
   formatShare,
@@ -13,8 +13,8 @@ import {
   type DistributionViewProps,
 } from './lineDistribution.logic';
 
-const truncateLabel = (text: string, width: number): string => {
-  const maxChars = Math.max(3, Math.floor((width - 10) / 6.4));
+const truncateLabel = (text: string, width: number, padX: number, charWidth: number): string => {
+  const maxChars = Math.max(3, Math.floor((width - padX * 2) / charWidth));
   return text.length > maxChars ? `${text.slice(0, maxChars - 1)}…` : text;
 };
 
@@ -27,6 +27,15 @@ export function DistributionIcicle(props: DistributionViewProps) {
   const [inspectedState, setInspectedState] = useState<{ scope: string; path: string } | null>(
     null
   );
+  const rootFontSize = useRootFontSize();
+  const zoom = rootFontSize / 16;
+  const rowHeight = Math.round(ICICLE_ROW_HEIGHT * zoom);
+  const padX = 5 * zoom;
+  const labelY = 17 * zoom;
+  const subY = 32 * zoom;
+  const charWidth = 6.6 * zoom;
+  const minLabelWidth = 34 * zoom;
+  const minSubWidth = 66 * zoom;
 
   useLayoutEffect(() => {
     const el = boxRef.current;
@@ -49,8 +58,8 @@ export function DistributionIcicle(props: DistributionViewProps) {
     [scopedFiles, dirPrefix, metric]
   );
   const { rects, height } = useMemo(
-    () => layoutIcicle(tree, width, ICICLE_MAX_DEPTH, ICICLE_ROW_HEIGHT),
-    [tree, width]
+    () => layoutIcicle(tree, width, ICICLE_MAX_DEPTH, rowHeight),
+    [tree, width, rowHeight]
   );
   const inspectedPath = inspectedState?.scope === dirPrefix ? inspectedState.path : null;
   const inspected =
@@ -71,8 +80,7 @@ export function DistributionIcicle(props: DistributionViewProps) {
         >
           {rects.map(({ node, depth, x, y, width: w, height: h }) => {
             const isRoot = depth === 0;
-            const interactive = node.file !== null || !isRoot;
-            const inTabOrder = interactive && (w >= ICICLE_MIN_TAB_WIDTH || isRoot);
+            const interactive = !isRoot;
             const displayPath = node.path || t('code.distribution.allFiles');
             const displayName = node.name || t('code.distribution.allFiles');
             const share = formatShare(node.value, scopeTotal);
@@ -85,7 +93,7 @@ export function DistributionIcicle(props: DistributionViewProps) {
             });
             const activate = () => {
               if (node.file) onSelectFile(node.file.path);
-              else if (!isRoot) onDirPrefixChange(node.path);
+              else onDirPrefixChange(node.path);
             };
             const clearInspect = () =>
               setInspectedState((cur) => (cur?.path === node.path ? null : cur));
@@ -98,11 +106,12 @@ export function DistributionIcicle(props: DistributionViewProps) {
               metric === 'total' && node.additions === 0 && node.deletions > 0
                 ? `${share} · -${fmt.format(node.deletions)}`
                 : `${share} · +${fmt.format(node.additions)}`;
-            const tabProps = inTabOrder
+            const interactiveProps = interactive
               ? {
                   role: 'button' as const,
                   tabIndex: 0,
                   'aria-label': label,
+                  onClick: activate,
                   onFocus: () => setInspectedState({ scope: dirPrefix, path: node.path }),
                   onBlur: clearInspect,
                   onKeyDown: (event: KeyboardEvent<SVGGElement>) => {
@@ -121,8 +130,7 @@ export function DistributionIcicle(props: DistributionViewProps) {
                 }
                 onMouseEnter={() => setInspectedState({ scope: dirPrefix, path: node.path })}
                 onMouseLeave={clearInspect}
-                onClick={interactive ? activate : undefined}
-                {...tabProps}
+                {...interactiveProps}
               >
                 <title>{label}</title>
                 <rect
@@ -133,23 +141,23 @@ export function DistributionIcicle(props: DistributionViewProps) {
                   width={Math.max(1, w - 1).toFixed(1)}
                   height={(h - 1).toFixed(1)}
                   rx="2"
-                  fillOpacity={isRoot ? undefined : node.file ? 1 : 0.92}
+                  fillOpacity={isRoot ? undefined : 1}
                 />
-                {w > 34 ? (
+                {w > minLabelWidth ? (
                   <text
                     className={labelClass}
-                    x={(x + 5).toFixed(1)}
-                    y={(y + 17).toFixed(1)}
+                    x={(x + padX).toFixed(1)}
+                    y={(y + labelY).toFixed(1)}
                     textAnchor="start"
                   >
-                    {truncateLabel(displayName, w)}
+                    {truncateLabel(displayName, w, padX, charWidth)}
                   </text>
                 ) : null}
-                {w > 66 ? (
+                {w > minSubWidth ? (
                   <text
                     className={isRoot ? 'mrpr-dist-icicle-root-sub' : 'mrpr-dist-icicle-sub'}
-                    x={(x + 5).toFixed(1)}
-                    y={(y + 32).toFixed(1)}
+                    x={(x + padX).toFixed(1)}
+                    y={(y + subY).toFixed(1)}
                     textAnchor="start"
                   >
                     {subStat}

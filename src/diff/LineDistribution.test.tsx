@@ -76,6 +76,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  document.documentElement.style.fontSize = '';
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -157,7 +158,7 @@ describe('LineDistribution', () => {
     expect(props.onMetricChange).toHaveBeenCalledWith('additions');
   });
 
-  it('renders Icicle with group role, readable fill opacity, bounded tab stops, resize viewBox, and inspect footer', async () => {
+  it('renders Icicle with group role, opaque fills, page-zoom scaling, keyboard-accessible nodes, resize viewBox, and inspect footer', async () => {
     let observedWidth = 540;
     const observers: { callback: ResizeObserverCallback; targets: Set<Element> }[] = [];
     vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (
@@ -184,6 +185,7 @@ describe('LineDistribution', () => {
       }
     );
 
+    document.documentElement.style.fontSize = '16px';
     const first = await mount({ view: 'icicle' });
     const { container, getByRole, getByText, props } = first;
     const svg = container.querySelector('svg.mrpr-dist-icicle-svg')!;
@@ -192,12 +194,12 @@ describe('LineDistribution', () => {
     // Root (0) -> src/ (1) -> workers/ (2) -> pool.ts (3) => 4 rows * 42 = 168px.
     expect(svg.getAttribute('viewBox')).toBe(`0 0 540 ${4 * ICICLE_ROW_HEIGHT}`);
     expect(svg.getAttribute('preserveAspectRatio')).toBeNull();
-    // Every rendered node has a <title> tooltip and readable fillOpacity (>= 0.92).
+    // Every rendered node has a <title> tooltip and opaque fillOpacity (1).
     const nodes = container.querySelectorAll('g.mrpr-dist-icicle-node');
     expect(nodes.length).toBeGreaterThan(0);
     for (const node of nodes) expect(node.querySelector('title')?.textContent).toBeTruthy();
     for (const rect of container.querySelectorAll('rect.mrpr-dist-icicle-rect')) {
-      expect(Number(rect.getAttribute('fill-opacity'))).toBeGreaterThanOrEqual(0.92);
+      expect(rect.getAttribute('fill-opacity')).toBe('1');
     }
 
     // Resize updates viewBox width cleanly.
@@ -212,6 +214,31 @@ describe('LineDistribution', () => {
           );
         }
       }
+    });
+    expect(svg.getAttribute('viewBox')).toBe(`0 0 480 ${4 * ICICLE_ROW_HEIGHT}`);
+
+    // Page Zoom (150% -> 24px root font size) scales rowHeight, SVG height, padding, and baselines.
+    await act(async () => {
+      document.documentElement.style.fontSize = '24px';
+      await Promise.resolve();
+    });
+    const zoomedRowHeight = Math.round(ICICLE_ROW_HEIGHT * 1.5);
+    expect(svg.getAttribute('viewBox')).toBe(`0 0 480 ${4 * zoomedRowHeight}`);
+    expect((container.querySelector('.mrpr-dist-icicle-box') as HTMLElement).style.blockSize).toBe(
+      `${4 * zoomedRowHeight}px`
+    );
+    expect(container.querySelector('text.mrpr-dist-icicle-root-label')?.getAttribute('x')).toBe(
+      '7.5'
+    );
+    expect(container.querySelector('text.mrpr-dist-icicle-root-label')?.getAttribute('y')).toBe(
+      '25.5'
+    );
+    expect(container.querySelector('text.mrpr-dist-icicle-root-sub')?.getAttribute('y')).toBe(
+      '48.0'
+    );
+    await act(async () => {
+      document.documentElement.style.fontSize = '16px';
+      await Promise.resolve();
     });
     expect(svg.getAttribute('viewBox')).toBe(`0 0 480 ${4 * ICICLE_ROW_HEIGHT}`);
 
@@ -236,24 +263,33 @@ describe('LineDistribution', () => {
     expect(getByText(/Click a folder to zoom/)).toBeTruthy();
     first.unmount();
 
-    // Narrow slivers (< 28px wide) stay clickable with <title> but are omitted from Tab order.
+    // Narrow interactive nodes (< 28px wide) remain keyboard-accessible buttons; root is not.
     const skewed = toDistributionFiles([
       prFile('src/huge.ts', 490, 0, 'modified'),
-      prFile('src/tiny.ts', 5, 0, 'added'),
+      prFile('tiny-dir/tiny.ts', 5, 0, 'added'),
     ]);
     const narrow = await mount({
       files: skewed,
       activeKinds: new Set<ChangedFileKind>(['code']),
       view: 'icicle',
     });
-    const tinyNode = [...narrow.container.querySelectorAll('g.mrpr-dist-icicle-node')].find((el) =>
-      el.querySelector('title')?.textContent?.startsWith('src/tiny.ts:')
+    const rootNode = [...narrow.container.querySelectorAll('g.mrpr-dist-icicle-node')].find((el) =>
+      el.querySelector('title')?.textContent?.startsWith('All files:')
     )!;
-    expect(tinyNode).toBeTruthy();
-    expect(tinyNode.getAttribute('tabindex')).toBeNull();
-    expect(tinyNode.getAttribute('role')).toBeNull();
-    await click(tinyNode);
-    expect(narrow.props.onSelectFile).toHaveBeenCalledWith('src/tiny.ts');
+    expect(rootNode).toBeTruthy();
+    expect(rootNode.getAttribute('role')).toBeNull();
+    expect(rootNode.getAttribute('tabindex')).toBeNull();
+
+    const tinyDirBtn = narrow.getByRole('button', { name: /^tiny-dir\/:/ });
+    expect(tinyDirBtn.getAttribute('tabindex')).toBe('0');
+    expect(Number(tinyDirBtn.querySelector('rect')?.getAttribute('width'))).toBeLessThan(28);
+    await keyDown(tinyDirBtn, 'Enter');
+    expect(narrow.props.onDirPrefixChange).toHaveBeenCalledWith('tiny-dir/');
+
+    const tinyFileBtn = narrow.getByRole('button', { name: /^tiny-dir\/tiny\.ts:/ });
+    expect(tinyFileBtn.getAttribute('tabindex')).toBe('0');
+    await keyDown(tinyFileBtn, ' ');
+    expect(narrow.props.onSelectFile).toHaveBeenCalledWith('tiny-dir/tiny.ts');
     narrow.unmount();
 
     // Zoomed into shallow leaf folder: height shrinks to 2 * 42 = 84px with zero dead space.

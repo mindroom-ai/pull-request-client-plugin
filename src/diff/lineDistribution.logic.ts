@@ -20,7 +20,6 @@ export const COMPACT_ROW_LIMIT = 5;
 export const ICICLE_MAX_DEPTH = 5;
 export const ICICLE_ROW_HEIGHT = 42;
 export const ICICLE_DEFAULT_WIDTH = 620;
-export const ICICLE_MIN_TAB_WIDTH = 28;
 const ICICLE_MIN_RECT_WIDTH = 1.5;
 
 type Totals = { files: number; additions: number; deletions: number; value: number };

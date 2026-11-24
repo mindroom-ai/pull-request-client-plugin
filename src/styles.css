@@ -2486,9 +2486,10 @@ button.mrpr-thread-menu-item[aria-current='true'] {
 
 .mrpr-dist-controls {
   display: flex;
-  flex-shrink: 0;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.3125rem;
+  min-inline-size: 0;
 }
 
 .mrpr-dist-segmented {
@@ -2775,7 +2776,7 @@ button.mrpr-thread-menu-item[aria-current='true'] {
 .mrpr-dist-icicle-root-label,
 .mrpr-dist-icicle-label {
   font-family: var(--pr-font-mono);
-  font-size: 10.5px;
+  font-size: 0.6875rem;
   font-weight: 600;
   pointer-events: none;
 }
@@ -2792,7 +2793,7 @@ button.mrpr-thread-menu-item[aria-current='true'] {
 .mrpr-dist-icicle-root-sub,
 .mrpr-dist-icicle-sub {
   font-family: var(--pr-font-sans);
-  font-size: 9.5px;
+  font-size: 0.625rem;
   pointer-events: none;
 }
 .mrpr-dist-icicle-root-sub {
@@ -2800,7 +2801,6 @@ button.mrpr-thread-menu-item[aria-current='true'] {
 }
 .mrpr-dist-icicle-sub {
   fill: var(--pr-kind-on-fill);
-  opacity: 0.94;
 }
 
 .mrpr-dist-foot {
