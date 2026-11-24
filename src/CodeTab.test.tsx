@@ -865,10 +865,10 @@ describe('CodeTab', () => {
       expect(document.activeElement).toBe(toggle);
 
       // Re-opening automatically via widening and focusing outside the tree leaves focus untouched.
-      await resizeCode(640);
+      await resizeCode(700);
       const wrapButton = tab.getByRole('button', { name: 'Wrap lines' });
       act(() => wrapButton.focus());
-      await resizeCode(500);
+      await resizeCode(600);
       expect(toggle.getAttribute('aria-pressed')).toBe('false');
       expect(document.activeElement).toBe(wrapButton);
     });

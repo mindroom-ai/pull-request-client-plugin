@@ -392,6 +392,11 @@ function Header({
     setExpandedScope('');
   };
   const stateIcon = <state.Icon aria-hidden className={`mrpr-icon ${state.toneClassName}`} />;
+  const autoMergeBadge = pr.autoMerge ? (
+    <span className="mrpr-badge mrpr-badge-outline mrpr-shrink-0">
+      {t('badge.autoMerge', { method: pr.autoMerge.method })}
+    </span>
+  ) : null;
   return (
     <>
       <div ref={barRef} className="mrpr-crumbs mrpr-bar">
@@ -409,6 +414,7 @@ function Header({
               {stateIcon}
               <span className={`mrpr-shrink-0 ${state.toneClassName}`}>#{ref.number}</span>
               <span className="mrpr-truncate mrpr-bar-title">{pr.title}</span>
+              {autoMergeBadge}
               {scrolls ? null : <ChevronDown aria-hidden className="mrpr-icon mrpr-shrink-0" />}
             </button>
           ) : (
@@ -437,11 +443,7 @@ function Header({
                     {t(`state.${state.key}`)}
                   </span>
                 )}
-                {pr.autoMerge ? (
-                  <span className="mrpr-badge mrpr-badge-outline">
-                    {t('badge.autoMerge', { method: pr.autoMerge.method })}
-                  </span>
-                ) : null}
+                {autoMergeBadge}
               </span>
             </>
           )}

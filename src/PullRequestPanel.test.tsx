@@ -2472,6 +2472,58 @@ describe('the dense header', () => {
     expect(document.activeElement).toBe(view.getByRole('button', { name: bar }));
   });
 
+  it('shows and hides the auto-merge badge in the collapsed Code bar after toggling auto-merge', async () => {
+    let armed = false;
+    asWriter();
+    const writer = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (url, init) => {
+      if (url === GRAPHQL) {
+        const body = String(init?.body ?? '');
+        if (body.includes('enablePullRequestAutoMerge')) {
+          armed = true;
+          return respond({ data: { enablePullRequestAutoMerge: { clientMutationId: null } } });
+        }
+        if (body.includes('disablePullRequestAutoMerge')) {
+          armed = false;
+          return respond({ data: { disablePullRequestAutoMerge: { clientMutationId: null } } });
+        }
+        return respond({ data: { repository: { ...repository, autoMergeAllowed: true } } });
+      }
+      if (url.endsWith('/pulls/200')) {
+        return respond(
+          pull({
+            node_id: 'PR_kw200',
+            head,
+            mergeable: true,
+            mergeable_state: 'blocked',
+            auto_merge: armed ? { merge_method: 'merge' } : null,
+          })
+        );
+      }
+      return writer(url, init);
+    });
+    const view = await showScrolling();
+    await view.findByRole('button', { name: 'Merge' });
+    await click(view.getByRole('tab', { name: 'Code' }));
+    const header = view.container.querySelector('.mrpr-header') as HTMLElement;
+    expect(view.getByRole('button', { name: bar }).textContent).not.toContain('Auto-merge');
+
+    await click(view.getByRole('button', { name: 'More actions' }));
+    await click((await view.findByText('Enable auto-merge')).closest('button')!);
+    await click((await view.findByText('Confirm auto-merge?')).closest('button')!);
+    await waitUntil(() => {
+      expect(header.classList.contains('mrpr-header-collapsed')).toBe(true);
+      expect(view.getByRole('button', { name: bar }).textContent).toContain('Auto-merge (merge)');
+    });
+
+    await click(view.getByRole('button', { name: 'More actions' }));
+    await click((await view.findByText('Disable auto-merge')).closest('button')!);
+    await waitUntil(() => {
+      expect(header.classList.contains('mrpr-header-collapsed')).toBe(true);
+      expect(view.getByRole('button', { name: bar }).textContent).not.toContain('Auto-merge');
+    });
+  });
+
   it('resets the Code tab header to collapsed when switching tabs or pull requests', async () => {
     fetchMock.mockImplementation(async (url) => {
       if (url.includes('/files') || url.includes('/commits') || url.includes('/comments'))
