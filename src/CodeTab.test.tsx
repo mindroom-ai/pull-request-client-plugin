@@ -2390,4 +2390,236 @@ describe('CodeTab', () => {
     );
     expect(tab.getByRole('button', { name: /^Diff scope:/ })).toBeTruthy();
   });
+
+  describe('line distribution', () => {
+    const DIST_FILES: PullRequestFile[] = [
+      file({ path: 'src/workers/pool.ts', additions: 120, deletions: 20 }),
+      file({
+        path: 'src/workers/queue.ts',
+        status: 'added',
+        additions: 60,
+        deletions: 0,
+        patch: '@@ -0,0 +1 @@\n+q',
+      }),
+      file({
+        path: 'src/workers/pool.test.ts',
+        status: 'added',
+        additions: 50,
+        deletions: 5,
+        patch: '@@ -0,0 +1 @@\n+t',
+      }),
+      file({ path: 'src/workers/icon.bin', patch: null, additions: 0, deletions: 0 }),
+      file({ path: 'src/app.ts', additions: 30, deletions: 10 }),
+      file({ path: 'docs/guide.md', additions: 25, deletions: 0 }),
+    ];
+
+    it('hides the toggle when there are no files, scrolls to top when opened, and respects reduced motion', async () => {
+      const empty = await show({ files: [] });
+      expect(empty.queryByRole('button', { name: 'Line distribution' })).toBeNull();
+      empty.unmount();
+
+      const tab = await show({ files: DIST_FILES });
+      const toggle = tab.getByRole('button', { name: 'Line distribution' });
+      expect(toggle.getAttribute('aria-pressed')).toBe('false');
+      expect(tab.queryByRole('region', { name: 'Line distribution' })).toBeNull();
+
+      await click(toggle);
+      expect(toggle.getAttribute('aria-pressed')).toBe('true');
+      expect(tab.getByRole('region', { name: 'Line distribution' })).toBeTruthy();
+      expect(view.scrollTo).toHaveBeenCalledWith({
+        type: 'position',
+        position: 0,
+        behavior: 'smooth',
+      });
+
+      // Closing does not force a scroll to top.
+      view.scrollTo.mockReset();
+      await click(toggle);
+      expect(tab.queryByRole('region', { name: 'Line distribution' })).toBeNull();
+      expect(view.scrollTo).not.toHaveBeenCalled();
+
+      // Reopening under prefers-reduced-motion uses instant scroll.
+      vi.stubGlobal('matchMedia', () => ({ matches: true }));
+      await click(toggle);
+      expect(view.scrollTo).toHaveBeenCalledWith({
+        type: 'position',
+        position: 0,
+        behavior: 'instant',
+      });
+    });
+
+    it('drills into directories to filter diffs, tree, and withoutDiff, reveals files, and clears via toolbar chip', async () => {
+      const tab = await show({ files: DIST_FILES });
+      await click(tab.getByRole('button', { name: 'Line distribution' }));
+
+      // Clicking a file reveals its diff without closing Distribution.
+      await click(tab.getByRole('button', { name: /pool\.ts/ }));
+      expect(view.scrollTo).toHaveBeenCalledWith({
+        type: 'item',
+        id: 'src/workers/pool.ts',
+        align: 'start',
+      });
+      expect(tab.getByRole('region', { name: 'Line distribution' })).toBeTruthy();
+
+      // Drill into src/ -> workers/ filters diffs, withoutDiff, file tree, and counts.
+      await click(tab.getByRole('button', { name: /^src\// }));
+      await click(tab.getByRole('button', { name: /^workers\// }));
+      expect(diffNames()).toEqual([
+        'src/workers/pool.ts',
+        'src/workers/queue.ts',
+        'src/workers/pool.test.ts',
+      ]);
+      expect(tab.container.querySelector('.mrpr-no-diff-path')?.textContent).toBe(
+        'src/workers/icon.bin'
+      );
+      expect(tab.getByText('4 files')).toBeTruthy();
+      const tree = tab.getByRole('list', { name: /^Files of/ });
+      expect(treeItems(tree).map(([path]) => path)).toEqual([
+        'src/workers/pool.ts',
+        'src/workers/queue.ts',
+        'src/workers/pool.test.ts',
+        'src/workers/icon.bin',
+      ]);
+
+      // Hiding Distribution keeps the active filter visible and dismissible in the toolbar.
+      await click(tab.getByRole('button', { name: 'Line distribution' }));
+      const chip = tab.getByRole('button', { name: 'Clear filter: src/workers/' });
+      expect(chip.textContent).toContain('src/workers/');
+      await click(chip);
+      expect(tab.queryByRole('button', { name: 'Clear filter: src/workers/' })).toBeNull();
+      expect(diffNames()).toHaveLength(5);
+    });
+
+    it('keeps Tests chip synced with toolbar Hide test files and auto-normalizes dirPrefix on kind toggle or refetch', async () => {
+      const files: PullRequestFile[] = [
+        file({ path: 'src/tests/unit.test.ts', additions: 40, deletions: 0 }),
+        file({ path: 'src/app.ts', additions: 20, deletions: 5 }),
+        file({ path: 'docs/notes.md', additions: 10, deletions: 0 }),
+      ];
+      const client = new QueryClient({ defaultOptions: { queries: { retryDelay: 0 } } });
+      let setFiles!: (next: PullRequestFile[]) => void;
+      function DynamicFiles() {
+        const [list, update] = useState(files);
+        setFiles = update;
+        return (
+          <CodeTab
+            pullRequest={REF}
+            files={list}
+            threads={loaded<ReviewThread>([])}
+            commits={loaded(COMMITS)}
+            commit={undefined}
+            onCommitChange={() => {}}
+          />
+        );
+      }
+      const tab = await renderPluginComponent(
+        <QueryClientProvider client={client}>
+          <GitHubServerContext.Provider value={{ server: undefined, pending: false }}>
+            <DynamicFiles />
+          </GitHubServerContext.Provider>
+        </QueryClientProvider>,
+        { id: 'pull-requests', plugin, themeKind: 'light' }
+      );
+      await click(tab.getByRole('button', { name: 'Line distribution' }));
+
+      // Drill into src/tests/ (contains only test files).
+      await click(tab.getByRole('button', { name: /^src\// }));
+      await click(tab.getByRole('button', { name: /^tests\// }));
+      expect(diffNames()).toEqual(['src/tests/unit.test.ts']);
+
+      // Toggling Tests chip off updates Hide test files AND auto-normalizes src/tests/ -> src/.
+      await click(tab.getByRole('button', { name: /Tests/ }));
+      expect(
+        tab.getByRole('button', { name: 'Hide test files' }).getAttribute('aria-pressed')
+      ).toBe('true');
+      expect(tab.getByRole('button', { name: 'Clear filter: src/' })).toBeTruthy();
+      expect(diffNames()).toEqual(['src/app.ts']);
+
+      // Toggling toolbar Hide test files back on updates Tests chip and stays at normalized src/.
+      await click(tab.getByRole('button', { name: 'Hide test files' }));
+      expect(tab.getByRole('button', { name: /Tests/ }).getAttribute('aria-pressed')).toBe('true');
+      expect(tab.getByRole('button', { name: 'Clear filter: src/' })).toBeTruthy();
+
+      // Refetch removing all files under src/ normalizes dirPrefix all the way back to root.
+      await act(async () =>
+        setFiles([file({ path: 'docs/notes.md', additions: 10, deletions: 0 })])
+      );
+      expect(tab.queryByRole('button', { name: /^Clear filter:/ })).toBeNull();
+      expect(diffNames()).toEqual(['docs/notes.md']);
+    });
+
+    it('resets dirPrefix when switching commits and shows a clearable empty state if toolbar Hide tests hides remaining files', async () => {
+      const tab = await show({
+        files: [
+          file({ path: 'src/app.ts', additions: 30, deletions: 5 }),
+          file({ path: 'src/app.test.ts', additions: 20, deletions: 0 }),
+        ],
+      });
+      await click(tab.getByRole('button', { name: 'Line distribution' }));
+      await click(tab.getByRole('button', { name: /^src\// }));
+      expect(tab.getByRole('button', { name: 'Clear filter: src/' })).toBeTruthy();
+
+      // Switch to Commit 2: dirPrefix resets.
+      await click(tab.getByRole('button', { name: /^Diff scope:/ }));
+      await click(tab.getByRole('menuitemradio', { name: /Commit 2/ }));
+      await act(async () => {});
+      expect(tab.queryByRole('button', { name: 'Clear filter: src/' })).toBeNull();
+
+      // Switch back to All commits, hide Code in Distribution, then hide tests from toolbar.
+      await click(tab.getByRole('button', { name: /^Diff scope:/ }));
+      await click(tab.getByRole('menuitemradio', { name: 'All commits' }));
+      await click(tab.getByRole('button', { name: /Code/ }));
+      await click(tab.getByRole('button', { name: 'Hide test files' }));
+      expect(tab.getByText('No files match the current filter.')).toBeTruthy();
+      await click(tab.getAllByRole('button', { name: 'Clear filter' })[0]);
+      expect(diffNames()).toEqual(['src/app.ts']);
+    });
+
+    it('composes cleanly with the narrow (< 640px) stacked Files tree without breaking Go to files or height bounds', async () => {
+      const clientWidth = vi
+        .spyOn(HTMLElement.prototype, 'clientWidth', 'get')
+        .mockImplementation(function (this: HTMLElement) {
+          return this.classList.contains('mrpr-code') ? 400 : 0;
+        });
+      const clientHeight = vi
+        .spyOn(HTMLElement.prototype, 'clientHeight', 'get')
+        .mockImplementation(function (this: HTMLElement) {
+          return this.classList.contains('mrpr-code-diffs') ? 600 : 0;
+        });
+      vi.stubGlobal(
+        'ResizeObserver',
+        class {
+          observe() {}
+          unobserve() {}
+          disconnect() {}
+        }
+      );
+      try {
+        const tab = await show({ files: DIST_FILES });
+        await click(tab.getByRole('button', { name: 'Line distribution' }));
+        const diffView = tab.getByTestId('diff-view');
+        const stackedList = tab.getByRole('list', { name: /^Files of/ });
+        const distRegion = tab.getByRole('region', { name: 'Line distribution' });
+        expect(diffView.contains(stackedList)).toBe(true);
+        expect(diffView.contains(distRegion)).toBe(true);
+        expect(
+          (tab.container.querySelector('.mrpr-code-diffs') as HTMLElement).style.getPropertyValue(
+            '--mrpr-stacked-tree-max-height'
+          )
+        ).toBe('270px');
+
+        view.scrollTo.mockReset();
+        await click(tab.getByRole('button', { name: 'Go to files' }));
+        expect(view.scrollTo).toHaveBeenCalledWith({
+          type: 'position',
+          position: 0,
+          behavior: 'smooth',
+        });
+        expect(stackedList.contains(document.activeElement)).toBe(true);
+      } finally {
+        clientWidth.mockRestore();
+        clientHeight.mockRestore();
+      }
+    });
+  });
 });

@@ -25,6 +25,9 @@ const values = () => ({
   diffStyle: prefs.diffStyle,
   wrap: prefs.wrap,
   treeWidth: prefs.treeWidth,
+  showDistribution: prefs.showDistribution,
+  distributionView: prefs.distributionView,
+  distributionMetric: prefs.distributionMetric,
 });
 
 beforeEach(() => {
@@ -33,7 +36,7 @@ beforeEach(() => {
 });
 
 describe('useCodePrefs', () => {
-  it('starts unified and wrapped, with test files and whitespace changes shown', async () => {
+  it('starts unified and wrapped, with test files, whitespace shown and distribution closed', async () => {
     await mount();
     expect(values()).toEqual({
       hideTests: false,
@@ -41,6 +44,9 @@ describe('useCodePrefs', () => {
       diffStyle: 'unified',
       wrap: true,
       treeWidth: 240,
+      showDistribution: false,
+      distributionView: 'bars',
+      distributionMetric: 'total',
     });
   });
 
@@ -49,13 +55,23 @@ describe('useCodePrefs', () => {
     act(() => prefs.update({ diffStyle: 'split', hideTests: true }));
     expect(values()).toMatchObject({ diffStyle: 'split', hideTests: true });
     act(() => prefs.update({ wrap: false }));
-    act(() => prefs.update({ treeWidth: 320 }));
+    act(() =>
+      prefs.update({
+        treeWidth: 320,
+        showDistribution: true,
+        distributionView: 'icicle',
+        distributionMetric: 'additions',
+      })
+    );
     expect(JSON.parse(localStorage.getItem(KEY) ?? 'null')).toEqual({
       hideTests: true,
       ignoreWhitespace: false,
       diffStyle: 'split',
       wrap: false,
       treeWidth: 320,
+      showDistribution: true,
+      distributionView: 'icicle',
+      distributionMetric: 'additions',
     });
     first.unmount();
     await mount();
@@ -65,6 +81,9 @@ describe('useCodePrefs', () => {
       diffStyle: 'split',
       wrap: false,
       treeWidth: 320,
+      showDistribution: true,
+      distributionView: 'icicle',
+      distributionMetric: 'additions',
     });
   });
 
@@ -76,16 +95,29 @@ describe('useCodePrefs', () => {
       </>,
       { id: 'pull-requests', plugin }
     );
-    act(() => prefs.update({ diffStyle: 'split' }));
+    act(() => prefs.update({ diffStyle: 'split', showDistribution: true }));
     expect(other.diffStyle).toBe('split');
-    act(() => other.update({ hideTests: true }));
-    expect(values()).toMatchObject({ diffStyle: 'split', hideTests: true });
+    expect(other.showDistribution).toBe(true);
+    act(() => other.update({ hideTests: true, distributionView: 'icicle' }));
+    expect(values()).toMatchObject({
+      diffStyle: 'split',
+      hideTests: true,
+      showDistribution: true,
+      distributionView: 'icicle',
+    });
   });
 
   it('takes each stored value it can read and the default for the rest', async () => {
     localStorage.setItem(
       KEY,
-      JSON.stringify({ hideTests: true, ignoreWhitespace: 'yes', diffStyle: 'sideways' })
+      JSON.stringify({
+        hideTests: true,
+        ignoreWhitespace: 'yes',
+        diffStyle: 'sideways',
+        showDistribution: 'on',
+        distributionView: 'treemap',
+        distributionMetric: 'deletions',
+      })
     );
     const first = await mount();
     expect(values()).toEqual({
@@ -94,6 +126,9 @@ describe('useCodePrefs', () => {
       diffStyle: 'unified',
       wrap: true,
       treeWidth: 240,
+      showDistribution: false,
+      distributionView: 'bars',
+      distributionMetric: 'total',
     });
     first.unmount();
     localStorage.setItem(KEY, JSON.stringify({ wrap: false, treeWidth: '300px' }));
@@ -108,6 +143,12 @@ describe('useCodePrefs', () => {
     third.unmount();
     localStorage.setItem(KEY, 'not json');
     await mount();
-    expect(values()).toMatchObject({ hideTests: false, diffStyle: 'unified' });
+    expect(values()).toMatchObject({
+      hideTests: false,
+      diffStyle: 'unified',
+      showDistribution: false,
+      distributionView: 'bars',
+      distributionMetric: 'total',
+    });
   });
 });
