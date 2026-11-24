@@ -15,9 +15,12 @@ const trap = vi.hoisted(() => ({
   active: undefined as boolean | undefined,
   options: undefined as
     | {
+        initialFocus?: unknown;
+        fallbackFocus?: () => HTMLElement;
+        preventScroll?: boolean;
+        returnFocusOnDeactivate?: boolean;
         escapeDeactivates: () => boolean;
-        clickOutsideDeactivates: (event?: MouseEvent | TouchEvent) => boolean;
-        allowOutsideClick?: (event?: MouseEvent | TouchEvent) => boolean;
+        clickOutsideDeactivates: () => boolean;
       }
     | undefined,
 }));
@@ -135,12 +138,19 @@ describe('ChecksStatusLine', () => {
     );
   const pointer = (
     target: EventTarget,
-    type: 'pointerover' | 'pointerout' | 'pointerdown',
-    { pointerType = 'mouse', buttons = 0 } = {}
+    type: 'pointerover' | 'pointerout' | 'pointerdown' | 'pointermove',
+    {
+      pointerType = 'mouse',
+      buttons = 0,
+      clientX = 0,
+      clientY = 0,
+    }: { pointerType?: string; buttons?: number; clientX?: number; clientY?: number } = {}
   ) =>
     act(async () => {
       target.dispatchEvent(
-        Object.assign(new MouseEvent(type, { bubbles: true, buttons }), { pointerType })
+        Object.assign(new MouseEvent(type, { bubbles: true, buttons, clientX, clientY }), {
+          pointerType,
+        })
       );
     });
   const advance = (ms: number) => act(async () => void vi.advanceTimersByTime(ms));
@@ -344,7 +354,7 @@ describe('ChecksStatusLine', () => {
     expect(button.getAttribute('title')).toBe('1 of 3 failing');
   });
 
-  it('pins in place on click while hover-open, keeping Show all expanded until clicked again', async () => {
+  it('pins in place on click while hover-open, keeping Show all expanded until closed', async () => {
     const { view, button } = await showHoverable();
     await openHover(button);
     await click(view.getByRole('button', { name: 'Show all' }));
@@ -359,12 +369,155 @@ describe('ChecksStatusLine', () => {
     await pointer(dialog, 'pointerout');
     await advance(CHECKS_HOVER_CLOSE_MS * 2);
     expect(view.getByRole('dialog', { name: 'Checks' })).toBeTruthy();
-    const onButton = new MouseEvent('mousedown', { bubbles: true });
-    Object.defineProperty(onButton, 'target', { value: button });
-    expect(trap.options?.clickOutsideDeactivates(onButton)).toBe(false);
-    expect(trap.options?.allowOutsideClick?.(onButton)).toBe(true);
-    await click(button);
+    act(() => void trap.options?.clickOutsideDeactivates());
     expect(view.queryByRole('dialog')).toBeNull();
+  });
+
+  it('scopes pointerEvents: none on PopOut to hover-open only, not pinned', async () => {
+    const { view, button } = await showHoverable();
+    await openHover(button);
+    const dialog = view.getByRole('dialog', { name: 'Checks' });
+    const layer = dialog.closest('[data-owns-focus]') as HTMLElement | null;
+    expect(layer).not.toBeNull();
+    expect(layer?.style.pointerEvents).toBe('none');
+    expect(dialog.style.pointerEvents).toBe('auto');
+
+    // Pinning drops pointerEvents: none and data-owns-focus on the PopOut layer.
+    await pointer(button, 'pointerdown');
+    await click(button);
+    expect(layer?.getAttribute('data-owns-focus')).toBeNull();
+    expect(layer?.style.pointerEvents).toBe('');
+
+    // Opening directly as pinned also omits pointerEvents: none on the PopOut layer.
+    act(() => void trap.options?.clickOutsideDeactivates());
+    expect(view.queryByRole('dialog')).toBeNull();
+    await click(button);
+    const pinnedDialog = view.getByRole('dialog', { name: 'Checks' });
+    const pinnedLayer = pinnedDialog.parentElement?.parentElement as HTMLElement | null;
+    expect(pinnedDialog.closest('[data-owns-focus]')).toBeNull();
+    expect(pinnedLayer?.style.pointerEvents).toBe('');
+  });
+
+  it('keeps hover popover open while focus is inside it and closes when focus moves outside', async () => {
+    const { view, button } = await showHoverable();
+    const outside = document.createElement('button');
+    document.body.appendChild(outside);
+    try {
+      await openHover(button);
+      const dialog = view.getByRole('dialog', { name: 'Checks' });
+      await pointer(button, 'pointerout');
+      await pointer(dialog, 'pointerover');
+      const toggle = view.getByRole('button', { name: 'Show all' });
+      await click(toggle);
+      await act(async () => toggle.focus());
+      expect(document.activeElement).toBe(toggle);
+
+      // Moving the mouse away past CHECKS_HOVER_CLOSE_MS keeps the popover while focus is inside.
+      await pointer(dialog, 'pointerout');
+      await advance(CHECKS_HOVER_CLOSE_MS * 2);
+      expect(view.getByRole('dialog', { name: 'Checks' })).toBeTruthy();
+      expect(document.activeElement).toBe(toggle);
+
+      // Blurring with no next target (relatedTarget === null) or onto the trigger keeps it open.
+      await act(async () => toggle.blur());
+      expect(view.getByRole('dialog', { name: 'Checks' })).toBeTruthy();
+      await act(async () => toggle.focus());
+      await act(async () => button.focus());
+      expect(view.getByRole('dialog', { name: 'Checks' })).toBeTruthy();
+
+      // Moving focus to an element outside both popover and trigger closes it.
+      await act(async () => toggle.focus());
+      await act(async () => outside.focus());
+      expect(view.queryByRole('dialog')).toBeNull();
+    } finally {
+      outside.remove();
+    }
+  });
+
+  it('does not reopen on synthetic pointerenter after closing a pinned popover until mouse leaves and returns', async () => {
+    const { view, button } = await showHoverable();
+    vi.spyOn(button, 'getBoundingClientRect').mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 80,
+      bottom: 30,
+      width: 80,
+      height: 30,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect);
+
+    await pointer(button, 'pointerover');
+    await pointer(button, 'pointerdown');
+    await click(button);
+    expect(view.getByRole('dialog', { name: 'Checks' })).toBeTruthy();
+    // Pinned PopOut layer mounts over the button, causing a synthetic leave.
+    await pointer(button, 'pointerout');
+
+    // Close the pinned popover while the mouse is still over the button.
+    act(() => void trap.options?.clickOutsideDeactivates());
+    expect(view.queryByRole('dialog')).toBeNull();
+
+    // Layer unmounts, causing a synthetic enter while mouse never left the button.
+    await pointer(button, 'pointerover');
+    await advance(CHECKS_HOVER_OPEN_MS * 2);
+    expect(view.queryByRole('dialog')).toBeNull();
+
+    // Moving while still inside the button box does not reset the visit.
+    await pointer(document.body, 'pointermove', { clientX: 20, clientY: 15 });
+    await pointer(button, 'pointerover');
+    await advance(CHECKS_HOVER_OPEN_MS * 2);
+    expect(view.queryByRole('dialog')).toBeNull();
+
+    // Once the mouse moves off the button and comes back, hover opens the popover again.
+    await pointer(document.body, 'pointermove', { clientX: 200, clientY: 200 });
+    await openHover(button);
+    expect(view.getByRole('dialog', { name: 'Checks' })).toBeTruthy();
+
+    // Moving off under the pinned layer before closing lets the first return open immediately.
+    await pointer(button, 'pointerdown');
+    await click(button);
+    await pointer(button, 'pointerout');
+    await pointer(document.body, 'pointermove', { clientX: 200, clientY: 200 });
+    act(() => void trap.options?.escapeDeactivates());
+    expect(view.queryByRole('dialog')).toBeNull();
+    await openHover(button);
+    expect(view.getByRole('dialog', { name: 'Checks' })).toBeTruthy();
+  });
+
+  it('activates FocusTrap without initialFocus: false when pinning and returns focus to button on Escape', async () => {
+    const { view, button } = await showHoverable();
+    await openHover(button);
+    expect(trap.active).toBe(false);
+
+    // Pinning after hover activates FocusTrap with fallbackFocus and preventScroll (no initialFocus: false).
+    await pointer(button, 'pointerdown');
+    await click(button);
+    const dialog = view.getByRole('dialog', { name: 'Checks' });
+    expect(trap.active).toBe(true);
+    expect(trap.options?.initialFocus).toBeUndefined();
+    expect(trap.options?.preventScroll).toBe(true);
+    expect(dialog.tabIndex).toBe(-1);
+    expect(trap.options?.fallbackFocus?.()).toBe(dialog);
+
+    const toggle = view.getByRole('button', { name: 'Show all' });
+    await act(async () => toggle.focus());
+    expect(document.activeElement).toBe(toggle);
+
+    // Escape closes the pinned popover and returns focus to the trigger button.
+    act(() => void trap.options?.escapeDeactivates());
+    expect(view.queryByRole('dialog')).toBeNull();
+    expect(document.activeElement).toBe(button);
+
+    // Outside click closes without pulling focus back onto the trigger button.
+    await click(button);
+    const toggleAgain = view.getByRole('button', { name: 'Show all' });
+    await act(async () => toggleAgain.focus());
+    expect(document.activeElement).toBe(toggleAgain);
+    act(() => void trap.options?.clickOutsideDeactivates());
+    expect(view.queryByRole('dialog')).toBeNull();
+    expect(document.activeElement).not.toBe(button);
   });
 
   it('ignores touch/pen hover and mouse hover while buttons are pressed', async () => {
@@ -397,6 +550,7 @@ describe('ChecksStatusLine', () => {
     expect(outsideEscape.defaultPrevented).toBe(false);
     expect(document.activeElement).not.toBe(button);
 
+    await pointer(button, 'pointerout');
     await openHover(button);
     view.getByRole('button', { name: 'Show all' }).focus();
     const insideEscape = await sendEscape();
@@ -404,6 +558,7 @@ describe('ChecksStatusLine', () => {
     expect(insideEscape.defaultPrevented).toBe(true);
     expect(document.activeElement).toBe(button);
 
+    await pointer(button, 'pointerout');
     await openHover(button);
     await pointer(view.getByRole('dialog', { name: 'Checks' }), 'pointerdown');
     expect(view.getByRole('dialog', { name: 'Checks' })).toBeTruthy();

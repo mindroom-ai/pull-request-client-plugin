@@ -1,7 +1,7 @@
 // Ported from T3 Code (https://github.com/pingdotgg/t3code, apps/web/src/components/pullRequest/PullRequestChecksPopover.tsx at 8ab427c6), MIT, Copyright (c) 2026 T3 Tools Inc. See NOTICE.
 // The panel header's checks line: the state's icon and the summary, which open the checks popover.
 // It loads the checks of the pull request's head commit itself, so a failure shows here only.
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type FocusEvent } from 'react';
 import FocusTrap from 'focus-trap-react';
 import type { RectCords } from 'folds';
 import { usePluginTranslation } from '@mindroom/client-sdk/core';
@@ -33,6 +33,8 @@ export function ChecksStatusLine({
   const [popover, setPopover] = useState<{ anchor: RectCords; mode: 'hover' | 'pinned' }>();
   const buttonRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
+  const refocusRef = useRef(false);
+  const mouseOnButton = useRef(false);
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const clearHoverTimer = useCallback(() => clearTimeout(hoverTimer.current), []);
   // Escape and a click outside the popover close it, as the app's own menus do.
@@ -46,17 +48,47 @@ export function ChecksStatusLine({
   const hasChecks = state !== 'none';
   const anchor = popover?.anchor;
   const hoverOpen = hasChecks && popover?.mode === 'hover';
+  const pinnedOpen = hasChecks && popover?.mode === 'pinned';
   useEffect(() => {
-    if (!hasChecks) close();
+    if (!hasChecks) {
+      mouseOnButton.current = false;
+      close();
+    }
     return clearHoverTimer;
   }, [hasChecks, close, clearHoverTimer]);
+  useEffect(() => {
+    if (anchor !== undefined || !refocusRef.current) return;
+    refocusRef.current = false;
+    buttonRef.current?.focus({ preventScroll: true });
+  }, [anchor]);
+  // One rest per mouse visit: a pinned PopOut lays a full-window layer over the button, causing a
+  // synthetic leave when it mounts and a synthetic enter when it unmounts. Watch pointer moves
+  // against the button box while pinned (and after closing until the mouse leaves) so closing a
+  // pinned popover under a resting mouse does not immediately reopen it on hover.
+  useEffect(() => {
+    if (!pinnedOpen && !mouseOnButton.current) return undefined;
+    const watch = (event: globalThis.PointerEvent) => {
+      const box = buttonRef.current?.getBoundingClientRect();
+      if (event.pointerType !== 'mouse' || !box) return;
+      mouseOnButton.current =
+        event.clientX >= box.left &&
+        event.clientX < box.right &&
+        event.clientY >= box.top &&
+        event.clientY < box.bottom;
+      if (!pinnedOpen && !mouseOnButton.current) {
+        window.removeEventListener('pointermove', watch, true);
+      }
+    };
+    window.addEventListener('pointermove', watch, true);
+    return () => window.removeEventListener('pointermove', watch, true);
+  }, [pinnedOpen]);
   useEffect(() => {
     if (!hoverOpen) return undefined;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       if (popoverRef.current?.contains(document.activeElement)) {
         event.preventDefault();
-        buttonRef.current?.focus();
+        buttonRef.current?.focus({ preventScroll: true });
       }
       close();
     };
@@ -97,13 +129,11 @@ export function ChecksStatusLine({
     if (event.pointerType !== 'mouse') return;
     clearHoverTimer();
     if (popover?.mode !== 'hover') return;
-    hoverTimer.current = setTimeout(
-      () => setPopover((cur) => (cur?.mode === 'hover' ? undefined : cur)),
-      CHECKS_HOVER_CLOSE_MS
-    );
+    hoverTimer.current = setTimeout(() => {
+      if (popoverRef.current?.contains(document.activeElement)) return;
+      setPopover((cur) => (cur?.mode === 'hover' ? undefined : cur));
+    }, CHECKS_HOVER_CLOSE_MS);
   };
-  const isOnButton = (event?: MouseEvent | TouchEvent) =>
-    !!event && event.target instanceof Node && !!buttonRef.current?.contains(event.target);
   return (
     <>
       <button
@@ -117,6 +147,8 @@ export function ChecksStatusLine({
         onPointerEnter={(event) => {
           if (event.pointerType !== 'mouse') return;
           clearHoverTimer();
+          if (mouseOnButton.current) return;
+          mouseOnButton.current = true;
           if (popover || event.buttons !== 0) return;
           const el = event.currentTarget;
           hoverTimer.current = setTimeout(
@@ -124,7 +156,10 @@ export function ChecksStatusLine({
             CHECKS_HOVER_OPEN_MS
           );
         }}
-        onPointerLeave={onHoverLeave}
+        onPointerLeave={(event) => {
+          if (event.pointerType === 'mouse' && !pinnedOpen) mouseOnButton.current = false;
+          onHoverLeave(event);
+        }}
         onPointerDown={clearHoverTimer}
         onClick={(event) => {
           clearHoverTimer();
@@ -146,7 +181,7 @@ export function ChecksStatusLine({
         </span>
       </button>
       <PopOut
-        style={{ pointerEvents: 'none' }}
+        style={hoverOpen ? { pointerEvents: 'none' } : undefined}
         data-owns-focus={hoverOpen ? '' : undefined}
         anchor={anchor}
         position="Bottom"
@@ -156,16 +191,19 @@ export function ChecksStatusLine({
           <FocusTrap
             active={!hoverOpen}
             focusTrapOptions={{
-              initialFocus: false,
+              fallbackFocus: () => popoverRef.current ?? buttonRef.current ?? document.body,
+              preventScroll: true,
               returnFocusOnDeactivate: false,
-              clickOutsideDeactivates: (event?: MouseEvent | TouchEvent) =>
-                isOnButton(event) ? false : close(),
-              allowOutsideClick: isOnButton,
-              escapeDeactivates: close,
+              clickOutsideDeactivates: close,
+              escapeDeactivates: () => {
+                refocusRef.current = true;
+                return close();
+              },
             }}
           >
             <Menu
               ref={popoverRef}
+              tabIndex={-1}
               role="dialog"
               aria-label={t('checksPopover.label')}
               style={{ pointerEvents: 'auto' }}
@@ -173,6 +211,17 @@ export function ChecksStatusLine({
                 if (event.pointerType === 'mouse') clearHoverTimer();
               }}
               onPointerLeave={onHoverLeave}
+              onBlur={(event: FocusEvent<HTMLDivElement>) => {
+                if (!hoverOpen) return;
+                const next = event.relatedTarget;
+                if (
+                  next instanceof Node &&
+                  !popoverRef.current?.contains(next) &&
+                  !buttonRef.current?.contains(next)
+                ) {
+                  close();
+                }
+              }}
             >
               <div className="mrpr-root mrpr-popover" style={pluginRootStyle()}>
                 <ChecksPopover
