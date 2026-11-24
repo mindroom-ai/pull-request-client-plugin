@@ -45,10 +45,17 @@ const keyDown = (el: Element, key: string) =>
   });
 
 const mount = (over: Partial<LineDistributionProps> = {}) => {
+  const files = over.files ?? SAMPLE_FILES;
+  const activeKinds = over.activeKinds ?? new Set<ChangedFileKind>(['code', 'test', 'docs']);
+  const dirPrefix = over.dirPrefix ?? '';
+  const scopedFiles =
+    over.scopedFiles ??
+    files.filter((f) => activeKinds.has(f.kind) && (!dirPrefix || f.path.startsWith(dirPrefix)));
   const props: LineDistributionProps = {
-    files: SAMPLE_FILES,
-    activeKinds: new Set<ChangedFileKind>(['code', 'test', 'docs']),
-    dirPrefix: '',
+    files,
+    scopedFiles,
+    activeKinds,
+    dirPrefix,
     view: 'bars',
     metric: 'total',
     onToggleKind: vi.fn(),
@@ -74,9 +81,14 @@ afterEach(() => {
 });
 
 describe('LineDistribution', () => {
-  it('shows only present kind chips, toggles kinds, and refuses to hide the last active kind', async () => {
+  it('shows only present kind chips, keeps the kind bar decorative, toggles kinds, and refuses to hide the last active kind', async () => {
     const first = await mount();
-    const { getByRole, queryByRole, props } = first;
+    const { container, getByRole, queryByRole, props } = first;
+    const kindBar = container.querySelector('.mrpr-dist-kind-bar')!;
+    expect(kindBar.getAttribute('aria-hidden')).toBe('true');
+    await click(kindBar.querySelector('.mrpr-dist-kind-seg')!);
+    expect(props.onToggleKind).not.toHaveBeenCalled();
+
     expect(getByRole('button', { name: /Code/ }).getAttribute('aria-pressed')).toBe('true');
     expect(getByRole('button', { name: /Tests/ }).getAttribute('aria-pressed')).toBe('true');
     expect(getByRole('button', { name: /Docs/ }).getAttribute('aria-pressed')).toBe('true');
@@ -95,11 +107,18 @@ describe('LineDistribution', () => {
     expect(single.props.onToggleKind).toHaveBeenCalledWith('test');
   });
 
-  it('renders 2-column Bars with top-5 compact toggle, drills into folders, and collapses leaf directories to 1 column', async () => {
+  it('renders 2-column Bars with translated status badges, top-5 compact toggle, folder drill-down, and 1-column leaf view', async () => {
     const first = await mount();
     const { container, getByRole, getByText, queryByText, props } = first;
     expect(container.querySelector('.mrpr-dist-bars-split')).not.toBeNull();
     expect(getByText(/Top 5 files =/)).toBeTruthy();
+
+    // Status badges use translated sr-only text + title rather than raw English aria-label.
+    const poolRow = getByRole('button', { name: /Modified.*pool\.ts/ });
+    const statusBadgeEl = poolRow.querySelector('.mrpr-dist-status')!;
+    expect(statusBadgeEl.getAttribute('aria-label')).toBeNull();
+    expect(statusBadgeEl.getAttribute('title')).toBe('Modified');
+    expect(statusBadgeEl.querySelector('.mrpr-sr-only')?.textContent).toBe('Modified');
 
     // Compact default shows 5 file rows under Largest files; Show all expands to all 7.
     const fileList = getByText('Largest files').closest('.mrpr-dist-column')!;
@@ -112,7 +131,7 @@ describe('LineDistribution', () => {
     // Click directory row to drill in; click file row to select file.
     await click(getByRole('button', { name: /^src\// }));
     expect(props.onDirPrefixChange).toHaveBeenCalledWith('src/');
-    await click(getByRole('button', { name: /pool\.ts/ }));
+    await click(poolRow);
     expect(props.onSelectFile).toHaveBeenCalledWith('src/workers/pool.ts');
 
     first.unmount();
@@ -138,7 +157,7 @@ describe('LineDistribution', () => {
     expect(props.onMetricChange).toHaveBeenCalledWith('additions');
   });
 
-  it('renders Icicle with measured viewBox, dynamic depth height, tooltips, keyboard activation, and live hover/focus summary', async () => {
+  it('renders Icicle with group role, readable fill opacity, bounded tab stops, resize viewBox, and inspect footer', async () => {
     let observedWidth = 540;
     const observers: { callback: ResizeObserverCallback; targets: Set<Element> }[] = [];
     vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (
@@ -168,13 +187,18 @@ describe('LineDistribution', () => {
     const first = await mount({ view: 'icicle' });
     const { container, getByRole, getByText, props } = first;
     const svg = container.querySelector('svg.mrpr-dist-icicle-svg')!;
+    expect(svg.getAttribute('role')).toBe('group');
+    expect(container.querySelector('.mrpr-dist-foot')?.getAttribute('aria-live')).toBeNull();
     // Root (0) -> src/ (1) -> workers/ (2) -> pool.ts (3) => 4 rows * 42 = 168px.
     expect(svg.getAttribute('viewBox')).toBe(`0 0 540 ${4 * ICICLE_ROW_HEIGHT}`);
     expect(svg.getAttribute('preserveAspectRatio')).toBeNull();
-    // Every rendered node has a <title> tooltip.
+    // Every rendered node has a <title> tooltip and readable fillOpacity (>= 0.92).
     const nodes = container.querySelectorAll('g.mrpr-dist-icicle-node');
     expect(nodes.length).toBeGreaterThan(0);
     for (const node of nodes) expect(node.querySelector('title')?.textContent).toBeTruthy();
+    for (const rect of container.querySelectorAll('rect.mrpr-dist-icicle-rect')) {
+      expect(Number(rect.getAttribute('fill-opacity'))).toBeGreaterThanOrEqual(0.92);
+    }
 
     // Resize updates viewBox width cleanly.
     await act(async () => {
@@ -191,7 +215,7 @@ describe('LineDistribution', () => {
     });
     expect(svg.getAttribute('viewBox')).toBe(`0 0 480 ${4 * ICICLE_ROW_HEIGHT}`);
 
-    // Keyboard activation (Enter on folder, Space on file) and live focus summary in footer.
+    // Keyboard activation (Enter on folder, Space on file) and focus summary in footer.
     const folderBtn = getByRole('button', { name: /^src\/workers\/:/ });
     await act(async () => {
       folderBtn.focus();
@@ -211,6 +235,26 @@ describe('LineDistribution', () => {
     });
     expect(getByText(/Click a folder to zoom/)).toBeTruthy();
     first.unmount();
+
+    // Narrow slivers (< 28px wide) stay clickable with <title> but are omitted from Tab order.
+    const skewed = toDistributionFiles([
+      prFile('src/huge.ts', 490, 0, 'modified'),
+      prFile('src/tiny.ts', 5, 0, 'added'),
+    ]);
+    const narrow = await mount({
+      files: skewed,
+      activeKinds: new Set<ChangedFileKind>(['code']),
+      view: 'icicle',
+    });
+    const tinyNode = [...narrow.container.querySelectorAll('g.mrpr-dist-icicle-node')].find((el) =>
+      el.querySelector('title')?.textContent?.startsWith('src/tiny.ts:')
+    )!;
+    expect(tinyNode).toBeTruthy();
+    expect(tinyNode.getAttribute('tabindex')).toBeNull();
+    expect(tinyNode.getAttribute('role')).toBeNull();
+    await click(tinyNode);
+    expect(narrow.props.onSelectFile).toHaveBeenCalledWith('src/tiny.ts');
+    narrow.unmount();
 
     // Zoomed into shallow leaf folder: height shrinks to 2 * 42 = 84px with zero dead space.
     const zoomed = await mount({ view: 'icicle', dirPrefix: 'src/workers/' });

@@ -2481,13 +2481,19 @@ describe('CodeTab', () => {
         'src/workers/icon.bin',
       ]);
 
+      // Hiding a non-test kind alongside a folder filter shows both in the toolbar filter chip.
+      await click(tab.getByRole('button', { name: /Docs/ }));
+      const combinedChip = tab.getByRole('button', {
+        name: 'Clear filter: src/workers/ (+1 kind)',
+      });
+      expect(combinedChip.textContent).toContain('src/workers/ (+1 kind)');
+
       // Hiding Distribution keeps the active filter visible and dismissible in the toolbar.
       await click(tab.getByRole('button', { name: 'Line distribution' }));
-      const chip = tab.getByRole('button', { name: 'Clear filter: src/workers/' });
-      expect(chip.textContent).toContain('src/workers/');
-      await click(chip);
-      expect(tab.queryByRole('button', { name: 'Clear filter: src/workers/' })).toBeNull();
+      await click(combinedChip);
+      expect(tab.queryByRole('button', { name: /^Clear filter:/ })).toBeNull();
       expect(diffNames()).toHaveLength(5);
+      expect(diffNames()).toContain('docs/guide.md');
     });
 
     it('keeps Tests chip synced with toolbar Hide test files and auto-normalizes dirPrefix on kind toggle or refetch', async () => {
@@ -2535,10 +2541,11 @@ describe('CodeTab', () => {
       expect(tab.getByRole('button', { name: 'Clear filter: src/' })).toBeTruthy();
       expect(diffNames()).toEqual(['src/app.ts']);
 
-      // Toggling toolbar Hide test files back on updates Tests chip and stays at normalized src/.
+      // Toggling toolbar Hide test files back off updates Tests chip and restores src/tests/.
       await click(tab.getByRole('button', { name: 'Hide test files' }));
       expect(tab.getByRole('button', { name: /Tests/ }).getAttribute('aria-pressed')).toBe('true');
-      expect(tab.getByRole('button', { name: 'Clear filter: src/' })).toBeTruthy();
+      expect(tab.getByRole('button', { name: 'Clear filter: src/tests/' })).toBeTruthy();
+      expect(diffNames()).toEqual(['src/tests/unit.test.ts']);
 
       // Refetch removing all files under src/ normalizes dirPrefix all the way back to root.
       await act(async () =>
@@ -2620,6 +2627,104 @@ describe('CodeTab', () => {
         clientWidth.mockRestore();
         clientHeight.mockRestore();
       }
+    });
+
+    it('disables the Line distribution toggle with aria-pressed="false" in empty-state PRs', async () => {
+      // Test-only PR with Hide tests enabled: disabled, aria-pressed="false", no region rendered.
+      const testOnly = await show({
+        files: [file({ path: 'src/a.test.ts', additions: 20, deletions: 0 })],
+      });
+      const toggle = testOnly.getByRole('button', {
+        name: 'Line distribution',
+      }) as HTMLButtonElement;
+      await click(toggle);
+      expect(toggle.getAttribute('aria-pressed')).toBe('true');
+      expect(testOnly.getByRole('region', { name: 'Line distribution' })).toBeTruthy();
+
+      await click(testOnly.getByRole('button', { name: 'Hide test files' }));
+      expect(toggle.disabled).toBe(true);
+      expect(toggle.getAttribute('aria-pressed')).toBe('false');
+      expect(testOnly.queryByRole('region', { name: 'Line distribution' })).toBeNull();
+
+      // Re-showing tests re-enables the toggle and restores the open distribution region.
+      await click(testOnly.getByRole('button', { name: 'Hide test files' }));
+      expect(toggle.disabled).toBe(false);
+      expect(toggle.getAttribute('aria-pressed')).toBe('true');
+      expect(testOnly.getByRole('region', { name: 'Line distribution' })).toBeTruthy();
+      testOnly.unmount();
+
+      // Whitespace-only PR with whitespace hidden also disables the toggle cleanly.
+      const wsOnly = await show({
+        files: [file({ path: 'src/a.ts', patch: '@@ -1 +1 @@\n-a  b\n+a b' })],
+      });
+      const wsToggle = wsOnly.getByRole('button', {
+        name: 'Line distribution',
+      }) as HTMLButtonElement;
+      await click(wsOnly.getByRole('button', { name: 'Hide whitespace changes' }));
+      expect(wsToggle.disabled).toBe(true);
+      expect(wsToggle.getAttribute('aria-pressed')).toBe('false');
+      expect(wsOnly.queryByRole('region', { name: 'Line distribution' })).toBeNull();
+    });
+
+    it('hands focus from Line distribution to the revealed diff fold button, patchless row, and virtualized fallback', async () => {
+      Element.prototype.scrollIntoView = vi.fn();
+      let nextId = 1;
+      const frames = new Map<number, FrameRequestCallback>();
+      vi.stubGlobal(
+        'requestAnimationFrame',
+        vi.fn((cb: FrameRequestCallback) => {
+          const id = nextId++;
+          frames.set(id, cb);
+          return id;
+        })
+      );
+      vi.stubGlobal(
+        'cancelAnimationFrame',
+        vi.fn((id: number) => {
+          frames.delete(id);
+        })
+      );
+      const flushFrames = () =>
+        act(async () => {
+          for (const [id, cb] of [...frames]) {
+            frames.delete(id);
+            cb(0);
+          }
+        });
+
+      const tab = await show({ files: DIST_FILES });
+      await click(tab.getByRole('button', { name: 'Line distribution' }));
+      const distRegion = tab.getByRole('region', { name: 'Line distribution' });
+
+      // 1. Normal diff file moves focus out of .mrpr-dist to the revealed diff's fold button.
+      const poolRow = tab.getByRole('button', { name: /pool.ts/ });
+      act(() => poolRow.focus());
+      expect(distRegion.contains(document.activeElement)).toBe(true);
+      await click(poolRow);
+      expect(distRegion.contains(document.activeElement)).toBe(false);
+      expect(document.activeElement).toBe(foldToggle(tab, 'src/workers/pool.ts'));
+
+      // 2. Patchless file moves focus out of .mrpr-dist to its footer row.
+      await click(tab.getByRole('button', { name: 'Show all 6' }));
+      const binRow = tab.getByRole('button', { name: /icon.bin/ });
+      act(() => binRow.focus());
+      expect(distRegion.contains(document.activeElement)).toBe(true);
+      await click(binRow);
+      expect(distRegion.contains(document.activeElement)).toBe(false);
+      expect(document.activeElement).toBe(tab.getByText('No diff to show').closest('li'));
+
+      // 3. Virtualized diff still unmounted on activation falls back on rAF from .mrpr-dist to .mrpr-code-diffs.
+      const diffs = tab.container.querySelector<HTMLElement>('.mrpr-code-diffs')!;
+      const appToggle = foldToggle(tab, 'src/app.ts');
+      const appHeader = appToggle.parentElement!;
+      appToggle.remove();
+      const appRow = tab.getByRole('button', { name: /app.ts/ });
+      act(() => appRow.focus());
+      await click(appRow);
+      expect(distRegion.contains(document.activeElement)).toBe(true);
+      await flushFrames();
+      expect(document.activeElement).toBe(diffs);
+      appHeader.prepend(appToggle);
     });
   });
 });

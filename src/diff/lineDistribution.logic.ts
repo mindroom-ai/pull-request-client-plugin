@@ -5,12 +5,22 @@ import { changedFileKind, type ChangedFileKind } from './changedFileKind';
 
 export type DistributionView = 'bars' | 'icicle';
 export type DistributionMetric = 'total' | 'additions';
+export type DistributionViewProps = {
+  scopedFiles: readonly DistributionFile[];
+  dirPrefix: string;
+  metric: DistributionMetric;
+  scopeTotal: number;
+  fmt: Intl.NumberFormat;
+  onDirPrefixChange: (prefix: string) => void;
+  onSelectFile: (path: string) => void;
+};
 
 export const DISTRIBUTION_KINDS: readonly ChangedFileKind[] = ['code', 'test', 'docs', 'generated'];
 export const COMPACT_ROW_LIMIT = 5;
 export const ICICLE_MAX_DEPTH = 5;
 export const ICICLE_ROW_HEIGHT = 42;
 export const ICICLE_DEFAULT_WIDTH = 620;
+export const ICICLE_MIN_TAB_WIDTH = 28;
 const ICICLE_MIN_RECT_WIDTH = 1.5;
 
 type Totals = { files: number; additions: number; deletions: number; value: number };
@@ -183,14 +193,18 @@ export function computeBarWidths(
   return { addPct, delPct };
 }
 
+export type DistributionStatusKey = 'added' | 'modified' | 'removed' | 'renamed' | 'copied';
+
 export function statusBadge(status: PullRequestFile['status']): {
   letter: 'A' | 'M' | 'D' | 'R';
   tone: 'added' | 'modified' | 'removed' | 'renamed';
+  key: DistributionStatusKey;
 } {
-  if (status === 'added') return { letter: 'A', tone: 'added' };
-  if (status === 'removed') return { letter: 'D', tone: 'removed' };
-  if (status === 'renamed' || status === 'copied') return { letter: 'R', tone: 'renamed' };
-  return { letter: 'M', tone: 'modified' };
+  if (status === 'added') return { letter: 'A', tone: 'added', key: 'added' };
+  if (status === 'removed') return { letter: 'D', tone: 'removed', key: 'removed' };
+  if (status === 'copied') return { letter: 'R', tone: 'renamed', key: 'copied' };
+  if (status === 'renamed') return { letter: 'R', tone: 'renamed', key: 'renamed' };
+  return { letter: 'M', tone: 'modified', key: 'modified' };
 }
 
 /** Builds a directory/file hierarchy rooted at `dirPrefix` with rolled-up counts and dominant kind. */

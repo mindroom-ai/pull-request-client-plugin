@@ -135,10 +135,12 @@ describe('directory drill-down and Bars rankings', () => {
       'src/moved.ts',
       'src/deleted.ts',
     ]);
-    expect(statusBadge('added')).toEqual({ letter: 'A', tone: 'added' });
-    expect(statusBadge('removed')).toEqual({ letter: 'D', tone: 'removed' });
-    expect(statusBadge('renamed')).toEqual({ letter: 'R', tone: 'renamed' });
-    expect(statusBadge('modified')).toEqual({ letter: 'M', tone: 'modified' });
+    expect(statusBadge('added')).toEqual({ letter: 'A', tone: 'added', key: 'added' });
+    expect(statusBadge('removed')).toEqual({ letter: 'D', tone: 'removed', key: 'removed' });
+    expect(statusBadge('renamed')).toEqual({ letter: 'R', tone: 'renamed', key: 'renamed' });
+    expect(statusBadge('copied')).toEqual({ letter: 'R', tone: 'renamed', key: 'copied' });
+    expect(statusBadge('modified')).toEqual({ letter: 'M', tone: 'modified', key: 'modified' });
+    expect(statusBadge('changed')).toEqual({ letter: 'M', tone: 'modified', key: 'modified' });
   });
 
   it('computes proportional green/red bar widths safely including zero totals', () => {

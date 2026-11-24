@@ -504,9 +504,6 @@ export function CodeTab({
     () => normalizeDirPrefix(rawDirPrefix, kindFilteredFiles),
     [rawDirPrefix, kindFilteredFiles]
   );
-  useEffect(() => {
-    if (dirPrefix !== rawDirPrefix) setStoredDirFilter({ view, prefix: dirPrefix });
-  }, [dirPrefix, rawDirPrefix, view]);
   const hiddenPresentNonTestCount = presentKinds.filter(
     (kind) => kind !== 'test' && hiddenNonTestKinds.has(kind)
   ).length;
@@ -533,16 +530,19 @@ export function CodeTab({
     },
     [activeKinds, prefs]
   );
+  const scopedDistributionFiles = useMemo(
+    () =>
+      dirPrefix
+        ? kindFilteredFiles.filter((file) => file.path.startsWith(dirPrefix))
+        : kindFilteredFiles,
+    [kindFilteredFiles, dirPrefix]
+  );
   const includedPaths = useMemo(
     () =>
       hideTests || hasDistributionFilter
-        ? new Set(
-            kindFilteredFiles
-              .filter((file) => !dirPrefix || file.path.startsWith(dirPrefix))
-              .map((file) => file.path)
-          )
+        ? new Set(scopedDistributionFiles.map((file) => file.path))
         : null,
-    [hideTests, hasDistributionFilter, kindFilteredFiles, dirPrefix]
+    [hideTests, hasDistributionFilter, scopedDistributionFiles]
   );
   const shownDiffs = useMemo(
     () =>
@@ -814,17 +814,23 @@ export function CodeTab({
       rowsRef.current.get(path)?.scrollIntoView({ block: 'nearest' });
     }
     if (!moveFocus) return;
-    // Move focus out of the off-screen stacked tree to the revealed diff control (or the diffs
-    // container if the row is still virtualized). Also re-check on the next frame because Pierre's
-    // tree reclaims focus after onSelectionChange during the same click handler, and virtualized
-    // diff headers may not mount synchronously before CodeView finishes scrolling.
+    // Move focus out of the off-screen scroll-away header (stacked tree or Line Distribution) to
+    // the revealed diff control (or the diffs container if the row is still virtualized). Also
+    // re-check on the next frame because Pierre's tree reclaims focus after onSelectionChange
+    // during the same click handler, and virtualized diff headers may not mount synchronously
+    // before CodeView finishes scrolling.
     const moved = focusRevealedTarget(path, isDiffItem);
     revealFocusFrameRef.current = window.requestAnimationFrame(() => {
       revealFocusFrameRef.current = null;
       const active = document.activeElement;
-      const inStackedTree =
-        diffsRef.current?.querySelector('.mrpr-code-tree-stacked')?.contains(active) ?? false;
-      if (moved ? !inStackedTree : !inStackedTree && active !== null && active !== document.body) {
+      const inScrollAwayHeader = [
+        ...(diffsRef.current?.querySelectorAll('.mrpr-code-tree-stacked, .mrpr-dist') ?? []),
+      ].some((headerEl) => headerEl.contains(active));
+      if (
+        moved
+          ? !inScrollAwayHeader
+          : !inScrollAwayHeader && active !== null && active !== document.body
+      ) {
         return;
       }
       if (!focusRevealedTarget(path, isDiffItem)) {
@@ -923,11 +929,13 @@ export function CodeTab({
   };
 
   const hasFiles = Boolean(viewFiles && viewFiles.length > 0);
-  const showDistribution = Boolean(prefs.showDistribution && hasFiles);
+  const showDistribution = Boolean(prefs.showDistribution && hasDiffs);
   const toggleDistribution = () => {
+    if (!hasDiffs) return;
     const next = !prefs.showDistribution;
     prefs.update({ showDistribution: next });
-    if (next && hasDiffs) {
+    if (next) {
+      cancelRevealFocus();
       const still = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
       viewerRef.current?.scrollTo({
         type: 'position',
@@ -936,6 +944,17 @@ export function CodeTab({
       });
     }
   };
+  const filterChipText = dirPrefix
+    ? hiddenPresentNonTestCount > 0
+      ? t('code.distribution.dirFilterWithKinds', {
+          prefix: dirPrefix,
+          count: hiddenPresentNonTestCount,
+        })
+      : dirPrefix
+    : t('code.distribution.clearFilter');
+  const filterChipLabel = dirPrefix
+    ? t('code.distribution.clearDirFilter', { prefix: filterChipText })
+    : filterChipText;
 
   const renderCodeViewHeader =
     stacked || showDistribution
@@ -954,6 +973,7 @@ export function CodeTab({
             {showDistribution ? (
               <LineDistribution
                 files={distributionFiles}
+                scopedFiles={scopedDistributionFiles}
                 activeKinds={activeKinds}
                 dirPrefix={dirPrefix}
                 view={prefs.distributionView}
@@ -962,7 +982,7 @@ export function CodeTab({
                 onDirPrefixChange={setDirPrefix}
                 onViewChange={(distributionView) => prefs.update({ distributionView })}
                 onMetricChange={(distributionMetric) => prefs.update({ distributionMetric })}
-                onSelectFile={(path) => reveal(path)}
+                onSelectFile={(path) => reveal(path, true)}
               />
             ) : null}
           </>
@@ -996,21 +1016,11 @@ export function CodeTab({
                 <button
                   type="button"
                   className="mrpr-filter-chip"
-                  aria-label={
-                    dirPrefix
-                      ? t('code.distribution.clearDirFilter', { prefix: dirPrefix })
-                      : t('code.distribution.clearFilter')
-                  }
-                  title={
-                    dirPrefix
-                      ? t('code.distribution.clearDirFilter', { prefix: dirPrefix })
-                      : t('code.distribution.clearFilter')
-                  }
+                  aria-label={filterChipLabel}
+                  title={filterChipLabel}
                   onClick={clearDistributionFilters}
                 >
-                  <span className="mrpr-truncate">
-                    {dirPrefix || t('code.distribution.clearFilter')}
-                  </span>
+                  <span className="mrpr-truncate">{filterChipText}</span>
                   <X aria-hidden className="mrpr-filter-chip-icon" />
                 </button>
               ) : null}
@@ -1091,7 +1101,8 @@ export function CodeTab({
           {hasFiles ? (
             <ToolbarButton
               label={t('code.distribution.toggle')}
-              pressed={prefs.showDistribution}
+              pressed={hasDiffs && prefs.showDistribution}
+              disabled={!hasDiffs}
               onClick={toggleDistribution}
             >
               <ChartBar aria-hidden className="mrpr-button-icon" />

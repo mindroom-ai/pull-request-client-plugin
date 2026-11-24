@@ -85,7 +85,16 @@ export const en = {
       icicleNodeLabel: '{{path}}: +{{additions}} -{{deletions}}, {{share}}, {{files}}',
       clearFilter: 'Clear filter',
       clearDirFilter: 'Clear filter: {{prefix}}',
+      dirFilterWithKinds_one: '{{prefix}} (+{{count}} kind)',
+      dirFilterWithKinds_other: '{{prefix}} (+{{count}} kinds)',
       noMatchingFiles: 'No files match the current filter.',
+      status: {
+        added: 'Added',
+        modified: 'Modified',
+        removed: 'Removed',
+        renamed: 'Renamed',
+        copied: 'Copied',
+      },
     },
   },
   thread: {
