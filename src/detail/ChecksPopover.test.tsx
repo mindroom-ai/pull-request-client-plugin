@@ -7,22 +7,31 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CheckStatus, PullRequest, PullRequestCheck } from '../github';
 import plugin from '../index';
 import { ChecksPopover } from './ChecksPopover';
-import { ChecksStatusLine } from './ChecksStatusLine';
+import { CHECKS_HOVER_CLOSE_MS, CHECKS_HOVER_OPEN_MS, ChecksStatusLine } from './ChecksStatusLine';
 
 // The options the popover gives its focus trap, which a test calls as the trap would on Escape and
 // on a click outside.
 const trap = vi.hoisted(() => ({
+  active: undefined as boolean | undefined,
   options: undefined as
-    { escapeDeactivates: () => boolean; clickOutsideDeactivates: () => boolean } | undefined,
+    | {
+        escapeDeactivates: () => boolean;
+        clickOutsideDeactivates: (event?: MouseEvent | TouchEvent) => boolean;
+        allowOutsideClick?: (event?: MouseEvent | TouchEvent) => boolean;
+      }
+    | undefined,
 }));
 vi.mock('focus-trap-react', () => ({
   default: ({
     children,
+    active = true,
     focusTrapOptions,
   }: {
     children: ReactNode;
+    active?: boolean;
     focusTrapOptions: NonNullable<typeof trap.options>;
   }) => {
+    trap.active = active;
     trap.options = focusTrapOptions;
     return children;
   },
@@ -108,9 +117,9 @@ describe('ChecksStatusLine', () => {
       status,
       headers: { 'content-type': 'application/json' },
     });
-  const runs = (conclusions: string[]) => ({
+  const runs = (conclusions: string[], labels?: string[]) => ({
     check_runs: conclusions.map((conclusion, index) => ({
-      name: `job ${index}`,
+      name: labels?.[index] ?? `job ${index}`,
       status: 'completed',
       conclusion,
       html_url: `https://github.com/a/b/runs/${index}`,
@@ -124,13 +133,46 @@ describe('ChecksStatusLine', () => {
         <ChecksStatusLine pullRequest={pullRequest} pullRequestRef={ref} />
       </QueryClientProvider>
     );
+  const pointer = (
+    target: EventTarget,
+    type: 'pointerover' | 'pointerout' | 'pointerdown',
+    { pointerType = 'mouse', buttons = 0 } = {}
+  ) =>
+    act(async () => {
+      target.dispatchEvent(
+        Object.assign(new MouseEvent(type, { bubbles: true, buttons }), { pointerType })
+      );
+    });
+  const advance = (ms: number) => act(async () => void vi.advanceTimersByTime(ms));
+  const openHover = async (button: HTMLElement) => {
+    await pointer(button, 'pointerover');
+    await advance(CHECKS_HOVER_OPEN_MS);
+  };
+  const showHoverable = async () => {
+    fetchMock.mockImplementation(async (url) =>
+      respond(
+        url.includes('/check-runs')
+          ? runs(['failure', 'success', 'success'], ['lint', 'build', 'test'])
+          : { statuses: [] }
+      )
+    );
+    const view = await show();
+    const button = await view.findByRole('button', { name: /1 of 3 failing/ });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    return { view, button };
+  };
 
   beforeEach(() => {
     localStorage.clear();
     fetchMock.mockReset();
+    trap.active = undefined;
+    trap.options = undefined;
     vi.stubGlobal('fetch', fetchMock);
   });
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
 
   it('summarizes the checks and opens the popover, which Escape closes', async () => {
     fetchMock.mockImplementation(async (url) =>
@@ -248,5 +290,124 @@ describe('ChecksStatusLine', () => {
     );
     await click(view.getByRole('button', { name: 'Retry' }));
     expect(await view.findByText('All checks have passed')).toBeTruthy();
+  });
+
+  it('opens on mouse hover after CHECKS_HOVER_OPEN_MS with inactive trap, data-owns-focus, and hidden title', async () => {
+    const { view, button } = await showHoverable();
+    expect(button.getAttribute('title')).toBe('1 of 3 failing');
+    await pointer(button, 'pointerover');
+    await advance(CHECKS_HOVER_OPEN_MS - 1);
+    expect(view.queryByRole('dialog')).toBeNull();
+    await advance(1);
+    const dialog = view.getByRole('dialog', { name: 'Checks' });
+    expect(view.getByText('Some checks were not successful')).toBeTruthy();
+    expect(view.getByText('lint')).toBeTruthy();
+    expect(button.getAttribute('aria-expanded')).toBe('true');
+    expect(button.getAttribute('title')).toBeNull();
+    expect(trap.active).toBe(false);
+    const layer = dialog.closest('[data-owns-focus]') as HTMLElement | null;
+    expect(layer?.getAttribute('data-owns-focus')).toBe('');
+    expect(layer?.style.pointerEvents).toBe('none');
+    expect(dialog.style.pointerEvents).toBe('auto');
+  });
+
+  it('does not open when the mouse leaves before CHECKS_HOVER_OPEN_MS', async () => {
+    const { view, button } = await showHoverable();
+    await pointer(button, 'pointerover');
+    await advance(CHECKS_HOVER_OPEN_MS - 1);
+    await pointer(button, 'pointerout');
+    await advance(CHECKS_HOVER_OPEN_MS);
+    expect(view.queryByRole('dialog')).toBeNull();
+  });
+
+  it('stays open across button and popover within CHECKS_HOVER_CLOSE_MS and closes after leaving', async () => {
+    const { view, button } = await showHoverable();
+    await openHover(button);
+    const dialog = view.getByRole('dialog', { name: 'Checks' });
+    await pointer(button, 'pointerout');
+    await advance(CHECKS_HOVER_CLOSE_MS - 1);
+    await pointer(dialog, 'pointerover');
+    await advance(CHECKS_HOVER_CLOSE_MS);
+    expect(view.getByRole('dialog', { name: 'Checks' })).toBeTruthy();
+    await pointer(dialog, 'pointerout');
+    await advance(CHECKS_HOVER_CLOSE_MS - 1);
+    await pointer(button, 'pointerover');
+    await advance(CHECKS_HOVER_CLOSE_MS);
+    expect(view.getByRole('dialog', { name: 'Checks' })).toBeTruthy();
+    await pointer(button, 'pointerout');
+    await pointer(dialog, 'pointerover');
+    await pointer(dialog, 'pointerout');
+    await advance(CHECKS_HOVER_CLOSE_MS - 1);
+    expect(view.getByRole('dialog', { name: 'Checks' })).toBeTruthy();
+    await advance(1);
+    expect(view.queryByRole('dialog')).toBeNull();
+    expect(button.getAttribute('title')).toBe('1 of 3 failing');
+  });
+
+  it('pins in place on click while hover-open, keeping Show all expanded until clicked again', async () => {
+    const { view, button } = await showHoverable();
+    await openHover(button);
+    await click(view.getByRole('button', { name: 'Show all' }));
+    expect(view.getByText('build')).toBeTruthy();
+    await pointer(button, 'pointerdown');
+    await click(button);
+    const dialog = view.getByRole('dialog', { name: 'Checks' });
+    expect(view.getByRole('button', { name: 'Show less' })).toBeTruthy();
+    expect(trap.active).toBe(true);
+    expect(dialog.closest('[data-owns-focus]')).toBeNull();
+    await pointer(button, 'pointerout');
+    await pointer(dialog, 'pointerout');
+    await advance(CHECKS_HOVER_CLOSE_MS * 2);
+    expect(view.getByRole('dialog', { name: 'Checks' })).toBeTruthy();
+    const onButton = new MouseEvent('mousedown', { bubbles: true });
+    Object.defineProperty(onButton, 'target', { value: button });
+    expect(trap.options?.clickOutsideDeactivates(onButton)).toBe(false);
+    expect(trap.options?.allowOutsideClick?.(onButton)).toBe(true);
+    await click(button);
+    expect(view.queryByRole('dialog')).toBeNull();
+  });
+
+  it('ignores touch/pen hover and mouse hover while buttons are pressed', async () => {
+    const { view, button } = await showHoverable();
+    for (const init of [
+      { pointerType: 'touch' },
+      { pointerType: 'pen' },
+      { pointerType: 'mouse', buttons: 1 },
+    ]) {
+      await pointer(button, 'pointerover', init);
+      await advance(CHECKS_HOVER_OPEN_MS);
+      expect(view.queryByRole('dialog')).toBeNull();
+    }
+  });
+
+  it('closes hover popover on Escape (focusing button only from inside) and outside pointerdown', async () => {
+    const { view, button } = await showHoverable();
+    const sendEscape = async () => {
+      const event = new KeyboardEvent('keydown', {
+        key: 'Escape',
+        bubbles: true,
+        cancelable: true,
+      });
+      await act(async () => void document.dispatchEvent(event));
+      return event;
+    };
+    await openHover(button);
+    const outsideEscape = await sendEscape();
+    expect(view.queryByRole('dialog')).toBeNull();
+    expect(outsideEscape.defaultPrevented).toBe(false);
+    expect(document.activeElement).not.toBe(button);
+
+    await openHover(button);
+    view.getByRole('button', { name: 'Show all' }).focus();
+    const insideEscape = await sendEscape();
+    expect(view.queryByRole('dialog')).toBeNull();
+    expect(insideEscape.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(button);
+
+    await openHover(button);
+    await pointer(view.getByRole('dialog', { name: 'Checks' }), 'pointerdown');
+    expect(view.getByRole('dialog', { name: 'Checks' })).toBeTruthy();
+    await pointer(document.body, 'pointerdown');
+    expect(view.queryByRole('dialog')).toBeNull();
   });
 });
