@@ -140,6 +140,7 @@ export function useHeaderActions({
   // The pull request whose branch the dialog asks about, so showing another one closes it.
   const [deleting, setDeleting] = useState<string | null>(null);
   const moreRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
   // Set when a choice or Escape closes the menu, which then gives the focus back to its button,
   // once the menu's focus trap is gone.
   const refocus = useRef(false);
@@ -379,7 +380,7 @@ export function useHeaderActions({
             }}
           >
             <Menu role="menu" aria-label={more}>
-              <div className="mrpr-root mrpr-actions-menu" style={pluginRootStyle()}>
+              <div ref={menuRef} className="mrpr-root mrpr-actions-menu" style={pluginRootStyle()}>
                 {showsMethods ? (
                   <>
                     <MenuGroup>
@@ -498,8 +499,11 @@ export function useHeaderActions({
                               // The entry goes with the menu: the panel's note takes the focus,
                               // or, when the removal fails, the menu's button, as its other
                               // entries give it back.
+                              const control = menuRef.current?.contains(document.activeElement)
+                                ? document.activeElement
+                                : null;
                               setAnchor(undefined);
-                              void removal.remove(null).then((ended) => {
+                              void removal.remove(control).then((ended) => {
                                 if (ended && !ended.done && ended.lost) moreRef.current?.focus();
                               });
                             }}

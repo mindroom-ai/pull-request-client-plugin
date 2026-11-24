@@ -240,7 +240,11 @@ const changeLimit = () => AbortSignal.timeout(30_000);
  * The query of a server's status. Its answer is kept as the server's (`setStatus`), unless the
  * fence moved since it was asked: that says nothing of now.
  */
-const statusQuery = (queryClient: QueryClient, server: MindroomServer | undefined) => ({
+const statusQuery = (
+  queryClient: QueryClient,
+  server: MindroomServer | undefined,
+  beforeStatus?: () => void
+) => ({
   queryKey: statusKey(server?.origin ?? ''),
   queryFn: async () => {
     const { origin } = server as MindroomServer;
@@ -256,6 +260,7 @@ const statusQuery = (queryClient: QueryClient, server: MindroomServer | undefine
     if (fence !== credentialOf(queryClient, origin).fence) {
       return queryClient.getQueryData<ServerStatus>(statusKey(origin)) ?? now;
     }
+    beforeStatus?.();
     setStatus(queryClient, origin, now);
     return now;
   },
@@ -263,8 +268,8 @@ const statusQuery = (queryClient: QueryClient, server: MindroomServer | undefine
 });
 
 /** Asks `server` for its status now, whoever shows it, as part of saving or removing a token. */
-const askStatus = (queryClient: QueryClient, server: MindroomServer) =>
-  queryClient.fetchQuery({ ...statusQuery(queryClient, server), staleTime: 0 });
+const askStatus = (queryClient: QueryClient, server: MindroomServer, beforeStatus?: () => void) =>
+  queryClient.fetchQuery({ ...statusQuery(queryClient, server, beforeStatus), staleTime: 0 });
 
 /**
  * Requests through `server` as the person's connected GitHub account, `account` the signed-in
@@ -396,9 +401,18 @@ function useServerToken() {
      * so the reads under way through it are cancelled and none starts until its status is known
      * again, from `send`'s answer or, once that failed, asked anew.
      */
-    const change = async (send: () => Promise<ServerStatus>): Promise<unknown> => {
+    const change = async (
+      send: () => Promise<ServerStatus>,
+      beforeCommit?: () => void
+    ): Promise<unknown> => {
       const before = credentialOf(queryClient, origin);
       let generation = before.generation + 1;
+      let committed = false;
+      const commit = () => {
+        if (committed) return;
+        committed = true;
+        beforeCommit?.();
+      };
       setCredential(queryClient, origin, { generation, fence: before.fence + 1, writing: true });
       void queryClient.cancelQueries({ queryKey: statusKey(origin) });
       void queryClient.cancelQueries({
@@ -406,7 +420,9 @@ function useServerToken() {
         predicate: ({ queryKey }) => String(accessOf(queryKey)).startsWith(`server:${origin}:`),
       });
       try {
-        setStatus(queryClient, origin, await send());
+        const next = await send();
+        commit();
+        setStatus(queryClient, origin, next);
         return undefined;
       } catch (error) {
         const { status, code } = refusalOf(error);
@@ -417,12 +433,14 @@ function useServerToken() {
         } else {
           // Whether it took the change is not known: without its status, nothing goes through
           // it as an account it may no longer use.
-          await askStatus(queryClient, server).catch(() =>
-            setStatus(queryClient, origin, NOT_CONNECTED)
-          );
+          await askStatus(queryClient, server, commit).catch(() => {
+            commit();
+            setStatus(queryClient, origin, NOT_CONNECTED);
+          });
         }
         return error ?? new Error('failed');
       } finally {
+        commit();
         const { fence } = credentialOf(queryClient, origin);
         setCredential(queryClient, origin, { generation, fence, writing: false });
       }
@@ -466,15 +484,17 @@ function useServerToken() {
         return status === 422 ? 'invalid' : 'failed';
       },
       /** Removes it there; resolves to whether it did. */
-      remove: async (): Promise<boolean> =>
-        (await change(async () =>
-          statusOf(
-            await server.request('/api/github/token', {
-              method: 'DELETE',
-              redirect: NO_REDIRECT,
-              signal: changeLimit(),
-            })
-          )
+      remove: async (beforeCommit?: () => void): Promise<boolean> =>
+        (await change(
+          async () =>
+            statusOf(
+              await server.request('/api/github/token', {
+                method: 'DELETE',
+                redirect: NO_REDIRECT,
+                signal: changeLimit(),
+              })
+            ),
+          beforeCommit
         )) === undefined,
     };
   }, [forget, origin, queryClient, server, storedToken, writing]);
@@ -630,12 +650,15 @@ function useRemoval(note: RemovedToken) {
     if (!serverToken || serverToken.busy()) return undefined;
     setFailedUnder(undefined);
     note.setRemoved(undefined);
-    const done = await serverToken.remove();
+    let lost = false;
+    const done = await serverToken.remove(() => {
+      // The focus follows from the button, or from where it fell once the button went, but not
+      // from where the person moved it meanwhile. Decide before the credential update notifies
+      // stores and can unmount the element holding focus (such as the panel header while reloading).
+      const active = document.activeElement;
+      lost = [null, document.body, control, note.placed.current].includes(active);
+    });
     setFailedUnder(done ? undefined : current().key);
-    // The focus follows from the button, or from where it fell once the button went, but not
-    // from where the person moved it meanwhile.
-    const active = document.activeElement;
-    const lost = [null, document.body, control, note.placed.current].includes(active);
     note.setRemoved(done ? { origin: serverToken.origin, focus: lost } : undefined);
     return { done, lost };
   };
