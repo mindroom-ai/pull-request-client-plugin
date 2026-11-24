@@ -2880,7 +2880,7 @@ test('on a phone the header scrolls away under a bar that brings it back', async
     await expect(hide).toBeVisible();
 
     // Expanding a folder reveals its files; choosing a later file scrolls the stacked tree out of
-    // view, and Go to files jumps back to the top and focuses the active treeitem row.
+    // view and moves focus to the revealed diff, and Go to files returns focus to the active row.
     await sessionFolder.click();
     await expect(sessionFolder).toHaveAttribute('aria-expanded', 'true');
     await expect(panel(page).getByRole('treeitem', { name: 'store.ts' })).toBeVisible();
@@ -2891,6 +2891,19 @@ test('on a phone the header scrolls away under a bar that brings it back', async
     await expect(runnerRow).toBeVisible();
     await runnerRow.click();
     await expect(sessionFolder).not.toBeInViewport();
+    await expect(runnerRow).not.toBeFocused();
+    const focusOnDiff = () =>
+      panel(page)
+        .locator('.mrpr-code-diffs')
+        .evaluate(
+          (diffs) =>
+            diffs.contains(document.activeElement) &&
+            !(
+              diffs.querySelector('.mrpr-code-tree-stacked')?.contains(document.activeElement) ??
+              false
+            )
+        );
+    await expect.poll(focusOnDiff).toBe(true);
     await goToFiles.click();
     await expect(sessionFolder).toBeInViewport();
     await expect(runnerRow).toBeFocused();
@@ -2901,6 +2914,18 @@ test('on a phone the header scrolls away under a bar that brings it back', async
           .evaluate((element) => element.shadowRoot?.activeElement?.getAttribute('role'))
       )
       .toBe('treeitem');
+
+    // Keyboard activation (ArrowUp -> Enter) also moves focus out of the off-screen stacked tree
+    // to the diff, and Go to files restores focus to that newly activated row.
+    const queueRow = panel(page).getByRole('treeitem', { name: 'queue.ts' });
+    await page.keyboard.press('ArrowUp');
+    await expect(queueRow).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(queueRow).not.toBeFocused();
+    await expect.poll(focusOnDiff).toBe(true);
+    await goToFiles.click();
+    await expect(sessionFolder).toBeInViewport();
+    await expect(queueRow).toBeFocused();
   } finally {
     PULLS.sessionStore.body = body;
     await context.close();

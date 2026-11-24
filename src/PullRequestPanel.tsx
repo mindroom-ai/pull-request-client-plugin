@@ -254,7 +254,7 @@ function Header({
     onForgetToken,
   });
   const scrolledAway = useScrolledAway(headerRef, barRef, scrolls && !holds);
-  // On the Code tab the header starts expanded; collapsing it stays for this pull request and tab.
+  // On the Code tab the header starts expanded; collapsing it stays until switching tabs or pull requests.
   const codeScope = scrolls ? '' : pullRequestUrl(ref);
   const [collapsedScope, setCollapsedScope] = useState('');
   if (collapsedScope && collapsedScope !== codeScope) setCollapsedScope('');

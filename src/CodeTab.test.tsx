@@ -119,6 +119,7 @@ vi.mock('@pierre/trees/react', async () => {
       paths: [] as readonly string[],
       statuses: new Map<string, string>(),
       folders: [] as [string, Decoration | null][],
+      focusedPath: null as string | null,
     };
     const listeners = new Set<() => void>();
     // Like Pierre, it draws the folders' decorations when it draws its rows: on a change of
@@ -165,8 +166,12 @@ vi.mock('@pierre/trees/react', async () => {
       getVisibleCount: () => state.paths.length,
       getItemHeight: () => 24,
       getSelectedPaths: () => [],
-      getFocusedPath: () => null,
-      focusPath() {},
+      getFocusedPath: () => state.focusedPath,
+      focusPath(path: string) {
+        if (state.focusedPath === path) return;
+        state = { ...state, focusedPath: path };
+        listeners.forEach((listener) => listener());
+      },
       scrollToPath() {},
       subscribe(listener: () => void) {
         listeners.add(listener);
@@ -182,13 +187,30 @@ vi.mock('@pierre/trees/react', async () => {
     },
     useFileTreeSelector: (model: Model, selector: (model: Model) => unknown) => selector(model),
     FileTree: ({ model, 'aria-label': label }: { model: Model; 'aria-label'?: string }) => {
-      const { paths, statuses, folders } = useSyncExternalStore(model.subscribe, model.state);
+      const { paths, statuses, folders, focusedPath } = useSyncExternalStore(
+        model.subscribe,
+        model.state
+      );
       return (
         <>
           <ul aria-label={label} data-initial-expansion={model.options.initialExpansion}>
-            {paths.map((path) => (
+            {paths.map((path, index) => (
               <li key={path} data-status={statuses.get(path)}>
-                <button type="button" onClick={() => model.options.onSelectionChange?.([path])}>
+                <button
+                  type="button"
+                  role="treeitem"
+                  tabIndex={focusedPath === path || (focusedPath === null && index === 0) ? 0 : -1}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      event.currentTarget.click();
+                    }
+                  }}
+                  onClick={() => {
+                    model.focusPath(path);
+                    model.options.onSelectionChange?.([path]);
+                  }}
+                >
                   {path}
                 </button>
               </li>
@@ -1029,7 +1051,7 @@ describe('CodeTab', () => {
 
   it('choosing a file scrolls its diff into view', async () => {
     const tab = await show();
-    await click(tab.getByRole('button', { name: 'README.md' }));
+    await click(tab.getByRole('treeitem', { name: 'README.md' }));
     expect(view.scrollTo).toHaveBeenCalledWith({ type: 'item', id: 'README.md', align: 'start' });
   });
 
@@ -1048,7 +1070,7 @@ describe('CodeTab', () => {
     const scrollIntoView = vi.fn();
     Element.prototype.scrollIntoView = scrollIntoView;
     const tab = await show();
-    await click(tab.getByRole('button', { name: 'logo.png' }));
+    await click(tab.getByRole('treeitem', { name: 'logo.png' }));
     expect(view.scrollTo).not.toHaveBeenCalled();
     expect(scrollIntoView).toHaveBeenCalledTimes(1);
     expect(scrollIntoView.mock.contexts[0]).toBe(tab.getByText('No diff to show').closest('li'));
@@ -1231,14 +1253,14 @@ describe('CodeTab', () => {
     it('moves focus to the Files button when resizing across 640px unmounts a focused tree', async () => {
       codeWidth = 640;
       const tab = await show();
-      const fileButton = tab.getByRole('button', { name: 'src/app.ts' });
+      const fileButton = tab.getByRole('treeitem', { name: 'src/app.ts' });
       act(() => fileButton.focus());
       expect(document.activeElement).toBe(fileButton);
 
       await resizeCode(500);
       expect(document.activeElement).toBe(tab.getByRole('button', { name: 'Go to files' }));
 
-      const stackedButton = tab.getByRole('button', { name: 'src/app.ts' });
+      const stackedButton = tab.getByRole('treeitem', { name: 'src/app.ts' });
       act(() => stackedButton.focus());
       await resizeCode(700);
       expect(document.activeElement).toBe(tab.getByRole('button', { name: 'Files' }));
@@ -1248,6 +1270,132 @@ describe('CodeTab', () => {
       act(() => wrapButton.focus());
       await resizeCode(600);
       expect(document.activeElement).toBe(wrapButton);
+    });
+
+    it('moves focus from the stacked tree to the revealed diff on Enter and returns via Go to files', async () => {
+      Element.prototype.scrollIntoView = vi.fn();
+      const tab = await show();
+      const stackedTree = tab.container.querySelector('.mrpr-code-tree-stacked')!;
+      const readmeRow = tab.getByRole('treeitem', { name: 'README.md' });
+      act(() => readmeRow.focus());
+      expect(document.activeElement).toBe(readmeRow);
+
+      await act(async () => {
+        readmeRow.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+        );
+      });
+      expect(view.scrollTo).toHaveBeenCalledWith({
+        type: 'item',
+        id: 'README.md',
+        align: 'start',
+      });
+      expect(stackedTree.contains(document.activeElement)).toBe(false);
+      expect(document.activeElement).toBe(foldToggle(tab, 'README.md'));
+      expect(readmeRow.getAttribute('tabindex')).toBe('0');
+
+      await click(tab.getByRole('button', { name: 'Go to files' }));
+      expect(document.activeElement).toBe(readmeRow);
+
+      // Activating a patchless file in the stacked tree moves focus to its footer row.
+      const logoRow = tab.getByRole('treeitem', { name: 'logo.png' });
+      act(() => logoRow.focus());
+      await act(async () => {
+        logoRow.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+        );
+      });
+      expect(stackedTree.contains(document.activeElement)).toBe(false);
+      expect(document.activeElement).toBe(tab.getByText('No diff to show').closest('li'));
+
+      await click(tab.getByRole('button', { name: 'Go to files' }));
+      expect(document.activeElement).toBe(logoRow);
+
+      // Wide desktop sidebar keeps focus on the tree item when activating a file.
+      await resizeCode(640);
+      const wideReadme = tab.getByRole('treeitem', { name: 'README.md' });
+      act(() => wideReadme.focus());
+      await act(async () => {
+        wideReadme.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+        );
+      });
+      expect(document.activeElement).toBe(wideReadme);
+    });
+
+    it('falls back on one animation frame for virtualized stacked reveals and cancels pending frames', async () => {
+      let nextId = 1;
+      const frames = new Map<number, FrameRequestCallback>();
+      const requestFrame = vi.fn((cb: FrameRequestCallback) => {
+        const id = nextId++;
+        frames.set(id, cb);
+        return id;
+      });
+      const cancelFrame = vi.fn((id: number) => {
+        frames.delete(id);
+      });
+      vi.stubGlobal('requestAnimationFrame', requestFrame);
+      vi.stubGlobal('cancelAnimationFrame', cancelFrame);
+      const flushFrames = () =>
+        act(async () => {
+          for (const [id, cb] of [...frames]) {
+            frames.delete(id);
+            cb(0);
+          }
+        });
+
+      const tab = await show();
+      const diffs = tab.container.querySelector<HTMLElement>('.mrpr-code-diffs')!;
+
+      // 1. Virtualized diff header still not mounted by rAF falls back to .mrpr-code-diffs.
+      const appToggle = foldToggle(tab, 'src/app.ts');
+      const appHeader = appToggle.parentElement!;
+      appToggle.remove();
+      const appRow = tab.getByRole('treeitem', { name: 'src/app.ts' });
+      act(() => appRow.focus());
+      await click(appRow);
+      expect(document.activeElement).toBe(appRow);
+      await flushFrames();
+      expect(document.activeElement).toBe(diffs);
+
+      // 2. Virtualized diff header mounted before rAF receives focus instead of the container.
+      const newToggle = foldToggle(tab, 'src/new.ts');
+      const newHeader = newToggle.parentElement!;
+      newToggle.remove();
+      const newRow = tab.getByRole('treeitem', { name: 'src/new.ts' });
+      act(() => newRow.focus());
+      await click(newRow);
+      newHeader.prepend(newToggle);
+      await flushFrames();
+      expect(document.activeElement).toBe(newToggle);
+      appHeader.prepend(appToggle);
+
+      // 3. If the tree reclaims focus after onSelectionChange, rAF moves it back to the diff control.
+      const readmeRow = tab.getByRole('treeitem', { name: 'README.md' });
+      act(() => readmeRow.focus());
+      await click(readmeRow);
+      expect(document.activeElement).toBe(foldToggle(tab, 'README.md'));
+      act(() => readmeRow.focus());
+      await flushFrames();
+      expect(document.activeElement).toBe(foldToggle(tab, 'README.md'));
+
+      // 4. Go to files cancels any pending reveal focus frame so focus stays on the tree row.
+      const oldToggle = foldToggle(tab, 'old.ts');
+      oldToggle.remove();
+      const oldRow = tab.getByRole('treeitem', { name: 'old.ts' });
+      act(() => oldRow.focus());
+      await click(oldRow);
+      expect(frames.size).toBe(1);
+      await click(tab.getByRole('button', { name: 'Go to files' }));
+      expect(cancelFrame).toHaveBeenCalled();
+      expect(frames.size).toBe(0);
+      expect(document.activeElement).toBe(oldRow);
+
+      // 5. Unmounting cancels any pending reveal focus frame.
+      await click(oldRow);
+      expect(frames.size).toBe(1);
+      await act(async () => tab.unmount());
+      expect(frames.size).toBe(0);
     });
   });
 
@@ -1894,7 +2042,7 @@ describe('CodeTab', () => {
       const tab = await show();
       await click(viewedBox(tab, 'README.md'));
       expect(itemOf('README.md')?.collapsed).toBe(true);
-      await click(tab.getByRole('button', { name: 'README.md' }));
+      await click(tab.getByRole('treeitem', { name: 'README.md' }));
       expect(itemOf('README.md')?.collapsed).toBe(false);
       expect(view.scrollTo).toHaveBeenCalledWith({ type: 'item', id: 'README.md', align: 'start' });
       // Still viewed: only the fold changed.

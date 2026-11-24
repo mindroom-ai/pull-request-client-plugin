@@ -262,6 +262,10 @@
   min-inline-size: 0;
 }
 
+.mrpr-code-diffs:focus {
+  outline: none;
+}
+
 /* The handle that resizes the Files column beside the diffs (FileTreeColumn.tsx), as T3 Code's: a
    4px strip, 16px for a coarse pointer, from the column's border over the diffs' edge, clear of the
    tree's scrollbar on the column's inline-end edge. Its line lies on the column's border and shows
@@ -378,6 +382,10 @@
   padding-inline: 0.75rem;
   border-block-start: 1px solid var(--pr-border);
   font-size: 0.75rem;
+}
+
+.mrpr-no-diff:focus:not(:focus-visible) {
+  outline: none;
 }
 
 .mrpr-no-diff-path {

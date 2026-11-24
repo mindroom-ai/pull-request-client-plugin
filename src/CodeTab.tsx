@@ -31,6 +31,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -124,6 +125,7 @@ type FileHeaderState = {
   setViewed(path: string, extendRange: boolean): void;
   foldedOf(path: string): boolean;
   toggleFolded(path: string): void;
+  foldButtons: Map<string, HTMLButtonElement>;
 };
 
 const FileHeaderContext = createContext<FileHeaderState | null>(null);
@@ -131,10 +133,22 @@ const FileHeaderContext = createContext<FileHeaderState | null>(null);
 function FoldToggle({ path }: { path: string }) {
   const t = usePluginTranslation('pull-requests');
   const header = useContext(FileHeaderContext);
+  const foldButtons = header?.foldButtons;
+  const buttonRef = useCallback(
+    (node: HTMLButtonElement | null) => {
+      if (!foldButtons || !node) return undefined;
+      foldButtons.set(path, node);
+      return () => {
+        if (foldButtons.get(path) === node) foldButtons.delete(path);
+      };
+    },
+    [foldButtons, path]
+  );
   if (!header) return null;
   const folded = header.foldedOf(path);
   return (
     <button
+      ref={buttonRef}
       type="button"
       className="mrpr-fold-toggle"
       aria-expanded={!folded}
@@ -256,7 +270,6 @@ const focusTree = (tree: HTMLElement | null) => {
     root?.querySelector<HTMLElement>('[role="treeitem"][tabindex="0"]') ??
     root?.querySelector<HTMLElement>('[role="treeitem"]') ??
     root?.querySelector<HTMLElement>('[role="tree"]') ??
-    tree?.querySelector<HTMLElement>('ul button') ??
     tree?.querySelector<HTMLElement>('.mrpr-tree-header button');
   target?.focus({ preventScroll: true });
 };
@@ -349,6 +362,15 @@ export function CodeTab({
   const canLoadDiffFiles = access.via !== undefined && !access.pending;
   const viewerRef = useRef<CodeViewHandle<ThreadGroup, undefined>>(null);
   const rowsRef = useRef(new Map<string, HTMLElement>());
+  const foldButtonsRef = useRef(new Map<string, HTMLButtonElement>());
+  const revealFocusFrameRef = useRef<number | null>(null);
+  const cancelRevealFocus = useCallback(() => {
+    if (revealFocusFrameRef.current !== null) {
+      window.cancelAnimationFrame(revealFocusFrameRef.current);
+      revealFocusFrameRef.current = null;
+    }
+  }, []);
+  useEffect(() => cancelRevealFocus, [cancelRevealFocus, stacked]);
 
   // A commit opened from the Timeline or left chosen across a force-push may no longer be part of
   // the pull request; it reads as All commits then, and its files are not asked for.
@@ -671,6 +693,7 @@ export function CodeTab({
     setViewed,
     foldedOf: collapsedOf,
     toggleFolded,
+    foldButtons: foldButtonsRef.current,
   };
   const allFolded = areAllDiffFilesCollapsed(
     items.map((item) => item.id),
@@ -691,8 +714,19 @@ export function CodeTab({
     }
   };
 
-  const reveal = (path: string) => {
-    if (items.some((item) => item.id === path)) {
+  const focusRevealedTarget = (path: string, isDiffItem: boolean): boolean => {
+    const target = isDiffItem ? foldButtonsRef.current.get(path) : rowsRef.current.get(path);
+    if (target?.isConnected) {
+      target.focus({ preventScroll: true });
+      return true;
+    }
+    return false;
+  };
+
+  const reveal = (path: string, moveFocus = false) => {
+    cancelRevealFocus();
+    const isDiffItem = items.some((item) => item.id === path);
+    if (isDiffItem) {
       // A folded file opens as it is revealed, and stays open as its mark changes.
       updateFolds((current) => ({
         choices: withFileDiffFold(current.choices, foldKeyOf(path), false),
@@ -701,6 +735,24 @@ export function CodeTab({
     } else {
       rowsRef.current.get(path)?.scrollIntoView({ block: 'nearest' });
     }
+    if (!moveFocus) return;
+    // Move focus out of the off-screen stacked tree to the revealed diff control (or the diffs
+    // container if the row is still virtualized). Also re-check on the next frame because Pierre's
+    // tree reclaims focus after onSelectionChange during the same click handler, and virtualized
+    // diff headers may not mount synchronously before CodeView finishes scrolling.
+    const moved = focusRevealedTarget(path, isDiffItem);
+    revealFocusFrameRef.current = window.requestAnimationFrame(() => {
+      revealFocusFrameRef.current = null;
+      const active = document.activeElement;
+      const inStackedTree =
+        diffsRef.current?.querySelector('.mrpr-code-tree-stacked')?.contains(active) ?? false;
+      if (moved ? !inStackedTree : !inStackedTree && active !== null && active !== document.body) {
+        return;
+      }
+      if (!focusRevealedTarget(path, isDiffItem)) {
+        diffsRef.current?.focus({ preventScroll: true });
+      }
+    });
   };
 
   const renderWithoutDiff = () =>
@@ -710,6 +762,7 @@ export function CodeTab({
           <li
             key={file.path}
             className="mrpr-no-diff"
+            tabIndex={-1}
             ref={(row) => {
               if (row) rowsRef.current.set(file.path, row);
               else rowsRef.current.delete(file.path);
@@ -777,6 +830,7 @@ export function CodeTab({
 
   const goToFiles = () => {
     if (!hasDiffs) return;
+    cancelRevealFocus();
     const still = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
     viewerRef.current?.scrollTo({
       type: 'position',
@@ -795,7 +849,7 @@ export function CodeTab({
             ariaLabel={t('code.treeLabel', pullRequest)}
             entries={entries}
             initialExpansion="closed"
-            onSelectFile={reveal}
+            onSelectFile={(path) => reveal(path, true)}
           />
         </div>
       )
@@ -972,7 +1026,12 @@ export function CodeTab({
               />
             </FileTreeColumn>
           ) : null}
-          <div ref={diffsRef} className="mrpr-code-diffs" onClickCapture={onDiffsClickCapture}>
+          <div
+            ref={diffsRef}
+            className="mrpr-code-diffs"
+            tabIndex={-1}
+            onClickCapture={onDiffsClickCapture}
+          >
             <FileHeaderContext.Provider value={header}>
               {/* The viewer must own its scroll element to position virtual rows within it. */}
               <StyledDiffCodeView<ThreadGroup>
