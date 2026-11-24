@@ -773,7 +773,7 @@ describe('CodeTab', () => {
   describe('responsive Files tree', () => {
     let codeWidth = 400;
     let clientWidth: { mockRestore(): void } | undefined;
-    let observers: { callback: () => void; targets: Set<Element> }[] = [];
+    let observers: { callback: ResizeObserverCallback; targets: Set<Element> }[] = [];
     beforeEach(() => {
       codeWidth = 400;
       observers = [];
@@ -786,7 +786,7 @@ describe('CodeTab', () => {
         'ResizeObserver',
         class {
           private readonly entry: (typeof observers)[number];
-          constructor(callback: () => void) {
+          constructor(callback: ResizeObserverCallback) {
             this.entry = { callback, targets: new Set() };
             observers.push(this.entry);
           }
@@ -809,7 +809,13 @@ describe('CodeTab', () => {
       act(async () => {
         codeWidth = width;
         for (const { callback, targets } of observers) {
-          if ([...targets].some((target) => target.classList.contains('mrpr-code'))) callback();
+          const code = [...targets].find((target) => target.classList.contains('mrpr-code'));
+          if (code) {
+            callback(
+              [{ target: code, contentRect: { width } } as unknown as ResizeObserverEntry],
+              {} as ResizeObserver
+            );
+          }
         }
       });
 
@@ -824,8 +830,8 @@ describe('CodeTab', () => {
       expect(toggle.getAttribute('aria-pressed')).toBe('true');
       expect(tab.getByRole('list', { name: /^Files of/ })).toBeTruthy();
 
-      // Narrowing back closes it automatically while still untouched.
-      await resizeCode(500);
+      // Fractional widths below 640px (matching CSS `@container (min-inline-size: 640px)`) close it.
+      await resizeCode(639.5);
       expect(toggle.getAttribute('aria-pressed')).toBe('false');
       expect(tab.queryByRole('list', { name: /^Files of/ })).toBeNull();
 
@@ -844,6 +850,27 @@ describe('CodeTab', () => {
       const tab = await show();
       expect(tab.getByRole('button', { name: 'Files' }).getAttribute('aria-pressed')).toBe('true');
       expect(tab.getByRole('list', { name: /^Files of/ })).toBeTruthy();
+    });
+
+    it('moves focus to Files when narrowing auto-closes a focused tree, and leaves focus elsewhere alone', async () => {
+      codeWidth = 640;
+      const tab = await show();
+      const toggle = tab.getByRole('button', { name: 'Files' });
+      const fileButton = tab.getByRole('button', { name: 'src/app.ts' });
+      act(() => fileButton.focus());
+      expect(document.activeElement).toBe(fileButton);
+
+      await resizeCode(500);
+      expect(toggle.getAttribute('aria-pressed')).toBe('false');
+      expect(document.activeElement).toBe(toggle);
+
+      // Re-opening automatically via widening and focusing outside the tree leaves focus untouched.
+      await resizeCode(640);
+      const wrapButton = tab.getByRole('button', { name: 'Wrap lines' });
+      act(() => wrapButton.focus());
+      await resizeCode(500);
+      expect(toggle.getAttribute('aria-pressed')).toBe('false');
+      expect(document.activeElement).toBe(wrapButton);
     });
   });
 

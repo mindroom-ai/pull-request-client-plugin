@@ -207,12 +207,14 @@ const renderAnnotation = (...[annotation]: CodeViewAnnotationArgs<ThreadGroup>) 
 function ToolbarButton({
   label,
   pressed,
+  buttonRef,
   onClick,
   children,
 }: {
   label: string;
   /** Whether a toggle is on; undefined for a button that acts. */
   pressed?: boolean;
+  buttonRef?: { current: HTMLButtonElement | null };
   onClick: () => void;
   children: ReactNode;
 }) {
@@ -220,7 +222,10 @@ function ToolbarButton({
     <IconTooltip label={label} align="End">
       {(triggerRef) => (
         <IconButton
-          ref={triggerRef}
+          ref={(node: HTMLButtonElement | null) => {
+            triggerRef(node);
+            if (buttonRef) buttonRef.current = node;
+          }}
           size="300"
           radii="300"
           aria-label={label}
@@ -271,24 +276,50 @@ export function CodeTab({
   const prefs = useCodePrefs();
   const viewed = useViewedFiles(pullRequest);
   const rootRef = useRef<HTMLDivElement>(null);
+  const filesButtonRef = useRef<HTMLButtonElement | null>(null);
+  const refocusFiles = useRef(false);
   // Start with the Files tree closed when stacked above the diffs (< 640px).
   const [wide, setWide] = useState<boolean | null>(() =>
     typeof ResizeObserver === 'undefined' ? true : null
   );
   const [treeChoice, setTreeChoice] = useState<boolean | null>(null);
+  const treeAutoRef = useRef(true);
+  treeAutoRef.current = treeChoice === null;
   useLayoutEffect(() => {
     const root = rootRef.current;
     if (!root || typeof ResizeObserver === 'undefined') return undefined;
-    const measure = () => {
-      const width = root.clientWidth;
-      setWide((previous) => (width === 0 ? previous ?? true : width >= WIDE_TREE_MIN_WIDTH));
+    const apply = (width: number, fromResize: boolean) => {
+      if (width === 0) {
+        setWide((previous) => previous ?? true);
+        return;
+      }
+      const nextWide = width >= WIDE_TREE_MIN_WIDTH;
+      if (
+        fromResize &&
+        !nextWide &&
+        treeAutoRef.current &&
+        (root.querySelector('.mrpr-code-tree')?.contains(document.activeElement) ?? false)
+      ) {
+        refocusFiles.current = true;
+      }
+      setWide(nextWide);
     };
-    measure();
-    const observer = new ResizeObserver(measure);
+    apply(root.getBoundingClientRect().width || root.clientWidth, false);
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries?.[entries.length - 1];
+      const width =
+        entry?.contentRect.width ?? (root.getBoundingClientRect().width || root.clientWidth);
+      apply(width, true);
+    });
     observer.observe(root);
     return () => observer.disconnect();
   }, []);
   const treeOpen = treeChoice ?? wide ?? false;
+  useLayoutEffect(() => {
+    if (!refocusFiles.current) return;
+    refocusFiles.current = false;
+    if (!treeOpen) filesButtonRef.current?.focus({ preventScroll: true });
+  }, [treeOpen]);
   const [nearViewport, setNearViewport] = useState<ReadonlySet<string>>(() => new Set());
   // Pierre only mounts items in its virtualized window (visible rows plus overscan).
   const onDiffRender = useCallback(
@@ -722,7 +753,11 @@ export function CodeTab({
           <ToolbarButton
             label={t('code.files')}
             pressed={treeOpen}
-            onClick={() => setTreeChoice(!treeOpen)}
+            buttonRef={filesButtonRef}
+            onClick={() => {
+              refocusFiles.current = false;
+              setTreeChoice(!treeOpen);
+            }}
           >
             <FolderTree aria-hidden className="mrpr-button-icon" />
           </ToolbarButton>

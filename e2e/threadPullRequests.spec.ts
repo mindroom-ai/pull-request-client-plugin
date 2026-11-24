@@ -1280,7 +1280,7 @@ test("Page Zoom scales the panel's text, its diffs and its file tree", async ({ 
     const line = panel(page).locator('[data-line]').filter({ hasText: 'ttl = 3600' }).first();
     await expect(line).toBeVisible({ timeout: 30_000 });
     // The narrow panel starts with the file tree closed; open it to measure its rows too.
-    await panel(page).getByRole('button', { name: 'Files', pressed: false }).click();
+    await panel(page).getByRole('button', { name: 'Files', exact: true, pressed: false }).click();
     const row = panel(page).getByRole('treeitem', { name: 'store.ts' });
     await expect(row).toBeVisible();
     await shot(page, `zoom-${pageZoom}-code`);
@@ -1347,7 +1347,7 @@ test('a pinch zoom keeps the file tree as it was: folded folders, selection, foc
     timeout: 30_000,
   });
   await panel(page).getByRole('tab', { name: 'Code' }).click();
-  await panel(page).getByRole('button', { name: 'Files', pressed: false }).click();
+  await panel(page).getByRole('button', { name: 'Files', exact: true, pressed: false }).click();
   const tree = panel(page).getByRole('tree');
   /** Scrolls the tree to `top`, and waits until its rows take the pointer again. */
   const scrollTree = async (top: number) => {
@@ -2732,7 +2732,7 @@ test('on a phone the header scrolls away under a bar that brings it back', async
     await expect(details).toBeVisible();
     await expect(details).toHaveAttribute('aria-expanded', 'false');
     await expect(title).toBeHidden();
-    const filesToggle = panel(page).getByRole('button', { name: 'Files' });
+    const filesToggle = panel(page).getByRole('button', { name: 'Files', exact: true });
     await expect(filesToggle).toHaveAttribute('aria-pressed', 'false');
     await expect(panel(page).getByRole('tree')).toHaveCount(0);
     await expect(
