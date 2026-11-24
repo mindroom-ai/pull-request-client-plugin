@@ -6,6 +6,7 @@ import { renderPluginComponent } from '@mindroom/client-sdk/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import plugin from './index';
 import { middleTruncate } from './middleTruncate';
+import { setShownPullRequest } from './shownPullRequest';
 import { linkedRoom, type TestLink, type TestWorktree } from './testing/linkedRoom';
 import { ThreadCardPullRequests } from './ThreadCardPullRequests';
 import { orderPullRequests, PullRequestLinkHoverCard, ThreadDetails } from './ThreadDetails';
@@ -13,7 +14,14 @@ import { threadHasDetails } from './threadPullRequests';
 
 // A card's chip opens its thread on a click, which needs the room's page; no test here clicks.
 // The room has no MindRoom server unless a test gives one: the stand-in client knows no room.
+const page = vi.hoisted(() => ({
+  panel: undefined as { isOpen: boolean; open: ReturnType<typeof vi.fn> } | undefined,
+}));
 const roomServer = vi.hoisted(() => ({ current: undefined as unknown }));
+vi.mock('@mindroom/client-sdk/core', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@mindroom/client-sdk/core')>()),
+  useRoomSidePanel: () => page.panel,
+}));
 vi.mock('@mindroom/client-sdk/server', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@mindroom/client-sdk/server')>()),
   useMindroomServerStatus: () => ({ server: roomServer.current, pending: false }),
@@ -86,10 +94,10 @@ const roomWith = (links: TestLink[], worktrees: TestWorktree[] = []) =>
 const newClient = () =>
   new QueryClient({ defaultOptions: { queries: { retry: false, retryDelay: 0 } } });
 
-const show = async (room: Room, client = newClient()) => {
+const show = async (room: Room, client = newClient(), onClose?: () => void) => {
   const view = await renderPluginComponent(
     <QueryClientProvider client={client}>
-      <ThreadDetails room={room} threadId="$t1" />
+      <ThreadDetails room={room} threadId="$t1" onClose={onClose} />
     </QueryClientProvider>,
     { id: 'pull-requests', plugin }
   );
@@ -109,6 +117,8 @@ const blocks = (view: Awaited<ReturnType<typeof show>>['view']) => [
 
 beforeEach(() => {
   localStorage.clear();
+  page.panel = undefined;
+  setShownPullRequest(ROOM_ID, undefined);
   fetchMock.mockReset();
   vi.stubGlobal('fetch', fetchMock);
 });
@@ -251,7 +261,7 @@ describe('ThreadDetails', () => {
     // Neither the owner, the branches nor the author.
     expect(root?.textContent).not.toMatch(/mindroom-ai|→|redis-sessions|acme-builder|updated/);
     expect(view.queryByText('this worktree')).toBeNull();
-    expect(view.container.querySelector('button, a, [tabindex]')).toBeNull();
+    expect(view.container.querySelector('button, a, [tabindex], [role="menuitem"]')).toBeNull();
   });
 
   it('shows only the repository and number while GitHub has not answered, and when it refuses', async () => {
@@ -454,5 +464,62 @@ describe('ThreadDetails', () => {
       expect([kind, fetchMock.mock.calls.length]).toEqual([kind, tries]);
       card.unmount();
     }
+  });
+
+  it('renders clickable pull request menu items that open the side panel when onClose is given, leaving the worktree non-interactive', async () => {
+    serve({ 412: pull({ title: 'First PR' }), 7: pull({ title: 'Second PR' }) });
+    const open = vi.fn();
+    page.panel = { isOpen: true, open };
+    setShownPullRequest(ROOM_ID, { owner: 'MINDROOM-AI', repo: 'MINDROOM-CHAT', number: 7 });
+    const onClose = vi.fn();
+    const room = roomWith(
+      [{ number: 412 }, { number: 7 }],
+      [{ path: 'worktrees/example', branch: 'other-branch' }]
+    );
+    const { view } = await show(room, newClient(), onClose);
+    await view.findByText('Second PR');
+    expect(view.container.firstElementChild?.classList.contains('mrpr-details-interactive')).toBe(
+      true
+    );
+    const items = view.getAllByRole('menuitem');
+    expect(items).toHaveLength(2);
+    expect(items.every((item) => item.tagName === 'BUTTON')).toBe(true);
+    expect(items[0]?.getAttribute('aria-current')).toBeNull();
+    expect(items[1]?.getAttribute('aria-current')).toBe('true');
+    const worktree = view.container.querySelector('.mrpr-details-worktree');
+    expect(worktree?.closest('button, a, [role="menuitem"], [tabindex]')).toBeNull();
+    await act(async () => items[0]!.click());
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(open).toHaveBeenCalledWith({
+      owner: 'mindroom-ai',
+      repo: 'mindroom-chat',
+      number: 412,
+    });
+    view.unmount();
+
+    page.panel = { isOpen: false, open };
+    const closed = await show(room, newClient(), onClose);
+    await closed.view.findByText('Second PR');
+    expect(closed.view.container.querySelector('[aria-current="true"]')).toBeNull();
+  });
+
+  it('renders external GitHub links when onClose is given without a room side panel', async () => {
+    serve({ 412: pull({ title: 'First PR' }) });
+    const onClose = vi.fn();
+    const { view } = await show(
+      roomWith([{ number: 412 }], [{ path: 'worktrees/example', branch: 'other-branch' }]),
+      newClient(),
+      onClose
+    );
+    await view.findByText('First PR');
+    const item = view.getByRole('menuitem');
+    expect(item.tagName).toBe('A');
+    expect(item.getAttribute('href')).toBe('https://github.com/mindroom-ai/mindroom-chat/pull/412');
+    expect(item.getAttribute('target')).toBe('_blank');
+    expect(item.getAttribute('rel')).toBe('noreferrer');
+    const worktree = view.container.querySelector('.mrpr-details-worktree');
+    expect(worktree?.closest('button, a, [role="menuitem"], [tabindex]')).toBeNull();
+    await act(async () => item.click());
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

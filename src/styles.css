@@ -2184,6 +2184,22 @@ button.mrpr-thread-menu-item[aria-current='true'] {
   padding-block-start: 0.625rem;
   border-block-start: 1px solid var(--pr-border);
 }
+/* Interactive thread details inside ThreadActionsMenu: pull requests reuse .mrpr-thread-menu-item,
+   inset to align with MenuEntry while their text lines up with the surrounding menu groups. */
+.mrpr-details-interactive {
+  gap: 0.25rem;
+}
+.mrpr-details-menu-item {
+  margin-inline: -0.5rem;
+  inline-size: calc(100% + 1rem);
+  padding-block: 0.375rem;
+  padding-inline: 0.5rem;
+}
+.mrpr-details-menu-item + .mrpr-details-worktree {
+  margin-block-start: 0.375rem;
+  padding-block-start: 0.625rem;
+  border-block-start: 1px solid var(--pr-border);
+}
 /* A pull request's lines wrap between their parts, never inside one. */
 .mrpr-details .mrpr-meta {
   flex-wrap: wrap;

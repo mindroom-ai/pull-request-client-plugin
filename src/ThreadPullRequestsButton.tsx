@@ -19,7 +19,7 @@ import {
   type ThreadHeaderSlotComponent,
 } from '@mindroom/client-sdk/core';
 import { IconTooltip, Menu, PopOut } from '@mindroom/client-sdk/ui';
-import { pullRequestUrl, type PullRequestRef } from './github';
+import { pullRequestUrl, samePullRequest, type PullRequestRef } from './github';
 import {
   combinedPullRequestState,
   PULL_REQUEST_STATE_PRESENTATION,
@@ -32,12 +32,6 @@ import { Details, useBannerRefetch } from './ThreadDetails';
 import { useThreadPullRequests, type ThreadWorktree } from './threadPullRequests';
 import { pluginRootStyle } from './theme';
 import { RoomGitHub, useGitHubAccess } from './token';
-
-/** Whether `a` and `b` name one pull request; GitHub's owner and repository names ignore case. */
-const samePullRequest = (a: PullRequestRef, b: PullRequestRef) =>
-  a.number === b.number &&
-  a.owner.toLowerCase() === b.owner.toLowerCase() &&
-  a.repo.toLowerCase() === b.repo.toLowerCase();
 
 export const ThreadPullRequestsButton: ThreadHeaderSlotComponent = ({ room, threadId }) => {
   const { pullRequests, worktree } = useThreadPullRequests(room, threadId);

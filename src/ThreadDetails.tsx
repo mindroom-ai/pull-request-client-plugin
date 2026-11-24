@@ -1,7 +1,8 @@
 // A thread's details, in the hover card of its card in the Compact view and as the first group of
 // its menu: each of its pull requests, also those past the two its card shows, open ones first, then
 // drafts, closed and merged ones, each newest activity first (as GitHub answers), then its worktree.
-// The app draws them as read-only rows, so nothing here is a control or takes the focus. A pull
+// Hover cards draw them as read-only rows, with no control or focus; interactive surfaces pass
+// `onClose`, so each pull request renders as a menu item opening the panel (or GitHub). A pull
 // request asks GitHub through the chips' own queries, so its chip's answer is already there. A pull
 // request on the worktree's branch says so, and the worktree then leaves its branch out. The open
 // thread's pull requests menu draws the same rows, each pull request as one of its items, and so
@@ -9,6 +10,7 @@
 import { Fragment, useMemo, type ReactNode } from 'react';
 import {
   usePluginTranslation,
+  useRoomSidePanel,
   type MessageLinkHoverCardProps,
   type ThreadDetailProps,
 } from '@mindroom/client-sdk/core';
@@ -16,6 +18,7 @@ import { Folder, GitBranch, GitPullRequestArrow } from 'lucide-react';
 import {
   parsePullRequestUrl,
   pullRequestUrl,
+  samePullRequest,
   type PullRequest,
   type PullRequestRef,
 } from './github';
@@ -36,6 +39,7 @@ import {
   usePullRequests,
   type RefetchOptions,
 } from './queries';
+import { useShownPullRequest } from './shownPullRequest';
 import { pluginRootStyle } from './theme';
 import { useThreadPullRequests, type ThreadWorktree } from './threadPullRequests';
 import { RoomGitHub, useGitHubAccess } from './token';
@@ -106,14 +110,77 @@ export function orderPullRequests<T>(
     .map((index) => refs[index] as T);
 }
 
-export function ThreadDetails({ room, threadId }: ThreadDetailProps) {
+export function ThreadDetails({ room, threadId, onClose }: ThreadDetailProps) {
   const { pullRequests, worktree } = useThreadPullRequests(room, threadId);
   // A thread can lose its last link or its worktree while a surface shows it: it then draws none.
   if (pullRequests.length === 0 && !worktree) return null;
   return (
     <RoomGitHub roomId={room.roomId}>
-      <Details pullRequests={pullRequests} worktree={worktree} />
+      {onClose ? (
+        <InteractiveDetails
+          roomId={room.roomId}
+          pullRequests={pullRequests}
+          worktree={worktree}
+          onClose={onClose}
+        />
+      ) : (
+        <Details pullRequests={pullRequests} worktree={worktree} />
+      )}
     </RoomGitHub>
+  );
+}
+
+function InteractiveDetails({
+  roomId,
+  pullRequests,
+  worktree,
+  onClose,
+}: {
+  roomId: string;
+  pullRequests: readonly PullRequestRef[];
+  worktree: ThreadWorktree | undefined;
+  onClose: () => void;
+}) {
+  const panel = useRoomSidePanel('pull-requests', 'pull-request');
+  const shown = useShownPullRequest(roomId);
+  const current = panel?.isOpen ? shown : undefined;
+  return (
+    <Details
+      pullRequests={pullRequests}
+      worktree={worktree}
+      className="mrpr-details-interactive"
+      item={(pullRequest, rows) => {
+        if (pullRequest === undefined) return rows;
+        if (!panel) {
+          return (
+            <a
+              role="menuitem"
+              className="mrpr-thread-menu-item mrpr-details-menu-item"
+              href={pullRequestUrl(pullRequest)}
+              target="_blank"
+              rel="noreferrer"
+              onClick={onClose}
+            >
+              {rows}
+            </a>
+          );
+        }
+        return (
+          <button
+            type="button"
+            role="menuitem"
+            className="mrpr-thread-menu-item mrpr-details-menu-item"
+            aria-current={current && samePullRequest(current, pullRequest) ? 'true' : undefined}
+            onClick={() => {
+              onClose();
+              panel.open(pullRequest);
+            }}
+          >
+            {rows}
+          </button>
+        );
+      }}
+    />
   );
 }
 

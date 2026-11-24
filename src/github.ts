@@ -89,6 +89,15 @@ export function pullRequestUrl(ref: PullRequestRef): string {
   return `https://github.com/${ref.owner}/${ref.repo}/pull/${ref.number}`;
 }
 
+/** Whether `a` and `b` name one pull request; GitHub's owner and repository names ignore case. */
+export function samePullRequest(a: PullRequestRef, b: PullRequestRef): boolean {
+  return (
+    a.number === b.number &&
+    a.owner.toLowerCase() === b.owner.toLowerCase() &&
+    a.repo.toLowerCase() === b.repo.toLowerCase()
+  );
+}
+
 export type GitHubErrorKind = 'notFound' | 'rateLimited' | 'badToken' | 'failed';
 
 export class GitHubError extends Error {

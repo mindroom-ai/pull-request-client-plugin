@@ -2101,7 +2101,18 @@ test("resting the pointer on a card shows all its pull requests' details", async
   }
 });
 
-test('on a phone a long press on a card opens its menu with the details', async ({
+const expectMenuFitsHorizontally = async (menu: Locator) => {
+  const overflow = await menu.evaluate((element) => {
+    const rows = element.firstElementChild as HTMLElement | null;
+    const details = element.querySelector<HTMLElement>('[data-thread-details]');
+    return [element, rows, details].some(
+      (node) => node !== null && node.scrollWidth > node.clientWidth + 1
+    );
+  });
+  expect(overflow).toBe(false);
+};
+
+test('on a phone a long press and the thread options menu open linked pull requests in the panel', async ({
   browser,
   baseURL,
 }) => {
@@ -2124,18 +2135,88 @@ test('on a phone a long press on a card opens its menu with the details', async 
       { type: 'wait', ms: 700 },
       { type: 'end' },
     ]);
-    const details = page.getByRole('menu').locator('[data-thread-details]');
+    const menu = page.getByRole('menu');
+    const details = menu.locator('[data-thread-details]');
     await expectDetailsTitles(details, [PULLS.sessionStore, PULLS.tokenEndpoint]);
     await expect(details.getByText('this worktree')).toHaveCount(0);
     await expect(details.locator('.mrpr-details-worktree')).toHaveText(
       'Worktreeredis-session-expiryworktrees/redis-session-expiry'
     );
     await expectEachOnOneLine(details.locator('.mrpr-meta > *'), details);
+    await expectMenuFitsHorizontally(menu);
+    const items = details.getByRole('menuitem');
+    await expect(items).toHaveCount(2);
     await shot(page, 'phone-details-menu', { keepPointer: true });
+    await items.nth(0).tap();
+    await expect(menu).toHaveCount(0);
+    await expect(panel(page).locator('.mrpr-panel-title')).toHaveText(PULLS.sessionStore.title, {
+      timeout: 30_000,
+    });
+    await expect(panel(page).getByText(/^Loading/)).toHaveCount(0);
+    await panel(page).getByRole('button', { name: 'Close pull request panel' }).tap();
+    await expect(panel(page)).toHaveCount(0);
+
+    // In an open thread, Thread options shows the same clickable pull requests.
+    await card(page, roots.sessions).getByText(THREADS.sessions.topic).tap();
+    await expect(banner(page)).toContainText('Move', { timeout: 30_000 });
+    await banner(page).getByRole('button', { name: 'Thread options' }).tap();
+    await expectDetailsTitles(details, [PULLS.sessionStore, PULLS.tokenEndpoint]);
+    await expectMenuFitsHorizontally(menu);
+    await shot(page, 'phone-thread-options-menu', { keepPointer: true });
+    await items.nth(1).tap();
+    await expect(menu).toHaveCount(0);
+    await expect(panel(page).locator('.mrpr-panel-title')).toHaveText(PULLS.tokenEndpoint.title, {
+      timeout: 30_000,
+    });
+    await expect(panel(page).getByText(/^Loading/)).toHaveCount(0);
+    await shot(page, 'phone-thread-options-panel');
     expect(unanswered).toEqual([]);
     expect(warnings).toEqual([]);
   } finally {
     await context.close();
+    await writeWorktree(roots.sessions, {});
+  }
+});
+
+test('in the desktop thread options menu clicking a linked pull request opens the side panel', async ({
+  page,
+}) => {
+  test.setTimeout(4 * 60_000);
+  await writeWorktree(roots.sessions, {
+    path: 'worktrees/redis-session-expiry',
+    branch: 'redis-session-expiry',
+    set_by: agent.userId,
+    set_at: new Date().toISOString(),
+  });
+  try {
+    const unanswered = await stubGitHub(page);
+    const warnings = listenerWarnings(page);
+    await openRoom(page);
+    await openThread(page, 'sessions');
+    const more = banner(page).getByRole('button', { name: 'Thread options' });
+    const menu = page.getByRole('menu');
+    const details = menu.locator('[data-thread-details]');
+    const items = details.getByRole('menuitem');
+    await more.click();
+    await expectDetailsTitles(details, [PULLS.sessionStore, PULLS.tokenEndpoint]);
+    await expect(items).toHaveCount(2);
+    await expectMenuFitsHorizontally(menu);
+    await items.nth(0).hover();
+    await shot(page, 'desktop-thread-options-menu-hover', { keepPointer: true });
+    await items.nth(0).click();
+    await expect(menu).toHaveCount(0);
+    await expect(panel(page).locator('.mrpr-panel-title')).toHaveText(PULLS.sessionStore.title, {
+      timeout: 30_000,
+    });
+    await expect(panel(page).getByText(/^Loading/)).toHaveCount(0);
+    await more.click();
+    await expect(items.nth(0)).toHaveAttribute('aria-current', 'true');
+    await expect(items.nth(1)).not.toHaveAttribute('aria-current', 'true');
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
+    expect(unanswered).toEqual([]);
+    expect(warnings).toEqual([]);
+  } finally {
     await writeWorktree(roots.sessions, {});
   }
 });
