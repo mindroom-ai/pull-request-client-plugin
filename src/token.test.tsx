@@ -7,7 +7,7 @@ import {
   QueryClientProvider,
 } from '@tanstack/react-query';
 import { createClient } from 'matrix-js-sdk';
-import { act } from 'react-dom/test-utils';
+import { act } from './testing/act';
 import { MindroomServerError, type MindroomServer } from '@mindroom/client-sdk/server';
 import { renderPluginComponent } from '@mindroom/client-sdk/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

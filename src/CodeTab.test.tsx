@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { useState, type ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act } from 'react-dom/test-utils';
+import { act } from './testing/act';
 import type { MindroomServer } from '@mindroom/client-sdk/server';
 import { renderPluginComponent } from '@mindroom/client-sdk/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // Ported from T3 Code (https://github.com/pingdotgg/t3code, apps/web/src/components/diffs/DiffFileTree.browser.test.tsx at 1c86881dd5), MIT, Copyright (c) 2026 T3 Tools Inc. See NOTICE.
-import { act } from 'react-dom/test-utils';
+import { act } from '../testing/act';
 import { renderPluginComponent } from '@mindroom/client-sdk/testing';
 import { FileTree } from '@pierre/trees';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

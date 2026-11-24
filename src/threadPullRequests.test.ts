@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events';
 import { createElement, Fragment, useLayoutEffect } from 'react';
 import type { Room } from 'matrix-js-sdk';
 import { RoomStateEvent } from 'matrix-js-sdk';
-import { act } from 'react-dom/test-utils';
+import { act } from './testing/act';
 import { renderPluginComponent } from '@mindroom/client-sdk/testing';
 import { beforeEach, describe, expect, it } from 'vitest';
 import plugin from './index';

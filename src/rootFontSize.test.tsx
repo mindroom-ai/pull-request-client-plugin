@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from 'react-dom/test-utils';
+import { act } from './testing/act';
 import { renderPluginComponent } from '@mindroom/client-sdk/testing';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import plugin from './index';
