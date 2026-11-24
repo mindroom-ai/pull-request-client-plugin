@@ -4,7 +4,9 @@
 // the queries that loaded; one that failed shows its own error with Retry above them.
 import { useMemo, useState, type ReactNode } from 'react';
 import {
+  ArrowDownUp,
   ChevronRight,
+  CircleCheck,
   GitCommitHorizontal,
   GitMerge,
   GitPullRequest,
@@ -30,10 +32,21 @@ import { TruncatedNote } from './TruncatedNote';
 import {
   buildTimeline,
   commitsCut,
+  latestReviewOutcomes,
   reviewOutcome,
   type ConversationItem,
   type TimelineEvent,
 } from './detail.logic';
+
+function Count({ icon, count, label }: { icon: ReactNode; count: number; label: string }) {
+  return (
+    <span className="mrpr-count" title={label}>
+      {icon}
+      <span aria-hidden>{count}</span>
+      <span className="mrpr-sr-only">{label}</span>
+    </span>
+  );
+}
 
 /** The round marker on the line: an actor's avatar, or an icon where there is none. */
 function Marker({
@@ -257,11 +270,13 @@ export function TimelineTab({
   pullRequestRef,
   pullRequest,
   order,
+  onOrder,
   onOpenCommit,
 }: {
   pullRequestRef: PullRequestRef;
   pullRequest: PullRequest;
   order: 'newest' | 'oldest';
+  onOrder: (order: 'newest' | 'oldest') => void;
   onOpenCommit: (sha: string) => void;
 }) {
   const t = usePluginTranslation('pull-requests');
@@ -287,6 +302,11 @@ export function TimelineTab({
       ),
     [pullRequest, commits.data, reviews.data, comments.data, threads, order]
   );
+  const approvals = reviews.data
+    ? latestReviewOutcomes(reviews.data.items, pullRequest.headSha).filter(
+        (outcome) => outcome.verdict === 'approved' && !outcome.stale
+      ).length
+    : undefined;
   const queries = [commits, reviews, comments, reviewComments];
   const loading = queries.some((query) => query.isPending);
   // Each list that came only in part says so, with how much of it is here.
@@ -301,6 +321,37 @@ export function TimelineTab({
 
   return (
     <div className="mrpr-timeline-tab">
+      <div className="mrpr-timeline-bar">
+        <div className="mrpr-timeline-counts">
+          <Count
+            icon={<MessageSquare aria-hidden className="mrpr-icon" />}
+            count={pullRequest.commentCount + pullRequest.reviewCommentCount}
+            label={t('timeline.comments', {
+              count: pullRequest.commentCount + pullRequest.reviewCommentCount,
+            })}
+          />
+          <Count
+            icon={<GitCommitHorizontal aria-hidden className="mrpr-icon" />}
+            count={pullRequest.commitCount}
+            label={t('timeline.commits', { count: pullRequest.commitCount })}
+          />
+          {approvals === undefined ? null : (
+            <Count
+              icon={<CircleCheck aria-hidden className="mrpr-icon mrpr-tone-success" />}
+              count={approvals}
+              label={t('timeline.approvals', { count: approvals })}
+            />
+          )}
+        </div>
+        <button
+          type="button"
+          className="mrpr-button mrpr-button-quiet mrpr-timeline-order"
+          onClick={() => onOrder(order === 'newest' ? 'oldest' : 'newest')}
+        >
+          <ArrowDownUp aria-hidden className="mrpr-icon" />
+          {t(order === 'newest' ? 'timeline.newestFirst' : 'timeline.oldestFirst')}
+        </button>
+      </div>
       {queries.map((query, index) =>
         query.isError ? (
           <GitHubErrorState

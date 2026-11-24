@@ -11,6 +11,7 @@ export const en = {
   noDiff: 'No diff to show',
   code: {
     files: 'Files',
+    goToFiles: 'Go to files',
     fileCount_one: '{{count}} file',
     fileCount_other: '{{count}} files',
     treeLabel: 'Files of {{owner}}/{{repo}} #{{number}}',

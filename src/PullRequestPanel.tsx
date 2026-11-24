@@ -14,16 +14,7 @@ import {
   type RefObject,
 } from 'react';
 import { IconButton as PlainIconButton } from 'folds';
-import {
-  ArrowLeft,
-  ChevronDown,
-  ChevronUp,
-  CircleCheck,
-  FileDiff,
-  GitCommitHorizontal,
-  MessageSquare,
-  X,
-} from 'lucide-react';
+import { ArrowLeft, ChevronDown, ChevronUp, FileDiff, X } from 'lucide-react';
 import { usePluginTranslation, useRoomSidePanel } from '@mindroom/client-sdk/core';
 import { IconTooltip } from '@mindroom/client-sdk/ui';
 import { useHeaderActions } from './actions/HeaderActions';
@@ -32,7 +23,7 @@ import { CodeTab, type ListState } from './CodeTab';
 import { BaseBranch } from './detail/BaseBranch';
 import { ChangeBreakdownStat } from './detail/ChangeBreakdownStat';
 import { ChecksStatusLine } from './detail/ChecksStatusLine';
-import { baseFreshness, commitsCut, latestReviewOutcomes } from './detail/detail.logic';
+import { baseFreshness, commitsCut } from './detail/detail.logic';
 import { SummaryTab } from './detail/SummaryTab';
 import { TimelineTab } from './detail/TimelineTab';
 import {
@@ -54,7 +45,6 @@ import {
   usePullRequest,
   usePullRequestFiles,
   useReviewComments,
-  useReviews,
 } from './queries';
 import { buildReviewThreads } from './reviewThreads';
 import { clearShownPullRequest, setShownPullRequest } from './shownPullRequest';
@@ -104,7 +94,7 @@ function TabBar({
 }: {
   value: Tab;
   onChange: (tab: Tab) => void;
-  /** What the bar shows after the tabs, which depends on the tab. */
+  /** What the bar shows after the tabs. */
   end: ReactNode;
 }) {
   const t = usePluginTranslation('pull-requests');
@@ -141,67 +131,6 @@ function TabBar({
       </div>
       <div className="mrpr-tabbar-end">{end}</div>
     </div>
-  );
-}
-
-function Count({ icon, count, label }: { icon: ReactNode; count: number; label: string }) {
-  return (
-    <span className="mrpr-count" title={label}>
-      {icon}
-      <span aria-hidden>{count}</span>
-      <span className="mrpr-sr-only">{label}</span>
-    </span>
-  );
-}
-
-/** What the Timeline tab's bar shows: the counts of the pull request and the order of the events. */
-function TimelineBarEnd({
-  pullRequest,
-  pullRequestRef,
-  order,
-  onOrder,
-}: {
-  pullRequest: PullRequest;
-  pullRequestRef: PullRequestRef;
-  order: Order;
-  onOrder: (order: Order) => void;
-}) {
-  const t = usePluginTranslation('pull-requests');
-  const reviews = useReviews(pullRequestRef, true);
-  const approvals = reviews.data
-    ? latestReviewOutcomes(reviews.data.items, pullRequest.headSha).filter(
-        (outcome) => outcome.verdict === 'approved' && !outcome.stale
-      ).length
-    : undefined;
-  return (
-    <>
-      <Count
-        icon={<MessageSquare aria-hidden className="mrpr-icon" />}
-        count={pullRequest.commentCount + pullRequest.reviewCommentCount}
-        label={t('timeline.comments', {
-          count: pullRequest.commentCount + pullRequest.reviewCommentCount,
-        })}
-      />
-      <Count
-        icon={<GitCommitHorizontal aria-hidden className="mrpr-icon" />}
-        count={pullRequest.commitCount}
-        label={t('timeline.commits', { count: pullRequest.commitCount })}
-      />
-      {approvals === undefined ? null : (
-        <Count
-          icon={<CircleCheck aria-hidden className="mrpr-icon mrpr-tone-success" />}
-          count={approvals}
-          label={t('timeline.approvals', { count: approvals })}
-        />
-      )}
-      <button
-        type="button"
-        className="mrpr-button"
-        onClick={() => onOrder(order === 'newest' ? 'oldest' : 'newest')}
-      >
-        {t(order === 'newest' ? 'timeline.newestFirst' : 'timeline.oldestFirst')}
-      </button>
-    </>
   );
 }
 
@@ -289,7 +218,7 @@ function useScrolledAway(
  * actions and Close), the title, the author and changes, the branches with the primary control,
  * and the lines of what runs. In the tabs that scroll with it (`scrolls`), once it is out of view
  * the top row stays as a bar with the number and title, which scrolls back up to it; on the Code
- * tab it starts collapsed into that bar and toggles in place.
+ * tab it starts expanded and collapses into that bar in place.
  */
 function Header({
   pr,
@@ -325,12 +254,12 @@ function Header({
     onForgetToken,
   });
   const scrolledAway = useScrolledAway(headerRef, barRef, scrolls && !holds);
-  // On the Code tab the header starts collapsed; expanding it stays for this pull request and tab.
+  // On the Code tab the header starts expanded; collapsing it stays for this pull request and tab.
   const codeScope = scrolls ? '' : pullRequestUrl(ref);
-  const [expandedScope, setExpandedScope] = useState('');
-  if (expandedScope && expandedScope !== codeScope) setExpandedScope('');
-  const codeHeaderOpen = !scrolls && expandedScope === codeScope;
-  const collapsed = !holds && (scrolls ? scrolledAway : !codeHeaderOpen);
+  const [collapsedScope, setCollapsedScope] = useState('');
+  if (collapsedScope && collapsedScope !== codeScope) setCollapsedScope('');
+  const codeHeaderCollapsed = !scrolls && collapsedScope === codeScope;
+  const collapsed = !holds && (scrolls ? scrolledAway : codeHeaderCollapsed);
   // Focus handoff across collapse/expand transitions: read active focus while the outgoing element
   // is still mounted, then move focus once the new state commits.
   const shown = useRef(collapsed);
@@ -378,7 +307,7 @@ function Header({
   const showDetails = () => {
     if (!scrolls) {
       pendingFocus.current = 'title';
-      setExpandedScope(codeScope);
+      setCollapsedScope('');
       return;
     }
     const header = headerRef.current;
@@ -389,7 +318,7 @@ function Header({
   };
   const hideDetails = () => {
     pendingFocus.current = 'swap';
-    setExpandedScope('');
+    setCollapsedScope(codeScope);
   };
   const stateIcon = <state.Icon aria-hidden className={`mrpr-icon ${state.toneClassName}`} />;
   const autoMergeBadge = pr.autoMerge ? (
@@ -650,7 +579,7 @@ function Panel({ roomId, request }: PanelProps) {
     );
   });
   const [tab, setTab] = useState<Tab>('summary');
-  // The Timeline tab's order, which the tab bar's toggle sets.
+  // The Timeline tab's order, kept here so switching tabs preserves it.
   const [order, setOrder] = useState<Order>('newest');
   // The commit the Code tab shows, chosen there or from the Timeline. It belongs to the pull
   // request it was chosen in: another one opens on All commits.
@@ -712,7 +641,7 @@ function Panel({ roomId, request }: PanelProps) {
     setLatch(undefined);
   };
   // Summary and Timeline scroll with the header, in the room's box; the Code tab scrolls in
-  // itself, under a header that starts collapsed into the top row.
+  // itself, under a header that starts expanded and can collapse into the top row.
   const scrolls = tab !== 'code';
 
   return (
@@ -797,18 +726,7 @@ function Panel({ roomId, request }: PanelProps) {
             <TabBar
               value={tab}
               onChange={setTab}
-              end={
-                tab === 'summary' ? (
-                  <ChecksStatusLine pullRequest={pr} pullRequestRef={ref} />
-                ) : tab === 'timeline' ? (
-                  <TimelineBarEnd
-                    pullRequest={pr}
-                    pullRequestRef={ref}
-                    order={order}
-                    onOrder={setOrder}
-                  />
-                ) : null
-              }
+              end={<ChecksStatusLine pullRequest={pr} pullRequestRef={ref} />}
             />
             <div
               className={tab === 'code' ? 'mrpr-tabpanel mrpr-tabpanel-code' : 'mrpr-tabpanel'}
@@ -823,6 +741,7 @@ function Panel({ roomId, request }: PanelProps) {
                   pullRequestRef={ref}
                   pullRequest={pr}
                   order={order}
+                  onOrder={setOrder}
                   onOpenCommit={(sha) => {
                     selectCommit(sha);
                     setTab('code');

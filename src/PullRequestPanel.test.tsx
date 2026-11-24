@@ -609,7 +609,7 @@ describe('PullRequestPanel', () => {
       expect((layer as HTMLElement | null)?.style.pointerEvents).toBe('none');
     });
 
-    it('shows the counts and the order toggle on Timeline, with approvals of the head only', async () => {
+    it('keeps CI checks in the tab bar across all tabs and keeps Timeline counts/order inside Timeline', async () => {
       const review = (id: number, login: string, state: string, commit: string) => ({
         id,
         state,
@@ -625,19 +625,42 @@ describe('PullRequestPanel', () => {
           review(2, 'bob', 'APPROVED', 'old'),
           review(3, 'cy', 'CHANGES_REQUESTED', SHA),
         ],
+        checks: respond({
+          check_runs: [
+            { name: 'ci/test', status: 'completed', conclusion: 'success', html_url: 'x' },
+          ],
+        }),
       });
       const view = await show();
-      await view.findByText('Add pull request cards');
+      const checksButton = await view.findByRole('button', {
+        name: 'Open checks: All checks have passed',
+      });
+      expect(view.container.querySelector('.mrpr-tabbar-end')?.contains(checksButton)).toBe(true);
+
       await click(view.getByRole('tab', { name: 'Timeline' }));
-      expect(view.getByText('7 comments')).toBeTruthy();
-      expect(view.getByText('5 commits')).toBeTruthy();
+      // ChecksStatusLine stays mounted in the tab bar across tab switches.
+      expect(view.getByRole('button', { name: 'Open checks: All checks have passed' })).toBe(
+        checksButton
+      );
+      const timelineBar = view.container.querySelector('.mrpr-timeline-bar') as HTMLElement;
+      expect(timelineBar).toBeTruthy();
+      expect(timelineBar.textContent).toContain('7 comments');
+      expect(timelineBar.textContent).toContain('5 commits');
       expect(await view.findByText('1 approval')).toBeTruthy();
-      const toggle = view.getByRole('button', { name: 'Newest first' });
-      await click(toggle);
+      await click(view.getByRole('button', { name: 'Newest first' }));
       expect(view.getByRole('button', { name: 'Oldest first' })).toBeTruthy();
+
+      await click(view.getByRole('tab', { name: 'Code' }));
+      expect(view.getByRole('button', { name: 'Open checks: All checks have passed' })).toBe(
+        checksButton
+      );
+
       await click(view.getByRole('tab', { name: 'Summary' }));
       // The Summary tab's comments have an order of their own, still the newest first.
       expect(view.queryByRole('button', { name: 'Oldest first' })).toBeNull();
+      // Returning to Timeline preserves its chosen order.
+      await click(view.getByRole('tab', { name: 'Timeline' }));
+      expect(view.getByRole('button', { name: 'Oldest first' })).toBeTruthy();
     });
 
     const commitEntry = (sha: string, message: string, date: string) => ({
@@ -2411,7 +2434,7 @@ describe('the dense header', () => {
     expect(document.activeElement).toBe(details);
   });
 
-  it('starts collapsed on the Code tab, toggles details in place, and moves focus', async () => {
+  it('starts expanded on the Code tab, toggles details in place, and moves focus', async () => {
     asWriter();
     const view = await showScrolling();
     await view.findByText('Add pull request cards');
@@ -2421,11 +2444,19 @@ describe('the dense header', () => {
 
     await click(view.getByRole('tab', { name: 'Code' }));
     const header = view.container.querySelector('.mrpr-header') as HTMLElement;
+    expect(header.classList.contains('mrpr-header-collapsed')).toBe(false);
+    expect(view.queryByRole('button', { name: bar })).toBeNull();
+    const hide = view.getByRole('button', { name: 'Hide pull request details' });
+    expect(hide.getAttribute('aria-expanded')).toBe('true');
+    expect(hide.getAttribute('aria-controls')).toBe(header.id);
+
+    await click(hide);
     expect(header.classList.contains('mrpr-header-collapsed')).toBe(true);
     const details = view.getByRole('button', { name: bar });
     expect(details.textContent).toBe('#200Add pull request cards');
     expect(details.getAttribute('aria-expanded')).toBe('false');
     expect(details.getAttribute('aria-controls')).toBe(header.id);
+    expect(document.activeElement).toBe(details);
     // The action status live region stays mounted in the accessibility tree while collapsed.
     expect(header.querySelector('.mrpr-header-lines [role="status"]')).toBeTruthy();
     expect(view.queryByRole('button', { name: 'Hide pull request details' })).toBeNull();
@@ -2435,16 +2466,10 @@ describe('the dense header', () => {
     expect(header.classList.contains('mrpr-header-collapsed')).toBe(false);
     expect(view.queryByRole('button', { name: bar })).toBeNull();
     expect(document.activeElement).toBe(header.querySelector('.mrpr-panel-title'));
-    const hide = view.getByRole('button', { name: 'Hide pull request details' });
-    expect(hide.getAttribute('aria-expanded')).toBe('true');
-    expect(hide.getAttribute('aria-controls')).toBe(header.id);
-
-    await click(hide);
-    expect(header.classList.contains('mrpr-header-collapsed')).toBe(true);
-    expect(document.activeElement).toBe(view.getByRole('button', { name: bar }));
+    expect(view.getByRole('button', { name: 'Hide pull request details' })).toBeTruthy();
   });
 
-  it('forces details open on the Code tab while an action holds the header, then collapses again', async () => {
+  it('forces a collapsed Code header open while an action holds it, then collapses again', async () => {
     asWriter();
     const writer = fetchMock.getMockImplementation()!;
     fetchMock.mockImplementation(async (url, init) =>
@@ -2456,6 +2481,7 @@ describe('the dense header', () => {
     await view.findByRole('button', { name: 'Merge' });
     await click(view.getByRole('tab', { name: 'Code' }));
     const header = view.container.querySelector('.mrpr-header') as HTMLElement;
+    await click(view.getByRole('button', { name: 'Hide pull request details' }));
     expect(header.classList.contains('mrpr-header-collapsed')).toBe(true);
 
     await click(view.getByRole('button', { name: 'More actions' }));
@@ -2506,6 +2532,7 @@ describe('the dense header', () => {
     await view.findByRole('button', { name: 'Merge' });
     await click(view.getByRole('tab', { name: 'Code' }));
     const header = view.container.querySelector('.mrpr-header') as HTMLElement;
+    await click(view.getByRole('button', { name: 'Hide pull request details' }));
     expect(view.getByRole('button', { name: bar }).textContent).not.toContain('Auto-merge');
 
     await click(view.getByRole('button', { name: 'More actions' }));
@@ -2524,7 +2551,7 @@ describe('the dense header', () => {
     });
   });
 
-  it('resets the Code tab header to collapsed when switching tabs or pull requests', async () => {
+  it('resets a collapsed Code tab header to expanded when switching tabs or pull requests', async () => {
     fetchMock.mockImplementation(async (url) => {
       if (url.includes('/files') || url.includes('/commits') || url.includes('/comments'))
         return respond([]);
@@ -2534,17 +2561,17 @@ describe('the dense header', () => {
     const view = await showScrolling();
     await view.findByText('Add pull request cards');
     await click(view.getByRole('tab', { name: 'Code' }));
-    await click(view.getByRole('button', { name: bar }));
     const header = () => view.container.querySelector('.mrpr-header') as HTMLElement;
-    expect(header().classList.contains('mrpr-header-collapsed')).toBe(false);
-
-    // Leaving Code and returning starts collapsed again.
-    await click(view.getByRole('tab', { name: 'Summary' }));
-    await click(view.getByRole('tab', { name: 'Code' }));
+    await click(view.getByRole('button', { name: 'Hide pull request details' }));
     expect(header().classList.contains('mrpr-header-collapsed')).toBe(true);
 
+    // Leaving Code and returning starts expanded again.
+    await click(view.getByRole('tab', { name: 'Summary' }));
+    await click(view.getByRole('tab', { name: 'Code' }));
+    expect(header().classList.contains('mrpr-header-collapsed')).toBe(false);
+
     // Switching to another pull request (and back to a cached one while Header stays mounted)
-    // resets the expanded header to collapsed and hands focus off from inside the hidden header.
+    // resets the collapsed header to expanded and hands focus off from the replaced bar button.
     const renderRequest = (req: typeof REQUEST) =>
       act(async () => {
         view.rerender(
@@ -2555,20 +2582,19 @@ describe('the dense header', () => {
           </div>
         );
       });
-    await renderRequest({ ...REQUEST, number: 201 });
-    const nextBar = await view.findByRole('button', {
-      name: 'Show details of pull request #201: Next PR',
-    });
-    expect(header().classList.contains('mrpr-header-collapsed')).toBe(true);
-    await click(nextBar);
-    expect(header().classList.contains('mrpr-header-collapsed')).toBe(false);
-    expect(document.activeElement).toBe(header().querySelector('.mrpr-panel-title'));
-    await renderRequest(REQUEST);
-    expect(header().classList.contains('mrpr-header-collapsed')).toBe(true);
+    await click(view.getByRole('button', { name: 'Hide pull request details' }));
     expect(document.activeElement).toBe(view.getByRole('button', { name: bar }));
+    await renderRequest({ ...REQUEST, number: 201 });
+    await view.findByText('Next PR');
+    expect(header().classList.contains('mrpr-header-collapsed')).toBe(false);
+    await click(view.getByRole('button', { name: 'Hide pull request details' }));
+    expect(header().classList.contains('mrpr-header-collapsed')).toBe(true);
+    await renderRequest(REQUEST);
+    expect(header().classList.contains('mrpr-header-collapsed')).toBe(false);
+    expect(document.activeElement).toBe(view.getByRole('link', { name: '#200' }));
   });
 
-  it('returns focus to the collapsed bar when the token form closes on the Code tab', async () => {
+  it('returns focus to the title or collapsed bar when the token form closes on the Code tab', async () => {
     roomServer.current = githubServer(async (url) =>
       url.includes('/files') || url.includes('/commits') || url.includes('/comments')
         ? respond([])
@@ -2583,6 +2609,14 @@ describe('the dense header', () => {
     act(() => cancel.focus());
     await click(cancel);
     expect(view.queryByLabelText('GitHub token')).toBeNull();
+    expect(document.activeElement).toBe(view.container.querySelector('.mrpr-panel-title'));
+
+    await click(view.getByRole('button', { name: 'Hide pull request details' }));
+    await click(view.getByRole('button', { name: 'More actions' }));
+    await click((await view.findByText('Use a token in this browser')).closest('button')!);
+    const cancelCollapsed = await view.findByRole('button', { name: 'Cancel' });
+    act(() => cancelCollapsed.focus());
+    await click(cancelCollapsed);
     expect(document.activeElement).toBe(view.getByRole('button', { name: bar }));
   });
 

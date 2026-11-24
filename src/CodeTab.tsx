@@ -214,6 +214,7 @@ const renderAnnotation = (...[annotation]: CodeViewAnnotationArgs<ThreadGroup>) 
 function ToolbarButton({
   label,
   pressed,
+  disabled,
   buttonRef,
   onClick,
   children,
@@ -221,6 +222,7 @@ function ToolbarButton({
   label: string;
   /** Whether a toggle is on; undefined for a button that acts. */
   pressed?: boolean;
+  disabled?: boolean;
   buttonRef?: { current: HTMLButtonElement | null };
   onClick: () => void;
   children: ReactNode;
@@ -237,6 +239,7 @@ function ToolbarButton({
           radii="300"
           aria-label={label}
           aria-pressed={pressed}
+          disabled={disabled}
           onClick={onClick}
         >
           {children}
@@ -245,6 +248,16 @@ function ToolbarButton({
     </IconTooltip>
   );
 }
+
+/** Moves focus into the file tree without triggering a competing native scroll. */
+const focusTree = (tree: HTMLElement | null) => {
+  const shadow = tree?.querySelector('file-tree-container')?.shadowRoot;
+  const target =
+    shadow?.querySelector<HTMLElement>(
+      '[role="treeitem"][tabindex="0"], [role="treeitem"], [role="tree"]'
+    ) ?? tree?.querySelector<HTMLElement>('ul button, .mrpr-tree-header button');
+  target?.focus({ preventScroll: true });
+};
 
 /** The folds of one view: the pull request as a whole, or one commit. */
 type Folds = {
@@ -283,15 +296,17 @@ export function CodeTab({
   const prefs = useCodePrefs();
   const viewed = useViewedFiles(pullRequest);
   const rootRef = useRef<HTMLDivElement>(null);
+  const diffsRef = useRef<HTMLDivElement>(null);
   const filesButtonRef = useRef<HTMLButtonElement | null>(null);
   const refocusFiles = useRef(false);
-  // Start with the Files tree closed when stacked above the diffs (< 640px).
+  // Wide (>= 640px): resizable Files sidebar starting open with all folders expanded.
+  // Stacked (< 640px): Files tree renders inside CodeView's header with all folders collapsed.
   const [wide, setWide] = useState<boolean | null>(() =>
     typeof ResizeObserver === 'undefined' ? true : null
   );
-  const [treeChoice, setTreeChoice] = useState<boolean | null>(null);
-  const treeAutoRef = useRef(true);
-  treeAutoRef.current = treeChoice === null;
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const wideRef = useRef(wide);
+  wideRef.current = wide;
   useLayoutEffect(() => {
     const root = rootRef.current;
     if (!root || typeof ResizeObserver === 'undefined') return undefined;
@@ -303,9 +318,9 @@ export function CodeTab({
       const nextWide = width >= WIDE_TREE_MIN_WIDTH;
       if (
         fromResize &&
-        !nextWide &&
-        treeAutoRef.current &&
-        (root.querySelector('.mrpr-code-tree')?.contains(document.activeElement) ?? false)
+        wideRef.current !== null &&
+        wideRef.current !== nextWide &&
+        (root.querySelector('.mrpr-tree')?.contains(document.activeElement) ?? false)
       ) {
         refocusFiles.current = true;
       }
@@ -321,12 +336,13 @@ export function CodeTab({
     observer.observe(root);
     return () => observer.disconnect();
   }, []);
-  const treeOpen = treeChoice ?? wide ?? false;
   useLayoutEffect(() => {
     if (!refocusFiles.current) return;
     refocusFiles.current = false;
-    if (!treeOpen) filesButtonRef.current?.focus({ preventScroll: true });
-  }, [treeOpen]);
+    filesButtonRef.current?.focus({ preventScroll: true });
+  }, [wide]);
+  const stacked = wide === false;
+  const showSidebar = wide === true && sidebarOpen;
   const access = useGitHubAccess();
   const canLoadDiffFiles = access.via !== undefined && !access.pending;
   const viewerRef = useRef<CodeViewHandle<ThreadGroup, undefined>>(null);
@@ -729,6 +745,55 @@ export function CodeTab({
             )
           ? t('code.onlyWhitespace')
           : undefined;
+  const hasDiffs = Boolean(viewFiles && !emptyNote);
+
+  // Give the stacked tree inside CodeView's auto-height header a concrete max-block-size derived
+  // from the diffs viewport height (percentage max-block-size resolves to none there).
+  useLayoutEffect(() => {
+    const diffs = diffsRef.current;
+    if (!diffs) return undefined;
+    const apply = (height: number) => {
+      if (height > 0) {
+        diffs.style.setProperty('--mrpr-stacked-tree-max-height', `${Math.round(height * 0.45)}px`);
+      }
+    };
+    apply(diffs.getBoundingClientRect().height || diffs.clientHeight);
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries?.[entries.length - 1];
+      const height =
+        entry?.contentRect.height ?? (diffs.getBoundingClientRect().height || diffs.clientHeight);
+      apply(height);
+    });
+    observer.observe(diffs);
+    return () => observer.disconnect();
+  }, [hasDiffs]);
+
+  const goToFiles = () => {
+    if (!hasDiffs) return;
+    const still = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    viewerRef.current?.scrollTo({
+      type: 'position',
+      position: 0,
+      behavior: still ? 'instant' : 'smooth',
+    });
+    focusTree(
+      diffsRef.current?.querySelector<HTMLElement>('.mrpr-code-tree-stacked .mrpr-tree') ?? null
+    );
+  };
+
+  const renderStackedTree = stacked
+    ? () => (
+        <div className="mrpr-code-tree-stacked">
+          <DiffFileTree
+            ariaLabel={t('code.treeLabel', pullRequest)}
+            entries={entries}
+            initialExpansion="closed"
+            onSelectFile={reveal}
+          />
+        </div>
+      )
+    : undefined;
 
   return (
     <div ref={rootRef} className="mrpr-root mrpr-code" style={pluginRootStyle()}>
@@ -827,17 +892,28 @@ export function CodeTab({
               <FlaskConicalOff aria-hidden className="mrpr-button-icon" />
             </ToolbarButton>
           ) : null}
-          <ToolbarButton
-            label={t('code.files')}
-            pressed={treeOpen}
-            buttonRef={filesButtonRef}
-            onClick={() => {
-              refocusFiles.current = false;
-              setTreeChoice(!treeOpen);
-            }}
-          >
-            <FolderTree aria-hidden className="mrpr-button-icon" />
-          </ToolbarButton>
+          {stacked ? (
+            <ToolbarButton
+              label={t('code.goToFiles')}
+              disabled={!hasDiffs}
+              buttonRef={filesButtonRef}
+              onClick={goToFiles}
+            >
+              <FolderTree aria-hidden className="mrpr-button-icon" />
+            </ToolbarButton>
+          ) : (
+            <ToolbarButton
+              label={t('code.files')}
+              pressed={sidebarOpen}
+              buttonRef={filesButtonRef}
+              onClick={() => {
+                refocusFiles.current = false;
+                setSidebarOpen((open) => !open);
+              }}
+            >
+              <FolderTree aria-hidden className="mrpr-button-icon" />
+            </ToolbarButton>
+          )}
         </div>
       </div>
       {/* A list that did not load leaves the diffs whole; it says so, with a retry, above them. */}
@@ -880,16 +956,17 @@ export function CodeTab({
         </div>
       ) : viewFiles ? (
         <div className="mrpr-code-body">
-          {treeOpen ? (
+          {showSidebar ? (
             <FileTreeColumn>
               <DiffFileTree
                 ariaLabel={t('code.treeLabel', pullRequest)}
                 entries={entries}
+                initialExpansion="open"
                 onSelectFile={reveal}
               />
             </FileTreeColumn>
           ) : null}
-          <div className="mrpr-code-diffs" onClickCapture={onDiffsClickCapture}>
+          <div ref={diffsRef} className="mrpr-code-diffs" onClickCapture={onDiffsClickCapture}>
             <FileHeaderContext.Provider value={header}>
               {/* The viewer must own its scroll element to position virtual rows within it. */}
               <StyledDiffCodeView<ThreadGroup>
@@ -904,6 +981,7 @@ export function CodeTab({
                   stickyHeaders: true,
                   loadDiffFiles: canLoadDiffFiles ? loadDiffFiles : undefined,
                 }}
+                renderCodeViewHeader={renderStackedTree}
                 renderCodeViewFooter={renderWithoutDiff}
                 renderHeaderPrefix={renderHeaderPrefix}
                 renderHeaderMetadata={renderHeaderMetadata}

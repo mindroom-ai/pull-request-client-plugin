@@ -32,9 +32,12 @@ export function ChecksStatusLine({
     return true;
   };
   if (query.isError) {
+    const unavailable = t('checksLine.unavailable');
     return (
       <span className="mrpr-checks-line">
-        <span className="mrpr-status">{t('checksLine.unavailable')}</span>
+        <span className="mrpr-status" title={unavailable}>
+          {unavailable}
+        </span>
         <button type="button" className="mrpr-button" onClick={() => void query.refetch()}>
           {t('checksLine.retry')}
         </button>

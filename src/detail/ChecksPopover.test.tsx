@@ -241,7 +241,8 @@ describe('ChecksStatusLine', () => {
   it('says Checks unavailable with Retry on an error', async () => {
     fetchMock.mockImplementation(async () => respond({}, 500));
     const view = await show();
-    expect(await view.findByText('Checks unavailable')).toBeTruthy();
+    const unavailable = await view.findByText('Checks unavailable');
+    expect(unavailable.getAttribute('title')).toBe('Checks unavailable');
     fetchMock.mockImplementation(async (url) =>
       respond(url.includes('/check-runs') ? runs(['success']) : { statuses: [] })
     );

@@ -135,6 +135,7 @@ const serve = (parts: Parts = {}) =>
 const show = async (
   over: {
     order?: 'newest' | 'oldest';
+    onOrder?: (order: 'newest' | 'oldest') => void;
     pullRequest?: PullRequest;
     onOpenCommit?: (sha: string) => void;
   } = {}
@@ -146,6 +147,7 @@ const show = async (
         pullRequestRef={REF}
         pullRequest={over.pullRequest ?? pull()}
         order={over.order ?? 'newest'}
+        onOrder={over.onOrder ?? (() => undefined)}
         onOpenCommit={over.onOpenCommit ?? (() => undefined)}
       />
     </QueryClientProvider>,
@@ -204,6 +206,28 @@ describe('TimelineTab', () => {
     const events = rows(view.container);
     expect(events[0]).toContain('Pull request opened');
     expect(events.at(-1)).toContain('Thread 20');
+  });
+
+  it('shows counts with head-only approvals and toggles order in the timeline bar', async () => {
+    serve({
+      reviews: [
+        review(1, 'ann', 'APPROVED', { commit_id: HEAD }),
+        review(2, 'bob', 'APPROVED', { commit_id: 'older' }),
+        review(3, 'cy', 'CHANGES_REQUESTED', { commit_id: HEAD }),
+      ],
+    });
+    const onOrder = vi.fn();
+    const view = await show({
+      onOrder,
+      pullRequest: pull({ commentCount: 4, reviewCommentCount: 3, commitCount: 5 }),
+    });
+    const bar = view.container.querySelector('.mrpr-timeline-bar') as HTMLElement;
+    expect(bar).toBeTruthy();
+    expect(bar.textContent).toContain('7 comments');
+    expect(bar.textContent).toContain('5 commits');
+    expect(await view.findByText('1 approval')).toBeTruthy();
+    await click(view.getByRole('button', { name: 'Newest first' }));
+    expect(onOrder).toHaveBeenCalledWith('oldest');
   });
 
   it('shows a verdict on earlier commits as such and a dismissed one as dismissed', async () => {

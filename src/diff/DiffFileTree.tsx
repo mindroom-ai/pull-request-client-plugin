@@ -103,45 +103,68 @@ function useStableCallback<Args extends ReadonlyArray<unknown>, Result>(
   return stable;
 }
 
+type TreeInitialExpansion = 'open' | 'closed';
+
 interface DiffFileTreeProps {
   readonly entries: ReadonlyArray<DiffFileTreeEntry>;
   readonly onSelectFile: (path: string) => void;
   readonly ariaLabel: string;
+  readonly initialExpansion?: TreeInitialExpansion;
 }
 
 /** What the tree shows besides its paths, by the model's paths. */
 interface TreeView {
   readonly selectedPaths: readonly string[];
+  readonly expandedDirectories: readonly string[];
   readonly collapsedDirectories: readonly string[];
   readonly focusedPath: string | null;
 }
 
 /** What a tree made again for another zoom takes over from the one before. */
 interface CarriedTree extends TreeView {
+  readonly initialExpansion: TreeInitialExpansion;
   /** How far it was scrolled, in rows. */
   readonly scrolledRows: number;
   /** Where the keyboard's focus was in it: on a row or on the header's button. */
   readonly focused: 'row' | 'header' | null;
 }
 
-function collapsedDirectoriesOf(model: TreeModel, directoryPaths: readonly string[]): string[] {
-  return directoryPaths.filter((path) => {
+function directoryStatesOf(
+  model: TreeModel,
+  directoryPaths: readonly string[]
+): Pick<TreeView, 'expandedDirectories' | 'collapsedDirectories'> {
+  const expandedDirectories: string[] = [];
+  const collapsedDirectories: string[] = [];
+  for (const path of directoryPaths) {
     const directory = model.getItem(path);
-    return directory !== null && 'isExpanded' in directory && !directory.isExpanded();
-  });
+    if (directory === null || !('isExpanded' in directory)) continue;
+    if (directory.isExpanded()) expandedDirectories.push(path);
+    else collapsedDirectories.push(path);
+  }
+  return { expandedDirectories, collapsedDirectories };
 }
 
 /**
- * Gives `model`, whose paths were just reset, `view`'s selection, folded folders and focus. The
- * selection it reports meanwhile is its own doing, which the caller ignores while syncing.
+ * Gives `model`, whose paths were just reset, `view`'s expanded/collapsed folders, selection and
+ * focus. Restoring folder expansion first ensures focused/selected descendants exist in the
+ * projection regardless of `initialExpansion`. The selection it reports meanwhile is its own doing,
+ * which the caller ignores while syncing.
  */
 function applyTreeView(model: TreeModel, view: TreeView, known: (path: string) => boolean) {
-  for (const path of model.getSelectedPaths()) model.getItem(path)?.deselect();
-  for (const path of view.selectedPaths) model.getItem(path)?.select();
+  for (const path of view.expandedDirectories) {
+    const directory = model.getItem(path);
+    if (directory !== null && 'isExpanded' in directory && !directory.isExpanded()) {
+      directory.expand();
+    }
+  }
   for (const path of view.collapsedDirectories) {
     const directory = model.getItem(path);
-    if (directory !== null && 'collapse' in directory) directory.collapse();
+    if (directory !== null && 'isExpanded' in directory && directory.isExpanded()) {
+      directory.collapse();
+    }
   }
+  for (const path of model.getSelectedPaths()) model.getItem(path)?.deselect();
+  for (const path of view.selectedPaths) model.getItem(path)?.select();
   if (view.focusedPath !== null && known(view.focusedPath)) model.focusPath(view.focusedPath);
 }
 
@@ -159,7 +182,7 @@ const ZOOM_SETTLE_MS = 250;
  * zoom makes it again with the rows' 1.5rem in the new size, once the zoom rests (a pinch changes
  * it on each frame), with the selection, folded folders, focus and scroll of the one before.
  */
-export function DiffFileTree(props: DiffFileTreeProps) {
+export function DiffFileTree({ initialExpansion = 'open', ...props }: DiffFileTreeProps) {
   const rem = useRootFontSize();
   const [settledRem, setSettledRem] = useState(rem);
   useEffect(() => {
@@ -170,8 +193,9 @@ export function DiffFileTree(props: DiffFileTreeProps) {
   const carried = useRef<CarriedTree | null>(null);
   return (
     <SizedDiffFileTree
-      key={settledRem}
+      key={`${settledRem}:${initialExpansion}`}
       {...props}
+      initialExpansion={initialExpansion}
       itemHeight={1.5 * settledRem}
       carried={carried}
     />
@@ -182,9 +206,11 @@ function SizedDiffFileTree({
   entries,
   onSelectFile,
   ariaLabel,
+  initialExpansion,
   itemHeight,
   carried,
-}: DiffFileTreeProps & {
+}: Omit<DiffFileTreeProps, 'initialExpansion'> & {
+  readonly initialExpansion: TreeInitialExpansion;
   readonly itemHeight: number;
   readonly carried: MutableRefObject<CarriedTree | null>;
 }) {
@@ -260,7 +286,7 @@ function SizedDiffFileTree({
     density: 'compact',
     itemHeight,
     flattenEmptyDirectories: true,
-    initialExpansion: 'open',
+    initialExpansion,
     icons,
     onSelectionChange: handleSelectionChange,
     paths: [],
@@ -275,8 +301,9 @@ function SizedDiffFileTree({
       const tree = treeRef.current;
       const paths = mountedPresentationRef.current?.paths ?? [];
       carried.current = {
+        initialExpansion,
         selectedPaths: model.getSelectedPaths(),
-        collapsedDirectories: collapsedDirectoriesOf(model, collectDirectoryPaths(paths)),
+        ...directoryStatesOf(model, collectDirectoryPaths(paths)),
         focusedPath: model.getFocusedPath(),
         scrolledRows: (scrollElementOf(tree)?.scrollTop ?? 0) / model.getItemHeight(),
         focused: tree?.querySelector('file-tree-container')?.matches(':focus-within')
@@ -286,7 +313,7 @@ function SizedDiffFileTree({
             : null,
       };
     },
-    [carried, model]
+    [carried, initialExpansion, model]
   );
   const allDirectoriesExpanded = useSyncExternalStore(
     (listener) => subscribeOncePerTask(model, listener),
@@ -312,7 +339,7 @@ function SizedDiffFileTree({
       model.resetPaths(modelPaths);
       const before = carried.current;
       carried.current = null;
-      if (before !== null) {
+      if (before !== null && before.initialExpansion === initialExpansion) {
         syncingSelectionRef.current = true;
         applyTreeView(model, before, known);
         queueMicrotask(() => {
@@ -345,12 +372,15 @@ function SizedDiffFileTree({
         .getSelectedPaths()
         .map((path) => presented.modelPath(mounted.selectionPath(path)))
         .filter((path) => path.endsWith('/') || modelPaths.includes(path));
-      const collapsedDirectories = collapsedDirectoriesOf(model, directoryPaths);
+      const { expandedDirectories, collapsedDirectories } = directoryStatesOf(
+        model,
+        directoryPaths
+      );
       syncingSelectionRef.current = true;
       model.resetPaths(modelPaths);
       applyTreeView(
         model,
-        { selectedPaths, collapsedDirectories, focusedPath: nextFocusedPath },
+        { selectedPaths, expandedDirectories, collapsedDirectories, focusedPath: nextFocusedPath },
         known
       );
       queueMicrotask(() => {
@@ -362,6 +392,7 @@ function SizedDiffFileTree({
     carried,
     directoryPaths,
     gitStatus,
+    initialExpansion,
     itemHeight,
     model,
     modelPaths,
