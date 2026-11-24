@@ -15,10 +15,21 @@ import {
 import plugin from './index';
 import type { ReviewThread } from './reviewThreads';
 import { CodeTab, type ListState } from './CodeTab';
-import { fnv1a32 } from './diff/diffRendering';
+import {
+  hydratePartialDiff,
+  type FileDiffContentsLoader,
+  type FileDiffMetadata,
+} from '@pierre/diffs';
+import { fnv1a32, getDiffLineStat } from './diff/diffRendering';
 import { trapOptions } from './testing/focusTrapStandIn';
-import { greenhouseAfter, greenhousePatch, greenhousePath } from './testing/greenhouseDiff';
+import {
+  greenhouseAfter,
+  greenhouseBefore,
+  greenhousePatch,
+  greenhousePath,
+} from './testing/greenhouseDiff';
 import { githubServer } from './testing/mindroomServer';
+import { usePullRequestFiles } from './queries';
 import { GitHubServerContext } from './token';
 
 vi.mock('focus-trap-react', async () => ({
@@ -339,11 +350,12 @@ function Holder({
 const show = (
   { themeKind, commit, ...options }: Options = {},
   client = new QueryClient({ defaultOptions: { queries: { retryDelay: 0 } } }),
-  server?: MindroomServer
+  server?: MindroomServer,
+  serverPending = false
 ) => {
   return renderPluginComponent(
     <QueryClientProvider client={client}>
-      <GitHubServerContext.Provider value={{ server, pending: false }}>
+      <GitHubServerContext.Provider value={{ server, pending: serverPending }}>
         <Holder {...options} initial={commit} />
       </GitHubServerContext.Provider>
     </QueryClientProvider>,
@@ -370,10 +382,7 @@ const versionOf = (path: string) =>
 type ShownItem = {
   id: string;
   collapsed?: boolean;
-  fileDiff: {
-    cacheKey?: string;
-    hunks: { additionLines: number; deletionLines: number }[];
-  };
+  fileDiff: FileDiffMetadata;
 };
 const itemOf = (path: string) =>
   (view.props?.items as ShownItem[]).find((item) => item.id === path);
@@ -462,40 +471,68 @@ describe('CodeTab', () => {
     const blobCalls = () =>
       fetchMock.mock.calls.filter(([url]) => url.includes('/git/blobs/')).map(([url]) => url);
     const response = (text = greenhouseAfter) => new Response(text);
-    const blobKey = (sha: string) => [
-      'pull-requests',
-      'blob',
-      request.owner,
-      request.repo,
-      sha,
-      true,
-    ];
-    // The real viewer only post-renders the items in its virtual window.
-    const setInWindow = (path: string, phase: 'mount' | 'unmount' = 'mount') =>
-      act(async () => {
-        const postRender = options().onPostRender as (
-          node: HTMLElement,
-          instance: unknown,
-          phase: string,
-          state: { item: ShownItem }
-        ) => void;
-        postRender?.(document.createElement('div'), null, phase, { item: itemOf(path)! });
-      });
+    const loader = () => options().loadDiffFiles as FileDiffContentsLoader | undefined;
 
-    it('loads only the files entry’s blob in the All commits view', async () => {
+    it('makes zero passive blob requests on mount, unfold, or re-render and keeps loadDiffFiles stable', async () => {
+      localStorage.setItem(tokenKey, 'e2e-token');
+      localStorage.setItem(markKey, JSON.stringify({ [greenhousePath]: fnv1a32(greenhousePatch) }));
+      fetchMock.mockImplementation(async () => response());
+      const tab = await show({ files: [testFile, other], pullRequest: request });
+      expect(options().onPostRender).toBeUndefined();
+      expect(tab.getByTestId(`partial:${greenhousePath}`)).toBeTruthy();
+      expect(tab.getByTestId(`partial:${other.path}`)).toBeTruthy();
+      const firstLoader = loader();
+      expect(firstLoader).toBeTypeOf('function');
+      expect(blobCalls()).toEqual([]);
+
+      // Unfolding a viewed file and toggling the tree still trigger zero passive blob reads and
+      // preserve the exact `loadDiffFiles` function identity for Pierre's `areOptionsEqual`.
+      await click(foldToggle(tab, greenhousePath));
+      await click(tab.getByRole('button', { name: 'Files' }));
+      expect(blobCalls()).toEqual([]);
+      expect(loader()).toBe(firstLoader);
+    });
+
+    it('passes loadDiffFiles only when authenticated GitHub access is ready', async () => {
+      const anonymous = await show({ files: [testFile], pullRequest: request });
+      expect(loader()).toBeUndefined();
+      expect(blobCalls()).toEqual([]);
+      anonymous.unmount();
+
+      const pending = await show(
+        { files: [testFile], pullRequest: request },
+        new QueryClient(),
+        undefined,
+        true
+      );
+      expect(loader()).toBeUndefined();
+      pending.unmount();
+
+      localStorage.setItem(tokenKey, 'e2e-token');
+      const withToken = await show({ files: [testFile], pullRequest: request });
+      expect(loader()).toBeTypeOf('function');
+      withToken.unmount();
+    });
+
+    it('fetches only the clicked file blob, reconstructs oldFile, and retains nothing in React Query', async () => {
       localStorage.setItem(tokenKey, 'e2e-token');
       fetchMock.mockImplementation(async (url) =>
         url === endpoint + sha ? response() : respond({}, 404)
       );
-      const tab = await show({ files: [testFile], pullRequest: request });
-      expect(tab.getByTestId(`partial:${greenhousePath}`)).toBeTruthy();
-      expect(fetchMock).not.toHaveBeenCalled();
-      await setInWindow(greenhousePath);
-      expect(await tab.findByTestId(`complete:${greenhousePath}`)).toBeTruthy();
-      expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([endpoint + sha]);
+      const client = new QueryClient();
+      await show({ files: [testFile, other], pullRequest: request }, client);
+      expect(blobCalls()).toEqual([]);
+
+      const loadedFiles = await loader()!(itemOf(greenhousePath)!.fileDiff);
+      expect(loadedFiles).toEqual({
+        oldFile: { name: greenhousePath, contents: greenhouseBefore },
+        newFile: { name: greenhousePath, contents: greenhouseAfter },
+      });
+      expect(blobCalls()).toEqual([endpoint + sha]);
+      expect(client.getQueryCache().findAll({ queryKey: ['pull-requests', 'blob'] })).toEqual([]);
     });
 
-    it('uses the selected commit’s file blob without fetching a parent or a separate path', async () => {
+    it('uses prevName ?? name for renamed files in a commit view without passive fetches', async () => {
       localStorage.setItem(tokenKey, 'e2e-token');
       const shaOfCommit = commit(2).sha;
       fetchMock.mockImplementation(async (url) => {
@@ -517,115 +554,31 @@ describe('CodeTab', () => {
       });
       const tab = await show({ commit: shaOfCommit, pullRequest: request });
       await tab.findByTestId(`partial:${greenhousePath}`);
-      await setInWindow(greenhousePath);
-      expect(await tab.findByTestId(`complete:${greenhousePath}`)).toBeTruthy();
+      expect(blobCalls()).toEqual([]);
+
+      const loadedFiles = await loader()!(itemOf(greenhousePath)!.fileDiff);
+      expect(loadedFiles).toEqual({
+        oldFile: { name: 'orchard.py', contents: greenhouseBefore },
+        newFile: { name: greenhousePath, contents: greenhouseAfter },
+      });
       expect(blobCalls()).toEqual([endpoint + sha]);
     });
 
-    it('does not fetch a viewed and folded file until it is unfolded', async () => {
-      localStorage.setItem(tokenKey, 'e2e-token');
-      localStorage.setItem(markKey, JSON.stringify({ [greenhousePath]: fnv1a32(greenhousePatch) }));
-      fetchMock.mockImplementation(async () => response());
-      const tab = await show({ files: [testFile, other], pullRequest: request });
-      expect(itemOf(greenhousePath)?.collapsed).toBe(true);
-      await setInWindow(greenhousePath);
-      await setInWindow(other.path);
-      await tab.findByTestId(`complete:${other.path}`);
-      expect(blobCalls()).toEqual([endpoint + otherSha]);
-      await click(foldToggle(tab, greenhousePath));
-      await tab.findByTestId(`complete:${greenhousePath}`);
-      expect(blobCalls()).toEqual([endpoint + otherSha, endpoint + sha]);
-    });
-
-    const observedBlobs = (client: QueryClient) =>
-      client
-        .getQueryCache()
-        .findAll({ queryKey: ['pull-requests', 'blob'] })
-        .flatMap((query) => (query.getObserversCount() > 0 ? [query.queryKey] : []));
-
-    it('leaves anonymous files patch-only with no blob observers even in the virtual window', async () => {
-      const client = new QueryClient();
-      const tab = await show({ files: [testFile], pullRequest: request }, client);
-      await setInWindow(greenhousePath);
-      expect(tab.getByTestId(`partial:${greenhousePath}`)).toBeTruthy();
-      expect(blobCalls()).toEqual([]);
-      expect(observedBlobs(client)).toEqual([]);
-    });
-
-    it('observes only eligible blobs in the virtual window and keeps hydrated diffs after scrolling out', async () => {
-      localStorage.setItem(tokenKey, 'e2e-token');
-      const client = new QueryClient();
-      const folded = file({ ...testFile, path: 'folded.py', sha: 'c'.repeat(40) });
-      localStorage.setItem(markKey, JSON.stringify({ [folded.path]: fnv1a32(greenhousePatch) }));
-      fetchMock.mockImplementation(async () => response());
-      const tab = await show({ files: [testFile, other, folded], pullRequest: request }, client);
-      expect(observedBlobs(client)).toEqual([]);
-      await setInWindow(folded.path);
-      await setInWindow(greenhousePath);
-      await tab.findByTestId(`complete:${greenhousePath}`);
-      expect(observedBlobs(client)).toEqual([blobKey(sha)]);
-      const hydrated = itemOf(greenhousePath)!.fileDiff;
-      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-      try {
-        await setInWindow(greenhousePath, 'unmount');
-        expect(observedBlobs(client)).toEqual([]);
-        expect(itemOf(greenhousePath)!.fileDiff).toBe(hydrated);
-        await act(async () => vi.advanceTimersByTimeAsync(29 * 60 * 1000));
-        expect(client.getQueryData(blobKey(sha))).toBe(greenhouseAfter);
-        await setInWindow(greenhousePath);
-        expect(itemOf(greenhousePath)!.fileDiff).toBe(hydrated);
-        expect(tab.getByTestId(`complete:${greenhousePath}`)).toBeTruthy();
-        expect(blobCalls()).toEqual([endpoint + sha]);
-      } finally {
-        vi.useRealTimers();
-      }
-    });
-
-    it('caps reads at four and skips a queued file that leaves the window', async () => {
-      localStorage.setItem(tokenKey, 'e2e-token');
-      const files = Array.from({ length: 6 }, (_, index) =>
-        file({
-          ...testFile,
-          path: `bed_${index}.py`,
-          sha: `${index + 1}`.repeat(40),
-        })
-      );
-      let release!: () => void;
-      const waiting = new Promise<void>((resolve) => {
-        release = resolve;
-      });
-      fetchMock.mockImplementation(async () => {
-        await waiting;
-        return response();
-      });
-      const client = new QueryClient();
-      const tab = await show({ files, pullRequest: request }, client);
-      const skipped = files[4]!;
-      for (const entry of files) await setInWindow(entry.path);
-      expect(blobCalls()).toEqual(files.slice(0, 4).map(({ sha }) => endpoint + sha));
-      await setInWindow(skipped.path, 'unmount');
-      await act(async () => release());
-      await tab.findByTestId(`complete:${files[5]!.path}`);
-      expect(client.getQueryState(blobKey(skipped.sha!))).toMatchObject({
-        fetchStatus: 'idle',
-        status: 'pending',
-      });
-      expect(blobCalls()).toEqual(
-        [...files.slice(0, 4), files[5]!].map(({ sha }) => endpoint + sha)
-      );
-    });
-
-    it('hydrates a diff with one raw blob request through MindRoom', async () => {
+    it('loads a diff blob on demand through the MindRoom server proxy', async () => {
       const upstream = githubServer(async (url) =>
         url === endpoint + sha ? response() : respond({}, 404)
       );
-      const tab = await show(
-        { files: [testFile], pullRequest: request },
-        new QueryClient(),
-        upstream.server
-      );
-      await setInWindow(greenhousePath);
-      expect(await tab.findByTestId(`complete:${greenhousePath}`)).toBeTruthy();
+      await show({ files: [testFile], pullRequest: request }, new QueryClient(), upstream.server);
+      await act(async () => {
+        await vi.waitFor(() => expect(loader()).toBeTypeOf('function'));
+      });
+      expect(upstream.githubRequests()).toEqual([]);
+
+      const loadedFiles = await loader()!(itemOf(greenhousePath)!.fileDiff);
+      expect(loadedFiles).toEqual({
+        oldFile: { name: greenhousePath, contents: greenhouseBefore },
+        newFile: { name: greenhousePath, contents: greenhouseAfter },
+      });
       expect(upstream.githubRequests()).toEqual([
         {
           path: new URL(endpoint + sha).pathname,
@@ -636,60 +589,229 @@ describe('CodeTab', () => {
       ]);
     });
 
-    it('hydrates the same SHA when re-enabled after a rate limit resets', async () => {
+    it('rejects cleanly on missing SHA, >128 KiB, LFS, mismatch, auth failure, and retries after transient failure', async () => {
       localStorage.setItem(tokenKey, 'retry-blob-fixture');
-      const now = vi.spyOn(Date, 'now');
-      const started = Date.now();
-      try {
-        now.mockReturnValue(started);
-        fetchMock.mockResolvedValueOnce(
-          new Response(null, { status: 429, headers: { 'retry-after': '60' } })
-        );
-        fetchMock.mockImplementation(async () => response());
-        const client = new QueryClient();
-        const tab = await show({ files: [testFile, other], pullRequest: request }, client);
-        await setInWindow(other.path);
-        await act(async () => {
-          await vi.waitFor(() =>
-            expect(client.getQueryState(blobKey(otherSha))?.status).toBe('error')
-          );
-        });
-        await setInWindow(greenhousePath);
-        await act(async () => {
-          await vi.waitFor(() => expect(client.getQueryState(blobKey(sha))?.status).toBe('error'));
-        });
-        expect(blobCalls()).toEqual([endpoint + otherSha]);
-        expect(tab.getByTestId(`partial:${greenhousePath}`)).toBeTruthy();
-        await setInWindow(greenhousePath, 'unmount');
-        now.mockReturnValue(started + 60_000);
-        await setInWindow(greenhousePath);
-        expect(await tab.findByTestId(`complete:${greenhousePath}`)).toBeTruthy();
-        expect(blobCalls()).toEqual([endpoint + otherSha, endpoint + sha]);
-      } finally {
-        now.mockRestore();
-      }
+      const noSha = file({ ...testFile, path: 'no-sha.py', sha: null });
+      const oversized = file({ ...testFile, path: 'huge.py', sha: '1'.repeat(40) });
+      const lfs = file({ ...testFile, path: 'lfs.py', sha: '2'.repeat(40) });
+      const mismatch = file({ ...testFile, path: 'mismatch.py', sha: '3'.repeat(40) });
+      const flaky = file({ ...testFile, path: 'flaky.py', sha: '4'.repeat(40) });
+      let flakyAttempts = 0;
+      fetchMock.mockImplementation(async (url) => {
+        if (url === endpoint + oversized.sha) return response('x'.repeat(128 * 1024 + 1));
+        if (url === endpoint + lfs.sha)
+          return response('version https://git-lfs.github.com/spec/v1\noid sha256:00\nsize 10\n');
+        if (url === endpoint + mismatch.sha) return response(greenhouseBefore);
+        if (url === endpoint + flaky.sha) {
+          flakyAttempts += 1;
+          return flakyAttempts === 1 ? respond({}, 500) : response();
+        }
+        return respond({}, 404);
+      });
+      await show({
+        files: [noSha, oversized, lfs, mismatch, flaky],
+        pullRequest: request,
+      });
+
+      await expect(loader()!(itemOf(noSha.path)!.fileDiff)).rejects.toThrow();
+      expect(blobCalls()).toEqual([]);
+      await expect(loader()!(itemOf(oversized.path)!.fileDiff)).rejects.toThrow();
+      await expect(loader()!(itemOf(lfs.path)!.fileDiff)).rejects.toThrow();
+      await expect(loader()!(itemOf(mismatch.path)!.fileDiff)).rejects.toThrow();
+      await expect(loader()!(itemOf(flaky.path)!.fileDiff)).rejects.toThrow();
+      expect(itemOf(flaky.path)!.fileDiff.isPartial).toBe(true);
+
+      // A subsequent click after the transient failure succeeds cleanly.
+      await expect(loader()!(itemOf(flaky.path)!.fileDiff)).resolves.toEqual({
+        oldFile: { name: flaky.path, contents: greenhouseBefore },
+        newFile: { name: flaky.path, contents: greenhouseAfter },
+      });
+
+      // Removing auth before invoking rejects without mutating the diff.
+      localStorage.removeItem(tokenKey);
+      await expect(loader()!(itemOf(flaky.path)!.fileDiff)).rejects.toThrow();
     });
 
-    it('keeps other prepared diffs when one blob arrives or a viewed mark changes', async () => {
+    it('deduplicates concurrent requests for the same SHA, caps concurrency at four, and aborts queued reads on unmount', async () => {
       localStorage.setItem(tokenKey, 'e2e-token');
-      let release!: (value: Response) => void;
-      const pending = new Promise<Response>((resolve) => {
+      const duplicate = file({ ...testFile, path: 'duplicate.py', sha });
+      const extra = Array.from({ length: 5 }, (_, index) =>
+        file({ ...testFile, path: `bed_${index}.py`, sha: `${index + 1}`.repeat(40) })
+      );
+      let release!: () => void;
+      const waiting = new Promise<void>((resolve) => {
         release = resolve;
       });
-      fetchMock.mockImplementation(async (url) =>
-        url === endpoint + otherSha ? pending : response()
+      const aborted: string[] = [];
+      fetchMock.mockImplementation(
+        (url, init) =>
+          new Promise<Response>((resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => {
+              aborted.push(url);
+              reject(init.signal?.reason ?? new Error('aborted'));
+            });
+            void waiting.then(() => {
+              if (!init?.signal?.aborted) resolve(response());
+            });
+          })
       );
+      const tab = await show({ files: [testFile, duplicate, ...extra], pullRequest: request });
+      const load = loader()!;
+
+      // Two files sharing `sha` issue only one fetch; 5 more files queue behind the cap of 4.
+      const first = load(itemOf(greenhousePath)!.fileDiff);
+      const second = load(itemOf(duplicate.path)!.fileDiff);
+      const rest = extra.map((entry) => load(itemOf(entry.path)!.fileDiff));
+      expect(blobCalls()).toEqual([
+        endpoint + sha,
+        ...extra.slice(0, 3).map(({ sha: entrySha }) => endpoint + entrySha),
+      ]);
+
+      // Unmounting aborts the four active reads and cancels the queued ones without fetching them.
+      tab.unmount();
+      release();
+      const settled = await Promise.allSettled([first, second, ...rest]);
+      expect(settled.every((result) => result.status === 'rejected')).toBe(true);
+      expect(aborted).toHaveLength(4);
+      expect(blobCalls()).toEqual([
+        endpoint + sha,
+        ...extra.slice(0, 3).map(({ sha: entrySha }) => endpoint + entrySha),
+      ]);
+    });
+
+    it('hydrates cleanly with ignoreWhitespace enabled against real @pierre/diffs hydratePartialDiff', async () => {
+      localStorage.setItem(tokenKey, 'e2e-token');
+      const wsPatch = greenhousePatch.replace('+    return COUNT + 2', '+    return  COUNT + 1');
+      const wsBlob = greenhouseAfter.replace('return COUNT + 2', 'return  COUNT + 1');
+      const wsFile = file({ ...testFile, patch: wsPatch });
+      fetchMock.mockImplementation(async (url) =>
+        url === endpoint + sha ? response(wsBlob) : respond({}, 404)
+      );
+      const tab = await show({ files: [wsFile], pullRequest: request });
+      await click(tab.getByRole('button', { name: 'Hide whitespace changes' }));
+
+      const diff = itemOf(greenhousePath)!.fileDiff;
+      expect(diff.isPartial).toBe(true);
+      expect(diff.cacheKey).toMatch(/:ignore-whitespace$/);
+      const loadedFiles = await loader()!(diff);
+      const hydrated = hydratePartialDiff('clone', diff, loadedFiles);
+      expect(hydrated.isPartial).toBe(false);
+      expect(getDiffLineStat([hydrated])).toEqual({ additions: 1, deletions: 1 });
+      expect(hydrated.hunks[1]?.collapsedBefore).toBe(6);
+      expect(hydrated.hunks[1]?.hunkContent).toEqual([
+        { type: 'context', lines: 6, additionLineIndex: 8, deletionLineIndex: 8 },
+      ]);
+    });
+
+    it('yields fresh unmutated partial diffs across ignoreWhitespace, commit, and credential changes', async () => {
+      localStorage.setItem(tokenKey, 'token-one');
+      fetchMock.mockImplementation(async (url) => {
+        if (url.endsWith(`/commits/${commit(2).sha}`)) {
+          return respond({
+            sha: commit(2).sha,
+            files: [
+              {
+                filename: greenhousePath,
+                status: 'modified',
+                sha,
+                additions: 2,
+                deletions: 2,
+                patch: greenhousePatch,
+              },
+            ],
+          });
+        }
+        return url === endpoint + sha ? response() : respond({}, 404);
+      });
       const tab = await show({ files: [testFile, other], pullRequest: request });
-      await setInWindow(greenhousePath);
-      await tab.findByTestId(`complete:${greenhousePath}`);
-      const first = itemOf(greenhousePath)!.fileDiff;
-      await setInWindow(other.path);
-      await act(async () => release(response()));
-      await tab.findByTestId(`complete:${other.path}`);
-      expect(itemOf(greenhousePath)!.fileDiff).toBe(first);
-      const second = itemOf(other.path)!.fileDiff;
-      await click(viewedBox(tab, greenhousePath));
-      expect(itemOf(other.path)!.fileDiff).toBe(second);
+
+      // Simulate Pierre's in-place `Object.assign(fileDiff, hydratePartialDiff(...))` mutation.
+      const hydrateInPlace = async () => {
+        const current = itemOf(greenhousePath)!.fileDiff;
+        const loadedFiles = await loader()!(current);
+        Object.assign(current, hydratePartialDiff('clone', current, loadedFiles));
+        return current;
+      };
+
+      const hydrated = await hydrateInPlace();
+      expect(hydrated.isPartial).toBe(false);
+      // Unrelated UI updates preserve the hydrated diff object in place.
+      await click(viewedBox(tab, other.path));
+      expect(itemOf(greenhousePath)!.fileDiff).toBe(hydrated);
+
+      // Toggling ignoreWhitespace on and back off yields fresh partial diffs (never the mutated one).
+      await click(tab.getByRole('button', { name: 'Hide whitespace changes' }));
+      const wsDiff = itemOf(greenhousePath)!.fileDiff;
+      expect(wsDiff).not.toBe(hydrated);
+      expect(wsDiff.isPartial).toBe(true);
+      await click(tab.getByRole('button', { name: 'Hide whitespace changes' }));
+      const restored = itemOf(greenhousePath)!.fileDiff;
+      expect(restored).not.toBe(hydrated);
+      expect(restored.isPartial).toBe(true);
+
+      // Switching commits yields a fresh partial diff with a view-scoped cacheKey.
+      const hydratedBeforeCommit = await hydrateInPlace();
+      await chooseCommit(tab, /^Commit 2/);
+      await tab.findByTestId(`partial:${greenhousePath}`);
+      const commitDiff = itemOf(greenhousePath)!.fileDiff;
+      expect(commitDiff).not.toBe(hydratedBeforeCommit);
+      expect(commitDiff.isPartial).toBe(true);
+      expect(commitDiff.cacheKey).not.toBe(hydratedBeforeCommit.cacheKey);
+
+      // Switching back to All commits also yields a fresh partial diff.
+      await chooseCommit(tab, 'All commits');
+      expect(itemOf(greenhousePath)!.fileDiff.isPartial).toBe(true);
+
+      // Replacing the browser token and signing out both yield fresh partial diffs with distinct cacheKeys.
+      const hydratedForTokenOne = await hydrateInPlace();
+      await act(async () => {
+        localStorage.setItem(tokenKey, 'token-two');
+        window.dispatchEvent(new StorageEvent('storage', { key: tokenKey }));
+      });
+      const tokenTwoDiff = itemOf(greenhousePath)!.fileDiff;
+      expect(tokenTwoDiff).not.toBe(hydratedForTokenOne);
+      expect(tokenTwoDiff.isPartial).toBe(true);
+      expect(tokenTwoDiff.cacheKey).not.toBe(hydratedForTokenOne.cacheKey);
+
+      const hydratedForTokenTwo = await hydrateInPlace();
+      await act(async () => {
+        localStorage.removeItem(tokenKey);
+        window.dispatchEvent(new StorageEvent('storage', { key: tokenKey }));
+      });
+      const anonDiff = itemOf(greenhousePath)!.fileDiff;
+      expect(anonDiff).not.toBe(hydratedForTokenTwo);
+      expect(anonDiff.isPartial).toBe(true);
+      expect(anonDiff.cacheKey).not.toBe(hydratedForTokenTwo.cacheKey);
+      expect(loader()).toBeUndefined();
+    });
+
+    it('bounds pull request and commit file list cache retention to 60 seconds', async () => {
+      const client = new QueryClient();
+      const shaOfCommit = commit(2).sha;
+      const Probe = () => {
+        usePullRequestFiles(REF, true);
+        return null;
+      };
+      fetchMock.mockImplementation(async (url) => {
+        if (url.includes(`/commits/${shaOfCommit}`))
+          return respond({ sha: shaOfCommit, files: COMMIT_FILES });
+        if (url.includes('/files')) return respond([]);
+        return respond({}, 404);
+      });
+      const probe = await renderPluginComponent(
+        <QueryClientProvider client={client}>
+          <Probe />
+        </QueryClientProvider>,
+        { id: 'pull-requests', plugin }
+      );
+      const tab = await show({ commit: shaOfCommit }, client);
+      await tab.findByText('2 files');
+      const queries = client.getQueryCache().findAll({ queryKey: ['pull-requests', 'pr'] });
+      const prFiles = queries.find((query) => query.queryKey.at(-1) === 'files');
+      const commitFiles = queries.find((query) => query.queryKey.at(-2) === 'commit-files');
+      expect(prFiles?.gcTime).toBe(60_000);
+      expect(commitFiles?.gcTime).toBe(60_000);
+      probe.unmount();
     });
   });
 

@@ -2,7 +2,7 @@
 // Patch parsing, whitespace hiding and the diff surface's theme, the part of T3 Code's diff
 // rendering the Code tab uses.
 import {
-  hydratePartialDiff,
+  cloneFileDiffMetadata,
   parseDiffFromFile,
   parsePatchFiles,
   type FileDiffMetadata,
@@ -193,46 +193,19 @@ export function reconstructOldFile(
   return new TextEncoder().encode(contents).length <= MAX_DIFF_BLOB_BYTES ? contents : null;
 }
 
-type Preparation = { ignoreWhitespace?: boolean; source?: DiffSource; blob?: string };
-type Prepared = { source?: DiffSource; blob?: string; result: FileDiffMetadata };
-const preparedByFile = new WeakMap<FileDiffMetadata, Map<boolean, Prepared>>();
-
 export function prepareFileDiff(
   file: FileDiffMetadata,
-  { source, blob, ignoreWhitespace = false }: Preparation = {}
+  { ignoreWhitespace = false }: { ignoreWhitespace?: boolean } = {}
 ): FileDiffMetadata {
-  let prepared = preparedByFile.get(file);
-  if (prepared === undefined) {
-    prepared = new Map();
-    preparedByFile.set(file, prepared);
+  // Hand Pierre a fresh object: on-demand `loadDiffFiles` mutates the diff it is given in place.
+  const copy = cloneFileDiffMetadata(file);
+  if (!ignoreWhitespace) return copy;
+  try {
+    return hideWhitespaceChanges(copy);
+  } catch {
+    // If filtering fails, show the unfiltered diff.
+    return copy;
   }
-  const cached = prepared.get(ignoreWhitespace);
-  if (cached && cached.source === source && cached.blob === blob) return cached.result;
-
-  let result = file;
-  if (source?.sha && blob !== undefined && canHydrateDiff(file)) {
-    try {
-      const old = reconstructOldFile(file, source, blob);
-      if (old !== null) {
-        result = hydratePartialDiff('clone', file, {
-          oldFile: { name: file.prevName ?? file.name, contents: old },
-          newFile: { name: file.name, contents: blob },
-        });
-        result.cacheKey = `${result.cacheKey ?? file.name}:${source.sha}`;
-      }
-    } catch {
-      // The original GitHub patch stays usable even if Pierre cannot hydrate it.
-    }
-  }
-  if (ignoreWhitespace) {
-    try {
-      result = hideWhitespaceChanges(result);
-    } catch {
-      // If filtering fails, show the unfiltered diff.
-    }
-  }
-  prepared.set(ignoreWhitespace, { source, blob, result });
-  return result;
 }
 
 function hideWhitespaceChanges(file: FileDiffMetadata): FileDiffMetadata {

@@ -1,5 +1,5 @@
 // Ported from T3 Code (https://github.com/pingdotgg/t3code, apps/web/src/lib/diffRendering.test.ts at 8ab427c6), MIT, Copyright (c) 2026 T3 Tools Inc. See NOTICE.
-import { getSharedHighlighter, renderDiffWithHighlighter } from '@pierre/diffs';
+import { getSharedHighlighter, hydratePartialDiff, renderDiffWithHighlighter } from '@pierre/diffs';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -147,7 +147,12 @@ describe('reconstructOldFile', () => {
 describe('partial diff hydration', () => {
   it('highlights a hunk that starts inside a Python docstring as a string', async () => {
     const partial = parse();
-    const file = prepareFileDiff(partial, { source: source(), blob: greenhouseAfter });
+    const old = reconstructOldFile(partial, source(), greenhouseAfter);
+    expect(old).toBe(greenhouseBefore);
+    const file = hydratePartialDiff('clone', prepareFileDiff(partial), {
+      oldFile: { name: partial.prevName ?? partial.name, contents: old! },
+      newFile: { name: partial.name, contents: greenhouseAfter },
+    });
     const highlighter = await getSharedHighlighter({ themes: ['pierre-light'], langs: ['python'] });
     const highlighted = renderDiffWithHighlighter(file, highlighter, {
       theme: 'pierre-light',
@@ -170,35 +175,105 @@ describe('partial diff hydration', () => {
     expect(file.isPartial).toBe(false);
   });
 
-  it('changes the cache key for different blobs with the same patch', () => {
-    const partial = parse();
-    const fern = prepareFileDiff(partial, { source: source(), blob: greenhouseAfter });
-    const sage = prepareFileDiff(partial, {
-      source: source(greenhousePatch, 2, 2, 'c'.repeat(40)),
-      blob: greenhouseAfter.replace('fresh soil', 'fresh compost'),
-    });
-    expect(fern.isPartial).toBe(false);
-    expect(sage.isPartial).toBe(false);
-    expect(new Set([partial.cacheKey, fern.cacheKey, sage.cacheKey]).size).toBe(3);
-  });
-
-  it('hides whitespace after hydrating and keeps hunk offsets in the full file', () => {
+  it('hydrates a whitespace-filtered partial diff cleanly with full-file hunk offsets', () => {
     const patch = greenhousePatch.replace('+    return COUNT + 2', '+    return  COUNT + 1');
-    const file = prepareFileDiff(parse(patch), {
-      ignoreWhitespace: true,
-      source: source(patch),
-      blob: greenhouseAfter.replace('return COUNT + 2', 'return  COUNT + 1'),
+    const blob = greenhouseAfter.replace('return COUNT + 2', 'return  COUNT + 1');
+    const parsed = parse(patch);
+    const filtered = prepareFileDiff(parsed, { ignoreWhitespace: true });
+    const old = reconstructOldFile(parsed, source(patch), blob);
+    expect(old).toBe(greenhouseBefore);
+    const file = hydratePartialDiff('clone', filtered, {
+      oldFile: { name: parsed.name, contents: old! },
+      newFile: { name: parsed.name, contents: blob },
     });
     expect(file.isPartial).toBe(false);
+    expect(file.cacheKey).toMatch(/:ignore-whitespace:hydrated$/);
     expect(getDiffLineStat([file])).toEqual({ additions: 1, deletions: 1 });
+    expect(file.hunks[1]?.collapsedBefore).toBe(6);
     expect(file.hunks[1]?.hunkContent).toEqual([
       { type: 'context', lines: 6, additionLineIndex: 8, deletionLineIndex: 8 },
     ]);
+    expect(file.additionLines[file.hunks[1]!.additionLineIndex]).toBe(
+      '    if a leaf is dry, move its pot.\n'
+    );
   });
 
-  it('keeps the exact same partial diff when the blob does not match', () => {
+  it('hydrates a multi-hunk whitespace-filtered diff with different old/new line counts', () => {
+    const prefix = Array.from({ length: 10 }, (_, i) => `const pre${i} = ${i};\n`).join('');
+    const middle = Array.from({ length: 10 }, (_, i) => `const mid${i} = ${i};\n`).join('');
+    const oldLines = [
+      prefix,
+      '<ItemContent>\n',
+      '  <ItemTitle>\n',
+      '    <h4>{name}</h4>\n',
+      '  </ItemTitle>\n',
+      '</ItemContent>\n',
+      middle,
+      'const value = 1;\n',
+    ].join('');
+    const newLines = [
+      prefix,
+      '<ItemContent>\n',
+      '  {show && (\n',
+      '    <ItemTitle>\n',
+      '      <h4>{name}</h4>\n',
+      '    </ItemTitle>\n',
+      '  )}\n',
+      '</ItemContent>\n',
+      middle,
+      'const value = 2;\n',
+    ].join('');
+    const patch = [
+      '@@ -11,5 +11,7 @@',
+      ' <ItemContent>',
+      '-  <ItemTitle>',
+      '-    <h4>{name}</h4>',
+      '-  </ItemTitle>',
+      '+  {show && (',
+      '+    <ItemTitle>',
+      '+      <h4>{name}</h4>',
+      '+    </ItemTitle>',
+      '+  )}',
+      ' </ItemContent>',
+      '@@ -26 +28 @@',
+      '-const value = 1;',
+      '+const value = 2;',
+    ].join('\n');
+    const parsed = parseFile(
+      `diff --git a/item.tsx b/item.tsx\n--- a/item.tsx\n+++ b/item.tsx\n${patch}\n`
+    );
+    const filtered = prepareFileDiff(parsed, { ignoreWhitespace: true });
+    const old = reconstructOldFile(parsed, source(patch, 6, 4), newLines);
+    expect(old).toBe(oldLines);
+    const hydrated = hydratePartialDiff('clone', filtered, {
+      oldFile: { name: 'item.tsx', contents: old! },
+      newFile: { name: 'item.tsx', contents: newLines },
+    });
+    expect(hydrated.isPartial).toBe(false);
+    expect(getDiffLineStat([hydrated])).toEqual({ additions: 3, deletions: 1 });
+    expect(hydrated.hunks[0]?.collapsedBefore).toBe(10);
+    expect(hydrated.hunks[0]?.hunkContent).toContainEqual({
+      type: 'context',
+      lines: 3,
+      additionLineIndex: 12,
+      deletionLineIndex: 11,
+    });
+    expect(hydrated.hunks[1]?.collapsedBefore).toBe(10);
+    expect(hydrated.additionLines[hydrated.hunks[1]!.additionLineIndex]).toBe('const value = 2;\n');
+    expect(hydrated.deletionLines[hydrated.hunks[1]!.deletionLineIndex]).toBe('const value = 1;\n');
+  });
+
+  it('clones the partial diff so in-place hydration never mutates the parsed diff', () => {
     const partial = parse();
-    expect(prepareFileDiff(partial, { source: source(), blob: greenhouseBefore })).toBe(partial);
+    const prepared = prepareFileDiff(partial);
+    expect(prepared).not.toBe(partial);
+    hydratePartialDiff('merge', prepared, {
+      oldFile: { name: partial.name, contents: greenhouseBefore },
+      newFile: { name: partial.name, contents: greenhouseAfter },
+    });
+    expect(prepared.isPartial).toBe(false);
+    expect(partial.isPartial).toBe(true);
+    expect(prepareFileDiff(partial).isPartial).toBe(true);
   });
 });
 

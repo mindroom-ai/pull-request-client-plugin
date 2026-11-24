@@ -7,7 +7,12 @@
 // a viewed mark; the toolbar counts the viewed files and holds the display controls.
 import { usePluginTranslation } from '@mindroom/client-sdk/core';
 import { IconButton, IconTooltip, useThemeKind } from '@mindroom/client-sdk/ui';
-import type { CodeViewDiffItem, CodeViewItem, PostRenderPhase } from '@pierre/diffs';
+import type {
+  CodeViewDiffItem,
+  CodeViewItem,
+  FileDiffLoadedFiles,
+  FileDiffMetadata,
+} from '@pierre/diffs';
 import type { CodeViewAnnotationArgs, CodeViewHandle } from '@pierre/diffs/react';
 import type { GitStatus } from '@pierre/trees';
 import {
@@ -57,6 +62,7 @@ import {
   fnv1a32,
   getRenderablePatch,
   prepareFileDiff,
+  reconstructOldFile,
   resolveFileDiffPath,
 } from './diff/diffRendering';
 import { orderDiffFiles } from './diff/fileOrder.logic';
@@ -72,9 +78,10 @@ import {
 } from './github';
 import { GitHubErrorState } from './GitHubErrorState';
 import { PullRequestDiffStat, PullRequestMetaLine } from './presentation';
-import { useCommitFiles, useDiffBlobs } from './queries';
+import { loadDiffBlob, useCommitFiles } from './queries';
 import type { ReviewThread } from './reviewThreads';
 import { pluginRootStyle } from './theme';
+import { useGitHubAccess, type GitHubAccess } from './token';
 
 /** A list the panel loads for the tab: its items once they have loaded, else why they did not. */
 export type ListState<T> =
@@ -320,26 +327,14 @@ export function CodeTab({
     refocusFiles.current = false;
     if (!treeOpen) filesButtonRef.current?.focus({ preventScroll: true });
   }, [treeOpen]);
-  const [nearViewport, setNearViewport] = useState<ReadonlySet<string>>(() => new Set());
-  // Pierre only mounts items in its virtualized window (visible rows plus overscan).
-  const onDiffRender = useCallback(
-    (
-      _node: HTMLElement,
-      _instance: unknown,
-      phase: PostRenderPhase,
-      { item }: { item: { id: string } }
-    ) => {
-      if (phase === 'update') return;
-      setNearViewport((previous) => {
-        if (previous.has(item.id) === (phase === 'mount')) return previous;
-        const next = new Set(previous);
-        if (phase === 'mount') next.add(item.id);
-        else next.delete(item.id);
-        return next;
-      });
-    },
-    []
-  );
+  const access = useGitHubAccess();
+  const [accessState, setAccessState] = useState(() => ({ access, generation: 0 }));
+  if (accessState.access !== access) {
+    setAccessState({ access, generation: accessState.generation + 1 });
+  }
+  const accessGeneration =
+    accessState.access === access ? accessState.generation : accessState.generation + 1;
+  const canLoadDiffFiles = access.via !== undefined && !access.pending;
   const viewerRef = useRef<CodeViewHandle<ThreadGroup, undefined>>(null);
   const rowsRef = useRef(new Map<string, HTMLElement>());
 
@@ -393,8 +388,11 @@ export function CodeTab({
     [foldKeyOf, folds.override, folds.choices, isViewedNow]
   );
 
-  // The highlighted lines depend on the theme, so the parse cache key carries it.
-  const scope = `pull-request:${pullRequest.owner}/${pullRequest.repo}#${pullRequest.number}:${themeKind}`;
+  // Scope cache keys to PR, commit view, credentials, and theme so Pierre never reuses a diff
+  // mutated in place by `loadDiffFiles` across views or accounts.
+  const scope = `pull-request:${pullRequest.owner}/${pullRequest.repo}#${
+    pullRequest.number
+  }:${view}:${String(access.key)}:${accessGeneration}:${themeKind}`;
   const { ignoreWhitespace, hideTests } = prefs;
   const parsedFiles = useMemo(() => {
     const patch = (viewFiles ?? [])
@@ -410,48 +408,80 @@ export function CodeTab({
     () => new Set((viewFiles ?? []).map((file) => file.path).filter(isTestFile)),
     [viewFiles]
   );
-  const shownPartialDiffs = useMemo(
-    () =>
-      hideTests
-        ? parsedFiles.filter((fileDiff) => !testPaths.has(resolveFileDiffPath(fileDiff)))
-        : parsedFiles,
-    [parsedFiles, hideTests, testPaths]
-  );
   const sourceByPath = useMemo(
     () => new Map(viewFiles?.map((file) => [file.path, file])),
     [viewFiles]
   );
-  const targets = useMemo(
-    () =>
-      shownPartialDiffs.filter(canHydrateDiff).flatMap((diff) => {
-        const path = resolveFileDiffPath(diff);
-        const sha = sourceByPath.get(path)?.sha;
-        return sha ? [{ path, sha }] : [];
-      }),
-    [shownPartialDiffs, sourceByPath]
-  );
-  const shas = useMemo(() => [...new Set(targets.map(({ sha }) => sha))], [targets]);
-  const enabledShas = useMemo(
-    () =>
-      new Set(
-        targets.flatMap(({ path, sha }) =>
-          nearViewport.has(path) && !collapsedOf(path) ? [sha] : []
-        )
-      ),
-    [targets, nearViewport, collapsedOf]
-  );
-  const blobs = useDiffBlobs(pullRequest, shas, enabledShas);
+  const prepared = useMemo(() => {
+    const pairs = parsedFiles.map(
+      (parsed) => [prepareFileDiff(parsed, { ignoreWhitespace }), parsed] as const
+    );
+    return { files: pairs.map(([diff]) => diff), parsedByDiff: new Map(pairs) };
+  }, [parsedFiles, ignoreWhitespace]);
   const shownDiffs = useMemo(
     () =>
-      shownPartialDiffs.map((file) => {
-        const source = sourceByPath.get(resolveFileDiffPath(file));
-        return prepareFileDiff(file, {
-          source,
-          blob: source?.sha ? blobs.get(source.sha) : undefined,
-          ignoreWhitespace,
+      hideTests
+        ? prepared.files.filter((fileDiff) => !testPaths.has(resolveFileDiffPath(fileDiff)))
+        : prepared.files,
+    [prepared.files, hideTests, testPaths]
+  );
+
+  // Each prepared diff set owns one abortable, zero-retention in-flight map for click-to-expand.
+  const loaderRef = useRef<{
+    pullRequest: PullRequestRef;
+    access: GitHubAccess;
+    sourceByPath: ReadonlyMap<string, PullRequestFile>;
+    parsedByDiff: ReadonlyMap<FileDiffMetadata, FileDiffMetadata>;
+    controller: AbortController;
+    inFlight: Map<string, Promise<string | null>>;
+  } | null>(null);
+  useLayoutEffect(() => {
+    const controller = new AbortController();
+    const session = {
+      pullRequest,
+      access,
+      sourceByPath,
+      parsedByDiff: prepared.parsedByDiff,
+      controller,
+      inFlight: new Map<string, Promise<string | null>>(),
+    };
+    loaderRef.current = session;
+    return () => {
+      controller.abort();
+      if (loaderRef.current === session) loaderRef.current = null;
+    };
+    // `prepared` already changes whenever PR identity, commit view, access, theme, files or
+    // ignoreWhitespace changes, so keeping the effect on `[prepared]` avoids spurious aborts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prepared]);
+  const loadDiffFiles = useCallback(
+    async (fileDiff: FileDiffMetadata): Promise<FileDiffLoadedFiles> => {
+      const session = loaderRef.current;
+      const signal = session?.controller.signal;
+      if (!session || !signal || signal.aborted) throw new Error('Diff expansion cancelled');
+      const parsed = session.parsedByDiff.get(fileDiff);
+      const path = parsed && canHydrateDiff(parsed) ? resolveFileDiffPath(parsed) : undefined;
+      const source = path ? session.sourceByPath.get(path) : undefined;
+      if (!parsed || !source?.sha || session.access.via === undefined || session.access.pending) {
+        throw new Error('Diff cannot be expanded');
+      }
+      const { sha } = source;
+      const pending =
+        session.inFlight.get(sha) ??
+        loadDiffBlob(session.pullRequest, sha, session.access, signal).finally(() => {
+          session.inFlight.delete(sha);
         });
-      }),
-    [shownPartialDiffs, sourceByPath, blobs, ignoreWhitespace]
+      session.inFlight.set(sha, pending);
+      const blob = await pending;
+      signal.throwIfAborted();
+      const old = blob === null ? null : reconstructOldFile(parsed, source, blob);
+      if (blob === null || old === null) throw new Error('Diff cannot be expanded');
+      return {
+        oldFile: { name: parsed.prevName ?? parsed.name, contents: old },
+        newFile: { name: parsed.name, contents: blob },
+      };
+    },
+    []
   );
   const hiddenTests = hideTests ? testPaths.size : 0;
   // A file without a diff to show, as GitHub sends none for a binary or a very large file.
@@ -819,7 +849,7 @@ export function CodeTab({
                   overflow: prefs.wrap ? 'wrap' : 'scroll',
                   lineDiffType: 'none',
                   stickyHeaders: true,
-                  onPostRender: onDiffRender,
+                  loadDiffFiles: canLoadDiffFiles ? loadDiffFiles : undefined,
                 }}
                 renderCodeViewFooter={renderWithoutDiff}
                 renderHeaderPrefix={renderHeaderPrefix}

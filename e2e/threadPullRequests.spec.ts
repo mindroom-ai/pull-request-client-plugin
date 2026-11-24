@@ -1163,7 +1163,7 @@ test.describe('phone lines tooltip', () => {
   }
 });
 
-test('the Code tab highlights a hunk inside a docstring and can expand its context', async ({
+test('the Code tab hydrates a partial diff on expand and upgrades docstring highlighting', async ({
   page,
 }) => {
   test.setTimeout(3 * 60_000);
@@ -1186,12 +1186,9 @@ test('the Code tab highlights a hunk inside a docstring and can expand its conte
       ],
     })
   );
-  let release!: () => void;
-  const partialIsVisible = new Promise<void>((resolve) => {
-    release = resolve;
-  });
+  let blobRequests = 0;
   await page.route(`${api}/git/blobs/${blob}`, async (route) => {
-    await partialIsVisible;
+    blobRequests += 1;
     await route.fulfill({ headers: CORS, body: greenhouseAfter });
   });
   await openRoom(page);
@@ -1205,21 +1202,22 @@ test('the Code tab highlights a hunk inside a docstring and can expand its conte
   const color = (token: Locator) => token.evaluate((element) => getComputedStyle(element).color);
   await expect(docLine.getByText('if', { exact: true })).toBeVisible({ timeout: 30_000 });
   const stringColor = await color(literal);
-  release();
-  await expect(docLine.getByText(prose, { exact: true })).toHaveCSS('color', stringColor);
-  const keyword = lines
-    .filter({ hasText: 'return COUNT + 2' })
-    .getByText('return', { exact: true });
-  await expect(keyword).not.toHaveCSS('color', stringColor);
   const separator = code
     .locator('[data-separator]')
     .filter({ hasText: '6 unmodified lines' })
     .first();
   const expand = separator.locator('[data-expand-button]').first();
   await expect(expand).toBeVisible();
+  expect(blobRequests).toBe(0);
   await shot(page, 'after');
   await expand.click();
   await expect(lines.filter({ hasText: 'Guide to the greenhouse.' }).first()).toBeVisible();
+  await expect(docLine.getByText(prose, { exact: true })).toHaveCSS('color', stringColor);
+  const keyword = lines
+    .filter({ hasText: 'return COUNT + 2' })
+    .getByText('return', { exact: true });
+  await expect(keyword).not.toHaveCSS('color', stringColor);
+  expect(blobRequests).toBe(1);
   await shot(page, 'expanded');
   expect(unanswered).toEqual([]);
 });
