@@ -251,11 +251,13 @@ function ToolbarButton({
 
 /** Moves focus into the file tree without triggering a competing native scroll. */
 const focusTree = (tree: HTMLElement | null) => {
-  const shadow = tree?.querySelector('file-tree-container')?.shadowRoot;
+  const root = tree?.querySelector('file-tree-container')?.shadowRoot ?? tree;
   const target =
-    shadow?.querySelector<HTMLElement>(
-      '[role="treeitem"][tabindex="0"], [role="treeitem"], [role="tree"]'
-    ) ?? tree?.querySelector<HTMLElement>('ul button, .mrpr-tree-header button');
+    root?.querySelector<HTMLElement>('[role="treeitem"][tabindex="0"]') ??
+    root?.querySelector<HTMLElement>('[role="treeitem"]') ??
+    root?.querySelector<HTMLElement>('[role="tree"]') ??
+    tree?.querySelector<HTMLElement>('ul button') ??
+    tree?.querySelector<HTMLElement>('.mrpr-tree-header button');
   target?.focus({ preventScroll: true });
 };
 
@@ -752,6 +754,10 @@ export function CodeTab({
   useLayoutEffect(() => {
     const diffs = diffsRef.current;
     if (!diffs) return undefined;
+    if (!stacked) {
+      diffs.style.removeProperty('--mrpr-stacked-tree-max-height');
+      return undefined;
+    }
     const apply = (height: number) => {
       if (height > 0) {
         diffs.style.setProperty('--mrpr-stacked-tree-max-height', `${Math.round(height * 0.45)}px`);
@@ -767,7 +773,7 @@ export function CodeTab({
     });
     observer.observe(diffs);
     return () => observer.disconnect();
-  }, [hasDiffs]);
+  }, [hasDiffs, stacked]);
 
   const goToFiles = () => {
     if (!hasDiffs) return;

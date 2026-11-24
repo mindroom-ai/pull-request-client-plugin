@@ -1376,6 +1376,12 @@ test('a pinch zoom keeps the file tree as it was: folded folders, selection, foc
     await file.click();
     await expect(file).toHaveAttribute('aria-selected', 'true', { timeout: 1_000 });
   }).toPass();
+  // Clicking a file reveals its diff, scrolling the stacked tree off-screen; jump back to Files
+  // before pinching so the tree is in view with part-50.ts still selected and focused.
+  await expect(file).not.toBeInViewport();
+  await panel(page).getByRole('button', { name: 'Go to files', exact: true }).click();
+  await expect(file).toBeInViewport();
+  await expect(file).toHaveAttribute('aria-selected', 'true');
   await expect(file).toBeFocused();
 
   // The trees Pierre makes from here on.
@@ -1416,8 +1422,9 @@ test('a pinch zoom keeps the file tree as it was: folded folders, selection, foc
   await expect(file).toHaveCSS('height', '36px');
   // Made once, after the zoom rested, not on each of its frames.
   expect(await treesMade()).toBe(1);
-  // Still scrolled to the file, which keeps the selection and the focus.
+  // Still scrolled to the file, which keeps the selection and the focus, while row 1 stays off-screen.
   await expect(file).toBeInViewport();
+  await expect(tree.getByRole('treeitem', { name: 'part-01.ts' })).not.toBeInViewport();
   await expect(file).toHaveAttribute('aria-selected', 'true');
   await expect(file).toBeFocused();
   // And at the top, the folder is still folded.
@@ -2752,11 +2759,30 @@ test('on a phone the header scrolls away under a bar that brings it back', async
   PULLS.sessionStore.body = LONG_BODY;
   try {
     await stubGitHub(page);
+    const phoneExtraPatch = (prefix: string) =>
+      `@@ -0,0 +1,45 @@\n${Array.from({ length: 45 }, (_, i) => `+export const ${prefix}${i + 1} = ${i + 1};`).join('\n')}`;
+    const phoneFiles = [
+      ZOOM_FILE,
+      {
+        filename: 'worker/queue.ts',
+        status: 'added',
+        additions: 45,
+        deletions: 0,
+        patch: phoneExtraPatch('queueStep'),
+      },
+      {
+        filename: 'worker/runner.ts',
+        status: 'added',
+        additions: 45,
+        deletions: 0,
+        patch: phoneExtraPatch('runnerStep'),
+      },
+    ];
     await page.route(
       (url) =>
         url.hostname === 'api.github.com' &&
         url.pathname === `${pullPath(PULLS.sessionStore)}/files`,
-      (route) => route.fulfill({ headers: CORS, json: [ZOOM_FILE] })
+      (route) => route.fulfill({ headers: CORS, json: phoneFiles })
     );
     await openRoom(page);
     await cardChips(page, roots.sessions, PULLS.sessionStore).click();
@@ -2853,22 +2879,28 @@ test('on a phone the header scrolls away under a bar that brings it back', async
     await expect(title).toBeVisible();
     await expect(hide).toBeVisible();
 
-    // Expanding a folder reveals its files; choosing a file scrolls to its diff, and Go to files
-    // jumps back to the top and focuses the file tree.
+    // Expanding a folder reveals its files; choosing a later file scrolls the stacked tree out of
+    // view, and Go to files jumps back to the top and focuses the active treeitem row.
     await sessionFolder.click();
     await expect(sessionFolder).toHaveAttribute('aria-expanded', 'true');
-    const fileRow = panel(page).getByRole('treeitem', { name: 'store.ts' });
-    await expect(fileRow).toBeVisible();
-    await fileRow.click();
+    await expect(panel(page).getByRole('treeitem', { name: 'store.ts' })).toBeVisible();
+    const workerFolder = panel(page).getByRole('treeitem', { name: 'worker' });
+    await workerFolder.click();
+    await expect(workerFolder).toHaveAttribute('aria-expanded', 'true');
+    const runnerRow = panel(page).getByRole('treeitem', { name: 'runner.ts' });
+    await expect(runnerRow).toBeVisible();
+    await runnerRow.click();
+    await expect(sessionFolder).not.toBeInViewport();
     await goToFiles.click();
     await expect(sessionFolder).toBeInViewport();
+    await expect(runnerRow).toBeFocused();
     await expect
       .poll(() =>
         panel(page)
           .locator('.mrpr-code-tree-stacked file-tree-container')
-          .evaluate((element) => element.matches(':focus-within'))
+          .evaluate((element) => element.shadowRoot?.activeElement?.getAttribute('role'))
       )
-      .toBe(true);
+      .toBe('treeitem');
   } finally {
     PULLS.sessionStore.body = body;
     await context.close();

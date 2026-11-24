@@ -237,12 +237,12 @@
 }
 
 .mrpr-code-tree {
+  position: relative;
   display: flex;
-  flex: 0 1 auto;
+  flex: 0 0 var(--mrpr-tree-width, 240px);
   flex-direction: column;
   min-block-size: 0;
-  max-block-size: 40%;
-  border-block-end: 1px solid var(--pr-border);
+  border-inline-end: 1px solid var(--pr-border);
 }
 
 /* Narrow (< 640px) Files tree inside CodeView's non-virtualized header slot: scrolls away with
@@ -283,13 +283,6 @@
 @container (min-inline-size: 640px) {
   .mrpr-code-body {
     flex-direction: row;
-  }
-  .mrpr-code-tree {
-    position: relative;
-    flex: 0 0 var(--mrpr-tree-width, 240px);
-    max-block-size: none;
-    border-block-end: 0;
-    border-inline-end: 1px solid var(--pr-border);
   }
   /* What the diffs stack inside stays below the handle's reach over their edge. */
   .mrpr-code-diffs {

@@ -1147,8 +1147,19 @@ describe('CodeTab', () => {
       });
       expect(diffView.contains(document.activeElement)).toBe(true);
 
-      // Widening across 640px moves the tree to the side-by-side column with folders expanded.
+      // Widening across 640px moves the tree to the side-by-side column with folders expanded
+      // and stops observing .mrpr-code-diffs for stacked height bounds.
       await resizeCode(640);
+      expect(
+        (tab.container.querySelector('.mrpr-code-diffs') as HTMLElement).style.getPropertyValue(
+          '--mrpr-stacked-tree-max-height'
+        )
+      ).toBe('');
+      expect(
+        observers.some(({ targets }) =>
+          [...targets].some((target) => target.classList.contains('mrpr-code-diffs'))
+        )
+      ).toBe(false);
       const toggle = tab.getByRole('button', { name: 'Files' });
       expect(toggle.getAttribute('aria-pressed')).toBe('true');
       const wideList = tab.getByRole('list', { name: /^Files of/ });
@@ -1190,12 +1201,31 @@ describe('CodeTab', () => {
 
       vi.stubGlobal('matchMedia', () => ({ matches: true }));
       const tab = await show();
+      // Verify selector priority: active [role="treeitem"][tabindex="0"] beats its ancestor [role="tree"]
+      // and earlier [role="treeitem"][tabindex="-1"] rows inside Pierre's shadow root.
+      const host = document.createElement('file-tree-container');
+      const shadow = host.attachShadow({ mode: 'open' });
+      shadow.innerHTML =
+        '<div role="tree" tabindex="-1">' +
+        '<button type="button" role="treeitem" tabindex="-1">first</button>' +
+        '<button type="button" role="treeitem" tabindex="0">active</button>' +
+        '</div>';
+      const stackedTree = tab.container.querySelector('.mrpr-code-tree-stacked .mrpr-tree')!;
+      stackedTree.appendChild(host);
+      const [firstRow, activeRow] = shadow.querySelectorAll<HTMLElement>('[role="treeitem"]');
+
       await click(tab.getByRole('button', { name: 'Go to files' }));
       expect(view.scrollTo).toHaveBeenCalledWith({
         type: 'position',
         position: 0,
         behavior: 'instant',
       });
+      expect(shadow.activeElement).toBe(activeRow);
+
+      // Without a tabindex="0" row, falls back to the first [role="treeitem"] rather than [role="tree"].
+      activeRow!.setAttribute('tabindex', '-1');
+      await click(tab.getByRole('button', { name: 'Go to files' }));
+      expect(shadow.activeElement).toBe(firstRow);
     });
 
     it('moves focus to the Files button when resizing across 640px unmounts a focused tree', async () => {
