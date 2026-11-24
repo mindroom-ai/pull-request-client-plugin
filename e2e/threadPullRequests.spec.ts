@@ -2205,6 +2205,7 @@ test('in the desktop thread options menu clicking a linked pull request opens th
     await shot(page, 'desktop-thread-options-menu-hover', { keepPointer: true });
     await items.nth(0).click();
     await expect(menu).toHaveCount(0);
+    await expect(more).toBeFocused();
     await expect(panel(page).locator('.mrpr-panel-title')).toHaveText(PULLS.sessionStore.title, {
       timeout: 30_000,
     });

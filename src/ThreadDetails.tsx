@@ -130,6 +130,56 @@ export function ThreadDetails({ room, threadId, onClose }: ThreadDetailProps) {
   );
 }
 
+/**
+ * One pull request row in a menu: opens the room side panel when available (marking the currently
+ * shown pull request with `aria-current`), or falls back to an external GitHub link.
+ */
+export function PullRequestMenuItem({
+  pullRequest,
+  panel,
+  current,
+  onClose,
+  className,
+  children,
+}: {
+  pullRequest: PullRequestRef;
+  panel: ReturnType<typeof useRoomSidePanel>;
+  current: PullRequestRef | undefined;
+  onClose: () => void;
+  className?: string;
+  children: ReactNode;
+}) {
+  const classes = className ? `mrpr-thread-menu-item ${className}` : 'mrpr-thread-menu-item';
+  if (!panel) {
+    return (
+      <a
+        role="menuitem"
+        className={classes}
+        href={pullRequestUrl(pullRequest)}
+        target="_blank"
+        rel="noreferrer"
+        onClick={onClose}
+      >
+        {children}
+      </a>
+    );
+  }
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      className={classes}
+      aria-current={current && samePullRequest(current, pullRequest) ? 'true' : undefined}
+      onClick={() => {
+        onClose();
+        panel.open(pullRequest);
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
 function InteractiveDetails({
   roomId,
   pullRequests,
@@ -149,37 +199,21 @@ function InteractiveDetails({
       pullRequests={pullRequests}
       worktree={worktree}
       className="mrpr-details-interactive"
-      item={(pullRequest, rows) => {
-        if (pullRequest === undefined) return rows;
-        if (!panel) {
-          return (
-            <a
-              role="menuitem"
-              className="mrpr-thread-menu-item mrpr-details-menu-item"
-              href={pullRequestUrl(pullRequest)}
-              target="_blank"
-              rel="noreferrer"
-              onClick={onClose}
-            >
-              {rows}
-            </a>
-          );
-        }
-        return (
-          <button
-            type="button"
-            role="menuitem"
-            className="mrpr-thread-menu-item mrpr-details-menu-item"
-            aria-current={current && samePullRequest(current, pullRequest) ? 'true' : undefined}
-            onClick={() => {
-              onClose();
-              panel.open(pullRequest);
-            }}
+      item={(pullRequest, rows) =>
+        pullRequest === undefined ? (
+          rows
+        ) : (
+          <PullRequestMenuItem
+            pullRequest={pullRequest}
+            panel={panel}
+            current={current}
+            onClose={onClose}
+            className="mrpr-details-menu-item"
           >
             {rows}
-          </button>
-        );
-      }}
+          </PullRequestMenuItem>
+        )
+      }
     />
   );
 }
