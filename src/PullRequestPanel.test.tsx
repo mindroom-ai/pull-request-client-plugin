@@ -2411,12 +2411,127 @@ describe('the dense header', () => {
     expect(document.activeElement).toBe(details);
   });
 
-  it('does not collapse on the Code tab, which scrolls itself', async () => {
+  it('starts collapsed on the Code tab, toggles details in place, and moves focus', async () => {
+    asWriter();
+    const view = await showScrolling();
+    await view.findByText('Add pull request cards');
+    const scroller = view.getByTestId('scroller');
+    const scrollTo = vi.fn();
+    scroller.scrollTo = scrollTo as typeof scroller.scrollTo;
+
+    await click(view.getByRole('tab', { name: 'Code' }));
+    const header = view.container.querySelector('.mrpr-header') as HTMLElement;
+    expect(header.classList.contains('mrpr-header-collapsed')).toBe(true);
+    const details = view.getByRole('button', { name: bar });
+    expect(details.textContent).toBe('#200Add pull request cards');
+    expect(details.getAttribute('aria-expanded')).toBe('false');
+    expect(details.getAttribute('aria-controls')).toBe(header.id);
+    // The action status live region stays mounted in the accessibility tree while collapsed.
+    expect(header.querySelector('.mrpr-header-lines [role="status"]')).toBeTruthy();
+    expect(view.queryByRole('button', { name: 'Hide pull request details' })).toBeNull();
+
+    await click(details);
+    expect(scrollTo).not.toHaveBeenCalled();
+    expect(header.classList.contains('mrpr-header-collapsed')).toBe(false);
+    expect(view.queryByRole('button', { name: bar })).toBeNull();
+    expect(document.activeElement).toBe(header.querySelector('.mrpr-panel-title'));
+    const hide = view.getByRole('button', { name: 'Hide pull request details' });
+    expect(hide.getAttribute('aria-expanded')).toBe('true');
+    expect(hide.getAttribute('aria-controls')).toBe(header.id);
+
+    await click(hide);
+    expect(header.classList.contains('mrpr-header-collapsed')).toBe(true);
+    expect(document.activeElement).toBe(view.getByRole('button', { name: bar }));
+  });
+
+  it('forces details open on the Code tab while an action holds the header, then collapses again', async () => {
+    asWriter();
+    const writer = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (url, init) =>
+      init?.method === 'PATCH'
+        ? respond({ message: 'Cannot close right now' }, 405)
+        : writer(url, init)
+    );
+    const view = await showScrolling();
+    await view.findByRole('button', { name: 'Merge' });
+    await click(view.getByRole('tab', { name: 'Code' }));
+    const header = view.container.querySelector('.mrpr-header') as HTMLElement;
+    expect(header.classList.contains('mrpr-header-collapsed')).toBe(true);
+
+    await click(view.getByRole('button', { name: 'More actions' }));
+    await click((await view.findByText('Close pull request')).closest('button')!);
+    await click((await view.findByText('Confirm close?')).closest('button')!);
+    expect(await view.findByText(/Cannot close right now/)).toBeTruthy();
+    expect(header.classList.contains('mrpr-header-collapsed')).toBe(false);
+    expect(view.queryByRole('button', { name: 'Hide pull request details' })).toBeNull();
+
+    const dismiss = view.getByRole('button', { name: 'Dismiss' });
+    act(() => dismiss.focus());
+    await click(dismiss);
+    expect(header.classList.contains('mrpr-header-collapsed')).toBe(true);
+    expect(document.activeElement).toBe(view.getByRole('button', { name: bar }));
+  });
+
+  it('resets the Code tab header to collapsed when switching tabs or pull requests', async () => {
+    fetchMock.mockImplementation(async (url) => {
+      if (url.includes('/files') || url.includes('/commits') || url.includes('/comments'))
+        return respond([]);
+      if (url.includes('/pulls/201')) return respond(pull({ number: 201, title: 'Next PR' }));
+      return respond(pull());
+    });
     const view = await showScrolling();
     await view.findByText('Add pull request cards');
     await click(view.getByRole('tab', { name: 'Code' }));
-    await report(false);
-    expect(view.queryByRole('button', { name: bar })).toBeNull();
+    await click(view.getByRole('button', { name: bar }));
+    const header = () => view.container.querySelector('.mrpr-header') as HTMLElement;
+    expect(header().classList.contains('mrpr-header-collapsed')).toBe(false);
+
+    // Leaving Code and returning starts collapsed again.
+    await click(view.getByRole('tab', { name: 'Summary' }));
+    await click(view.getByRole('tab', { name: 'Code' }));
+    expect(header().classList.contains('mrpr-header-collapsed')).toBe(true);
+
+    // Switching to another pull request (and back to a cached one while Header stays mounted)
+    // resets the expanded header to collapsed and hands focus off from inside the hidden header.
+    const renderRequest = (req: typeof REQUEST) =>
+      act(async () => {
+        view.rerender(
+          <div data-testid="scroller" style={{ overflowY: 'auto' }}>
+            <QueryClientProvider client={client}>
+              <PullRequestPanel roomId="!room:example.org" request={req} />
+            </QueryClientProvider>
+          </div>
+        );
+      });
+    await renderRequest({ ...REQUEST, number: 201 });
+    const nextBar = await view.findByRole('button', {
+      name: 'Show details of pull request #201: Next PR',
+    });
+    expect(header().classList.contains('mrpr-header-collapsed')).toBe(true);
+    await click(nextBar);
+    expect(header().classList.contains('mrpr-header-collapsed')).toBe(false);
+    expect(document.activeElement).toBe(header().querySelector('.mrpr-panel-title'));
+    await renderRequest(REQUEST);
+    expect(header().classList.contains('mrpr-header-collapsed')).toBe(true);
+    expect(document.activeElement).toBe(view.getByRole('button', { name: bar }));
+  });
+
+  it('returns focus to the collapsed bar when the token form closes on the Code tab', async () => {
+    roomServer.current = githubServer(async (url) =>
+      url.includes('/files') || url.includes('/commits') || url.includes('/comments')
+        ? respond([])
+        : respond(pull())
+    ).server;
+    const view = await showScrolling();
+    await view.findByText('Add pull request cards');
+    await click(view.getByRole('tab', { name: 'Code' }));
+    await click(view.getByRole('button', { name: 'More actions' }));
+    await click((await view.findByText('Use a token in this browser')).closest('button')!);
+    const cancel = await view.findByRole('button', { name: 'Cancel' });
+    act(() => cancel.focus());
+    await click(cancel);
+    expect(view.queryByLabelText('GitHub token')).toBeNull();
+    expect(document.activeElement).toBe(view.getByRole('button', { name: bar }));
   });
 
   it('does not collapse while the result of an action shows', async () => {

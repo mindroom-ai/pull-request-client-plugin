@@ -1278,8 +1278,10 @@ test("Page Zoom scales the panel's text, its diffs and its file tree", async ({ 
     await panel(page).getByRole('tab', { name: 'Code' }).click();
     // Pierre draws the diff and the tree in open shadow roots, which locators enter.
     const line = panel(page).locator('[data-line]').filter({ hasText: 'ttl = 3600' }).first();
-    const row = panel(page).getByRole('treeitem', { name: 'store.ts' });
     await expect(line).toBeVisible({ timeout: 30_000 });
+    // The narrow panel starts with the file tree closed; open it to measure its rows too.
+    await panel(page).getByRole('button', { name: 'Files', pressed: false }).click();
+    const row = panel(page).getByRole('treeitem', { name: 'store.ts' });
     await expect(row).toBeVisible();
     await shot(page, `zoom-${pageZoom}-code`);
     return {
@@ -1345,6 +1347,7 @@ test('a pinch zoom keeps the file tree as it was: folded folders, selection, foc
     timeout: 30_000,
   });
   await panel(page).getByRole('tab', { name: 'Code' }).click();
+  await panel(page).getByRole('button', { name: 'Files', pressed: false }).click();
   const tree = panel(page).getByRole('tree');
   /** Scrolls the tree to `top`, and waits until its rows take the pointer again. */
   const scrollTree = async (top: number) => {
@@ -2666,6 +2669,12 @@ test('on a phone the header scrolls away under a bar that brings it back', async
   PULLS.sessionStore.body = LONG_BODY;
   try {
     await stubGitHub(page);
+    await page.route(
+      (url) =>
+        url.hostname === 'api.github.com' &&
+        url.pathname === `${pullPath(PULLS.sessionStore)}/files`,
+      (route) => route.fulfill({ headers: CORS, json: [ZOOM_FILE] })
+    );
     await openRoom(page);
     await cardChips(page, roots.sessions, PULLS.sessionStore).click();
     const title = panel(page).locator('.mrpr-panel-title');
@@ -2717,6 +2726,34 @@ test('on a phone the header scrolls away under a bar that brings it back', async
     await expect(title).toBeInViewport({ timeout: 10_000 });
     await expect(details).toHaveCount(0);
     await expect(panel(page).getByRole('link', { name: 'acme/webapp' })).toBeVisible();
+
+    // On the Code tab the header starts collapsed and the stacked Files tree starts closed.
+    await panel(page).getByRole('tab', { name: 'Code' }).click();
+    await expect(details).toBeVisible();
+    await expect(details).toHaveAttribute('aria-expanded', 'false');
+    await expect(title).toBeHidden();
+    const filesToggle = panel(page).getByRole('button', { name: 'Files' });
+    await expect(filesToggle).toHaveAttribute('aria-pressed', 'false');
+    await expect(panel(page).getByRole('tree')).toHaveCount(0);
+    await expect(
+      panel(page).locator('[data-line]').filter({ hasText: 'ttl = 3600' }).first()
+    ).toBeVisible({ timeout: 30_000 });
+    await shot(page, 'code-collapsed');
+
+    await details.click();
+    await expect(title).toBeVisible();
+    const hide = panel(page).getByRole('button', { name: 'Hide pull request details' });
+    await expect(hide).toBeVisible();
+    await expect(hide).toHaveAttribute('aria-expanded', 'true');
+    await shot(page, 'code-expanded');
+
+    await hide.click();
+    await expect(title).toBeHidden();
+    await expect(details).toBeVisible();
+
+    await filesToggle.click();
+    await expect(filesToggle).toHaveAttribute('aria-pressed', 'true');
+    await expect(panel(page).getByRole('treeitem', { name: 'store.ts' })).toBeVisible();
   } finally {
     PULLS.sessionStore.body = body;
     await context.close();

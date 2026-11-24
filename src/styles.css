@@ -710,7 +710,7 @@
 }
 /* Summary and Timeline: the panel takes its content's height, so the room's box scrolls it whole,
    the header with it, under the top row and the tab bar, which stay. The Code tab scrolls in
-   itself, under a header that stays. */
+   itself, under a header that starts collapsed into the top row. */
 .mrpr-panel-scrolls {
   flex-shrink: 0;
   block-size: auto;
@@ -755,6 +755,13 @@
   min-inline-size: 0;
   padding-inline: 1rem;
   padding-block: 0 0.75rem;
+}
+/* On the Code tab the header collapses into the top row, leaving only its live region in the tree. */
+.mrpr-header-collapsed {
+  padding-block: 0;
+}
+.mrpr-header-collapsed > :not(.mrpr-header-lines) {
+  display: none;
 }
 
 .mrpr-crumbs {

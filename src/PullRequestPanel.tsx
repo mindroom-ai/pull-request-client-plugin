@@ -4,6 +4,7 @@
 import {
   useContext,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -15,6 +16,8 @@ import {
 import { IconButton as PlainIconButton } from 'folds';
 import {
   ArrowLeft,
+  ChevronDown,
+  ChevronUp,
   CircleCheck,
   FileDiff,
   GitCommitHorizontal,
@@ -240,19 +243,15 @@ function scrollerOf(element: HTMLElement): HTMLElement | null {
 /**
  * Whether the header has scrolled out of view under the panel's top row, while `watches`: one
  * observer of the header against the box that scrolls, no listener of every scroll, made again
- * when the top row's height changes (Page Zoom). The part of the top row that changes with it,
- * `swap`, gives the focus it had to its counterpart there, marked `data-mrpr-swap-focus`.
+ * when the top row's height changes (Page Zoom).
  */
 function useScrolledAway(
   header: RefObject<HTMLElement | null>,
   bar: RefObject<HTMLElement | null>,
-  swap: RefObject<HTMLElement | null>,
   watches: boolean
 ): boolean {
   const [away, setAway] = useState(false);
   const [barSize, setBarSize] = useState(0);
-  // Whether the part that changes had the focus as it changed.
-  const refocus = useRef(false);
   useEffect(() => {
     const element = bar.current;
     if (!element || typeof ResizeObserver === 'undefined') return undefined;
@@ -282,29 +281,15 @@ function useScrolledAway(
   useEffect(() => {
     if (!watches) setAway(false);
   }, [watches]);
-  const collapsed = watches && away;
-  // Whether the part that changes has the focus, read as it is about to change, while the element
-  // that has it is still on the page: by scrolling, or as the header stays in place (`watches`).
-  const shown = useRef(collapsed);
-  if (shown.current !== collapsed) {
-    shown.current = collapsed;
-    refocus.current = swap.current?.contains(document.activeElement) ?? false;
-  }
-  useLayoutEffect(() => {
-    if (!refocus.current) return;
-    refocus.current = false;
-    swap.current
-      ?.querySelector<HTMLElement>('[data-mrpr-swap-focus]')
-      ?.focus({ preventScroll: true });
-  }, [collapsed, swap]);
-  return collapsed;
+  return watches && away;
 }
 
 /**
  * The pull request's header, top to bottom: the top row (state, repository, number, badges, More
  * actions and Close), the title, the author and changes, the branches with the primary control,
- * and the lines of what runs. In the tabs that scroll with it (`collapses`), once it is out of
- * view the top row stays as a bar with the number and title, which scrolls back up to it.
+ * and the lines of what runs. In the tabs that scroll with it (`scrolls`), once it is out of view
+ * the top row stays as a bar with the number and title, which scrolls back up to it; on the Code
+ * tab it starts collapsed into that bar and toggles in place.
  */
 function Header({
   pr,
@@ -312,8 +297,7 @@ function Header({
   state,
   actions,
   freshness,
-  collapses,
-  onHold,
+  scrolls,
   onUseToken,
   onForgetToken,
 }: {
@@ -322,17 +306,16 @@ function Header({
   state: NonNullable<ReturnType<typeof resolvePullRequestState>>;
   actions: ReturnType<typeof usePullRequestActions>;
   freshness: ReturnType<typeof baseFreshness>;
-  collapses: boolean;
-  /** Told whether the header stays in place: an action runs, or a line says what came of one. */
-  onHold: (holds: boolean) => void;
+  scrolls: boolean;
   onUseToken?: () => void;
   onForgetToken?: () => void;
 }) {
   const t = usePluginTranslation('pull-requests');
+  const headerId = useId();
   const headerRef = useRef<HTMLDivElement>(null);
   const barRef = useRef<HTMLDivElement>(null);
   const swapRef = useRef<HTMLSpanElement>(null);
-  const collapsed = useScrolledAway(headerRef, barRef, swapRef, collapses);
+  const hideRef = useRef<HTMLButtonElement | null>(null);
   const { control, menu, lines, holds } = useHeaderActions({
     pullRequestRef: ref,
     pullRequest: pr,
@@ -341,32 +324,72 @@ function Header({
     onUseToken,
     onForgetToken,
   });
-  useLayoutEffect(() => {
-    onHold(holds);
-    return () => onHold(false);
-  }, [holds, onHold]);
+  const scrolledAway = useScrolledAway(headerRef, barRef, scrolls && !holds);
+  // On the Code tab the header starts collapsed; expanding it stays for this pull request and tab.
+  const codeScope = scrolls ? '' : pullRequestUrl(ref);
+  const [expandedScope, setExpandedScope] = useState('');
+  if (expandedScope && expandedScope !== codeScope) setExpandedScope('');
+  const codeHeaderOpen = !scrolls && expandedScope === codeScope;
+  const collapsed = !holds && (scrolls ? scrolledAway : !codeHeaderOpen);
+  // Focus handoff across collapse/expand transitions: read active focus while the outgoing element
+  // is still mounted, then move focus once the new state commits.
+  const shown = useRef(collapsed);
+  const pendingFocus = useRef<'title' | 'swap' | null>(null);
+  const swapFocus = useRef(false);
+  if (shown.current !== collapsed) {
+    const active = document.activeElement;
+    swapFocus.current =
+      (swapRef.current?.contains(active) ?? false) ||
+      (!scrolls &&
+        collapsed &&
+        ((headerRef.current?.contains(active) ?? false) ||
+          (hideRef.current?.contains(active) ?? false)));
+  } else {
+    pendingFocus.current = null;
+    swapFocus.current = false;
+  }
   // A hold that starts while the header is out of view, as from the bar's More actions, and a
   // line that comes under it while it holds (what a merge started at the top came to, after a
   // scroll), bring the header and its line back into view.
-  const wasCollapsed = useRef(collapsed);
-  wasCollapsed.current = collapsed;
   useLayoutEffect(() => {
     const header = headerRef.current;
     const scroller = header && scrollerOf(header);
-    if (!holds || !header || !scroller) return;
+    if (!scrolls || !holds || !header || !scroller) return;
     const under = scroller.getBoundingClientRect().top + (barRef.current?.offsetHeight ?? 0);
-    if (wasCollapsed.current || header.getBoundingClientRect().bottom <= under) {
+    if (shown.current || header.getBoundingClientRect().bottom <= under) {
       scroller.scrollTo({ top: 0 });
     }
-  }, [holds, actions.result]);
+  }, [scrolls, holds, actions.result]);
+  useLayoutEffect(() => {
+    shown.current = collapsed;
+    const target = pendingFocus.current ?? (swapFocus.current ? 'swap' : null);
+    pendingFocus.current = null;
+    swapFocus.current = false;
+    const next =
+      target === 'title' && !collapsed
+        ? headerRef.current?.querySelector<HTMLElement>('.mrpr-panel-title')
+        : target === 'swap'
+        ? swapRef.current?.querySelector<HTMLElement>('[data-mrpr-swap-focus]')
+        : null;
+    next?.focus({ preventScroll: true });
+  }, [collapsed]);
   const forkOwner =
     pr.headRepo && pr.headRepo !== pr.baseRepo ? pr.headRepo.split('/')[0] : undefined;
   const showDetails = () => {
+    if (!scrolls) {
+      pendingFocus.current = 'title';
+      setExpandedScope(codeScope);
+      return;
+    }
     const header = headerRef.current;
     const scroller = header && scrollerOf(header);
     const still = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
     scroller?.scrollTo({ top: 0, behavior: still ? 'auto' : 'smooth' });
     header?.querySelector<HTMLElement>('.mrpr-panel-title')?.focus({ preventScroll: true });
+  };
+  const hideDetails = () => {
+    pendingFocus.current = 'swap';
+    setExpandedScope('');
   };
   const stateIcon = <state.Icon aria-hidden className={`mrpr-icon ${state.toneClassName}`} />;
   return (
@@ -378,12 +401,15 @@ function Header({
               type="button"
               className="mrpr-bar-details"
               aria-label={t('showDetails', { number: ref.number, title: pr.title })}
+              aria-expanded={scrolls ? undefined : false}
+              aria-controls={scrolls ? undefined : headerId}
               data-mrpr-swap-focus
               onClick={showDetails}
             >
               {stateIcon}
               <span className={`mrpr-shrink-0 ${state.toneClassName}`}>#{ref.number}</span>
               <span className="mrpr-truncate mrpr-bar-title">{pr.title}</span>
+              {scrolls ? null : <ChevronDown aria-hidden className="mrpr-icon mrpr-shrink-0" />}
             </button>
           ) : (
             <>
@@ -421,11 +447,38 @@ function Header({
           )}
         </span>
         <span className="mrpr-bar-end">
+          {!scrolls && !collapsed && !holds ? (
+            <IconTooltip label={t('hideDetails')} align="End">
+              {(triggerRef) => (
+                <PlainIconButton
+                  ref={(node: HTMLButtonElement | null) => {
+                    triggerRef(node);
+                    hideRef.current = node;
+                  }}
+                  size="300"
+                  radii="300"
+                  variant="SurfaceVariant"
+                  fill="None"
+                  className="mrpr-header-more"
+                  aria-label={t('hideDetails')}
+                  aria-expanded
+                  aria-controls={headerId}
+                  onClick={hideDetails}
+                >
+                  <ChevronUp aria-hidden className="mrpr-button-icon" />
+                </PlainIconButton>
+              )}
+            </IconTooltip>
+          ) : null}
           {menu}
           <CloseButton />
         </span>
       </div>
-      <div ref={headerRef} className="mrpr-header">
+      <div
+        ref={headerRef}
+        id={headerId}
+        className={!scrolls && collapsed ? 'mrpr-header mrpr-header-collapsed' : 'mrpr-header'}
+      >
         <h2 className="mrpr-panel-title" tabIndex={-1}>
           {pr.title}
         </h2>
@@ -588,7 +641,11 @@ function Panel({ roomId, request }: PanelProps) {
   const placeFocus = usePlaceFocus();
   useEffect(() => {
     if (!focused.current || document.activeElement !== document.body) return;
-    placeFocus(root.current?.querySelector<HTMLElement>('.mrpr-panel-title, .mrpr-token input'));
+    placeFocus(
+      root.current?.querySelector<HTMLElement>(
+        '.mrpr-header:not(.mrpr-header-collapsed) .mrpr-panel-title, .mrpr-bar-details, .mrpr-token input'
+      )
+    );
   });
   const [tab, setTab] = useState<Tab>('summary');
   // The Timeline tab's order, which the tab bar's toggle sets.
@@ -652,10 +709,8 @@ function Panel({ roomId, request }: PanelProps) {
     setOverriding(false);
     setLatch(undefined);
   };
-  // Summary and Timeline scroll with the header, in the room's box, the Code tab in itself. While
-  // an action runs or a line under the header says what came of one, the header does not collapse
-  // (`Header`'s `onHold`), so the line stays with it.
-  const [headerHeld, setHeaderHeld] = useState(false);
+  // Summary and Timeline scroll with the header, in the room's box; the Code tab scrolls in
+  // itself, under a header that starts collapsed into the top row.
   const scrolls = tab !== 'code';
 
   return (
@@ -704,8 +759,7 @@ function Panel({ roomId, request }: PanelProps) {
             state={state}
             actions={actions}
             freshness={freshness}
-            collapses={scrolls && !headerHeld}
-            onHold={setHeaderHeld}
+            scrolls={scrolls}
             // Who the requests go as and what changes that sit in its menu, out of the way.
             onUseToken={
               via === 'server' && !tokenForm.reason && !overriding

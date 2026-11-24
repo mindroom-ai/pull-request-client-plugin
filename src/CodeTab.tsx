@@ -26,6 +26,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -91,6 +92,8 @@ const REPLACE_FILE_COUNTS_CSS = `
 
 const NO_THREADS: ReviewThread[] = [];
 const NO_FOLDS: FileDiffFoldChoices = new Map();
+// Matches `@container (min-inline-size: 640px)` in styles.css where the Files tree sits beside diffs.
+const WIDE_TREE_MIN_WIDTH = 640;
 
 /** What a file's viewed mark and fold are against: its patch, or its blob without one. */
 const markText = (file: PullRequestFile) =>
@@ -267,7 +270,25 @@ export function CodeTab({
   const themeKind = useThemeKind();
   const prefs = useCodePrefs();
   const viewed = useViewedFiles(pullRequest);
-  const [treeOpen, setTreeOpen] = useState(true);
+  const rootRef = useRef<HTMLDivElement>(null);
+  // Start with the Files tree closed when stacked above the diffs (< 640px).
+  const [wide, setWide] = useState<boolean | null>(() =>
+    typeof ResizeObserver === 'undefined' ? true : null
+  );
+  const [treeChoice, setTreeChoice] = useState<boolean | null>(null);
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    if (!root || typeof ResizeObserver === 'undefined') return undefined;
+    const measure = () => {
+      const width = root.clientWidth;
+      setWide((previous) => (width === 0 ? previous ?? true : width >= WIDE_TREE_MIN_WIDTH));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(root);
+    return () => observer.disconnect();
+  }, []);
+  const treeOpen = treeChoice ?? wide ?? false;
   const [nearViewport, setNearViewport] = useState<ReadonlySet<string>>(() => new Set());
   // Pierre only mounts items in its virtualized window (visible rows plus overscan).
   const onDiffRender = useCallback(
@@ -602,7 +623,7 @@ export function CodeTab({
     : undefined;
 
   return (
-    <div className="mrpr-root mrpr-code" style={pluginRootStyle()}>
+    <div ref={rootRef} className="mrpr-root mrpr-code" style={pluginRootStyle()}>
       <div className="mrpr-code-toolbar">
         <div className="mrpr-code-toolbar-start">
           {commits.status === 'success' && commits.items.length > 0 ? (
@@ -701,7 +722,7 @@ export function CodeTab({
           <ToolbarButton
             label={t('code.files')}
             pressed={treeOpen}
-            onClick={() => setTreeOpen((open) => !open)}
+            onClick={() => setTreeChoice(!treeOpen)}
           >
             <FolderTree aria-hidden className="mrpr-button-icon" />
           </ToolbarButton>
