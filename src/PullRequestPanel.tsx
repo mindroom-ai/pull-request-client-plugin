@@ -244,9 +244,9 @@ function scrollerOf(element: HTMLElement): HTMLElement | null {
  * `swap`, gives the focus it had to its counterpart there, marked `data-mrpr-swap-focus`.
  */
 function useScrolledAway(
-  header: RefObject<HTMLElement>,
-  bar: RefObject<HTMLElement>,
-  swap: RefObject<HTMLElement>,
+  header: RefObject<HTMLElement | null>,
+  bar: RefObject<HTMLElement | null>,
+  swap: RefObject<HTMLElement | null>,
   watches: boolean
 ): boolean {
   const [away, setAway] = useState(false);
@@ -598,7 +598,7 @@ function Panel({ roomId, request }: PanelProps) {
   // What GitHub answered last, shown while the pull request is read again with the same access:
   // a read again from an error forgets it. Read with another, it says nothing of now.
   const readAs = `${accessKey} ${formScope}`;
-  const lastError = useRef<{ key: string; error: unknown }>();
+  const lastError = useRef<{ key: string; error: unknown } | undefined>(undefined);
   if (query.isError) lastError.current = { key: readAs, error: query.error };
   const error = query.isError
     ? query.error

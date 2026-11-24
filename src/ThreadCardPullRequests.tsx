@@ -71,7 +71,7 @@ function CardChips({
     retryOnMount: unlessRefused,
     refetchOnReconnect: unlessRefused,
   });
-  const settledRanks = useRef<ReadonlyMap<string, number>>();
+  const settledRanks = useRef<ReadonlyMap<string, number> | undefined>(undefined);
   const previous = settledRanks.current;
   const idle = queries.every((query) => query.fetchStatus === 'idle');
   const answered = queries.every((query) => !query.isPending);

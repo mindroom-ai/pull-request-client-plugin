@@ -43,7 +43,7 @@ export function ChangeBreakdownStat({
   const t = usePluginTranslation('pull-requests');
   const tooltipId = useId();
   const statRef = useRef<HTMLButtonElement>(null);
-  const wasOpenOnPress = useRef<boolean>();
+  const wasOpenOnPress = useRef<boolean | undefined>(undefined);
   const [requested, setRequested] = useState(false);
   const [anchor, setAnchor] = useState<RectCords>();
   // Files the Code tab loaded already are in the cache, so a disabled query still has them.

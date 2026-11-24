@@ -37,7 +37,7 @@ export function CommitSelector({
     triggerRef.current?.focus();
   }, [anchor]);
   // The first row "Show more" brought in, which takes the focus from it.
-  const focusRow = useRef<number>();
+  const focusRow = useRef<number | undefined>(undefined);
   useEffect(() => {
     if (focusRow.current === undefined) return;
     menuRef.current
