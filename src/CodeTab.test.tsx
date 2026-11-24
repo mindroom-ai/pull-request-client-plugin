@@ -20,7 +20,7 @@ import {
   type FileDiffContentsLoader,
   type FileDiffMetadata,
 } from '@pierre/diffs';
-import { fnv1a32, getDiffLineStat, prepareFileDiff } from './diff/diffRendering';
+import { fnv1a32, getDiffLineStat } from './diff/diffRendering';
 import { trapOptions } from './testing/focusTrapStandIn';
 import {
   greenhouseAfter,
@@ -39,11 +39,6 @@ vi.mock('focus-trap-react', async () => ({
 vi.mock('@mindroom/client-sdk/ui', async (importOriginal) => {
   const ui = await importOriginal<typeof import('@mindroom/client-sdk/ui')>();
   return { ...ui, useMarkdownHtml: (markdown: string) => markdown };
-});
-
-vi.mock('./diff/diffRendering', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('./diff/diffRendering')>();
-  return { ...actual, prepareFileDiff: vi.fn(actual.prepareFileDiff) };
 });
 
 // jsdom has no custom elements, layout or ResizeObserver, which Pierre's tree and diff view need:
@@ -966,24 +961,28 @@ describe('CodeTab', () => {
       probe.unmount();
     });
 
-    it('skips prepareFileDiff for hidden test files when hideTests and ignoreWhitespace are enabled', async () => {
-      const prepareMock = vi.mocked(prepareFileDiff);
-      const sourceFile = file({
-        path: 'src/app.ts',
-        patch: '@@ -1 +1 @@\n-  const a = 1;\n+const a = 2;',
-      });
-      const testDiff = file({
-        path: 'src/app.test.ts',
-        patch: '@@ -1 +1 @@\n-  expect(1).toBe(1);\n+expect(1).toBe(1);',
-      });
-      const tab = await show({ files: [sourceFile, testDiff], pullRequest: request });
-      await click(tab.getByRole('button', { name: 'Hide test files' }));
-      prepareMock.mockClear();
+    it('preserves fileDiff object identity on unchanged source files across hideTests toggles', async () => {
+      localStorage.setItem(tokenKey, 'e2e-token');
+      const testDiff = file({ ...testFile, path: 'greenhouse.test.py', sha: otherSha });
+      fetchMock.mockImplementation(async (url) =>
+        url === endpoint + sha ? response() : respond({}, 404)
+      );
+      const tab = await show({ files: [testFile, testDiff], pullRequest: request });
+      const before = itemOf(greenhousePath)!.fileDiff;
 
-      await click(tab.getByRole('button', { name: 'Hide whitespace changes' }));
-      expect(prepareMock.mock.calls.map(([diff, opts]) => [diff.name, opts])).toEqual([
-        ['src/app.ts', { ignoreWhitespace: true, sha: null }],
-      ]);
+      await click(foldToggle(tab, greenhousePath));
+      expect(itemOf(greenhousePath)?.collapsed).toBe(true);
+      await click(tab.getByRole('button', { name: 'Hide test files' }));
+      expect(itemOf(greenhousePath)!.fileDiff).toBe(before);
+      await click(tab.getByRole('button', { name: 'Hide test files' }));
+      expect(itemOf(greenhousePath)!.fileDiff).toBe(before);
+
+      await click(foldToggle(tab, greenhousePath));
+      await expect(loader()!(itemOf(greenhousePath)!.fileDiff)).resolves.toEqual({
+        oldFile: { name: greenhousePath, contents: greenhouseBefore },
+        newFile: { name: greenhousePath, contents: greenhouseAfter },
+      });
+      expect(blobCalls()).toEqual([endpoint + sha]);
     });
   });
 

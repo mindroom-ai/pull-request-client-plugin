@@ -406,30 +406,32 @@ export function CodeTab({
     () => new Set((viewFiles ?? []).map((file) => file.path).filter(isTestFile)),
     [viewFiles]
   );
-  const shownPartialDiffs = useMemo(
-    () =>
-      hideTests
-        ? parsedFiles.filter((fileDiff) => !testPaths.has(resolveFileDiffPath(fileDiff)))
-        : parsedFiles,
-    [parsedFiles, hideTests, testPaths]
-  );
   const sourceByPath = useMemo(
     () => new Map(viewFiles?.map((file) => [file.path, file])),
     [viewFiles]
   );
-  const shownDiffs = useMemo(
+  // Prepare before filtering tests so toggling `hideTests` keeps the same `fileDiff` identity for
+  // unchanged source files (including folded ones whose instance Pierre retains).
+  const preparedFiles = useMemo(
     () =>
-      shownPartialDiffs.map((parsed) =>
+      parsedFiles.map((parsed) =>
         prepareFileDiff(parsed, {
           ignoreWhitespace,
           sha: sourceByPath.get(resolveFileDiffPath(parsed))?.sha,
         })
       ),
-    [shownPartialDiffs, sourceByPath, ignoreWhitespace]
+    [parsedFiles, sourceByPath, ignoreWhitespace]
   );
   const cacheKeyByPath = useMemo(
-    () => new Map(shownDiffs.map((file) => [resolveFileDiffPath(file), file.cacheKey])),
-    [shownDiffs]
+    () => new Map(preparedFiles.map((file) => [resolveFileDiffPath(file), file.cacheKey])),
+    [preparedFiles]
+  );
+  const shownDiffs = useMemo(
+    () =>
+      hideTests
+        ? preparedFiles.filter((fileDiff) => !testPaths.has(resolveFileDiffPath(fileDiff)))
+        : preparedFiles,
+    [preparedFiles, hideTests, testPaths]
   );
 
   const [expandNotice, setExpandNotice] = useState<{ scope: string; path: string } | null>(null);
