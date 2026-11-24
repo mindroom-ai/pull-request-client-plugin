@@ -132,8 +132,8 @@ const identity = (status: ServerStatus) =>
   status.connected
     ? `connected:${status.via ?? ''}:${status.login ?? ''}`
     : status.unreadable
-    ? 'unreadable'
-    : 'none';
+      ? 'unreadable'
+      : 'none';
 
 /** How GitHub is reached in a key of `queries.ts`, after the pull request or the repository. */
 const accessOf = (queryKey: QueryKey) => queryKey[queryKey[1] === 'repo' ? 4 : 5];
@@ -785,8 +785,8 @@ export function useGitHubAccess(): GitHubAccess {
         token !== undefined
           ? true
           : connected
-          ? serverKey(origin, login, credential.generation - (credential.writing ? 1 : 0))
-          : false,
+            ? serverKey(origin, login, credential.generation - (credential.writing ? 1 : 0))
+            : false,
       pending:
         token === undefined &&
         (serverPending || (server !== undefined && (status.isPending || credential.writing))),
@@ -1010,8 +1010,8 @@ export function usePanelTokenForm(scope: string) {
   const reason: TokenReason | undefined = asked.includes('rateLimited')
     ? 'rateLimited'
     : asked.includes('notFound')
-    ? 'notFound'
-    : undefined;
+      ? 'notFound'
+      : undefined;
   return { context, reason, inputRef };
 }
 

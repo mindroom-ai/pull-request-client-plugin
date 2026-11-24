@@ -101,7 +101,10 @@ export function samePullRequest(a: PullRequestRef, b: PullRequestRef): boolean {
 export type GitHubErrorKind = 'notFound' | 'rateLimited' | 'badToken' | 'failed';
 
 export class GitHubError extends Error {
-  constructor(readonly kind: GitHubErrorKind, readonly status: number) {
+  constructor(
+    readonly kind: GitHubErrorKind,
+    readonly status: number
+  ) {
     super(`GitHub request failed: ${kind} (${status})`);
     this.name = 'GitHubError';
   }
@@ -390,8 +393,8 @@ async function graphql(
       error.type === 'FORBIDDEN' || error.type === 'NOT_FOUND'
         ? 'noAccess'
         : error.type === 'RATE_LIMITED'
-        ? 'rateLimited'
-        : 'refused';
+          ? 'rateLimited'
+          : 'refused';
     throw new GitHubWriteError(kind, 200, reason(error.message, token));
   }
   return record(answer.data);
@@ -661,13 +664,7 @@ async function fetchPaged<T>(
 }
 
 export type CheckStatus =
-  | 'pending'
-  | 'action-required'
-  | 'success'
-  | 'failure'
-  | 'cancelled'
-  | 'skipped'
-  | 'neutral';
+  'pending' | 'action-required' | 'success' | 'failure' | 'cancelled' | 'skipped' | 'neutral';
 
 export type PullRequestCheck = {
   name: string;
@@ -715,7 +712,8 @@ function checkRun(run: Json): PullRequestCheck {
   return {
     name: text(run.name),
     // A run that is not completed (queued, in_progress, waiting, requested, pending) is pending.
-    status: run.status === 'completed' ? CONCLUSIONS[text(run.conclusion)] ?? 'neutral' : 'pending',
+    status:
+      run.status === 'completed' ? (CONCLUSIONS[text(run.conclusion)] ?? 'neutral') : 'pending',
     description: textOrNull(output?.title) || null,
     url: webUrl(run.html_url) ?? webUrl(run.details_url),
     updatedAt: textOrNull(run.completed_at) ?? textOrNull(run.started_at),
@@ -860,14 +858,7 @@ export function fetchReviews(
 }
 
 export type ReactionContent =
-  | '+1'
-  | '-1'
-  | 'laugh'
-  | 'hooray'
-  | 'confused'
-  | 'heart'
-  | 'rocket'
-  | 'eyes';
+  '+1' | '-1' | 'laugh' | 'hooray' | 'confused' | 'heart' | 'rocket' | 'eyes';
 
 export type Reaction = { content: ReactionContent; count: number };
 

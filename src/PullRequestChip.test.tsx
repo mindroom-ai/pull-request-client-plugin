@@ -491,7 +491,7 @@ describe('PullRequestChip hover card', () => {
     const chip = await view.findByRole('img', { name: /: Open/ });
     const bottom = window.innerHeight - 40;
     chip.getBoundingClientRect = () =>
-      ({ left: 10, right: 70, top: bottom - 20, bottom, width: 60, height: 20 } as DOMRect);
+      ({ left: 10, right: 70, top: bottom - 20, bottom, width: 60, height: 20 }) as DOMRect;
     hover(chip);
     await vi.waitFor(() => expect(card()).not.toBeNull());
     // The rem is 16 pixels here, so the gap to the chip is 4.

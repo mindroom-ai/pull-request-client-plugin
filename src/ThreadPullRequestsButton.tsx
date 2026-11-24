@@ -129,9 +129,9 @@ function PullRequestsMenu({
     count === 0
       ? t('details.worktree')
       : state
-      ? t('threadPullRequests.buttonWithState', { count, state: t(`state.${state}`) })
-      : t('threadPullRequests.button', { count });
-  const Icon = count === 0 ? GitBranch : presentation?.Icon ?? GitPullRequestArrow;
+        ? t('threadPullRequests.buttonWithState', { count, state: t(`state.${state}`) })
+        : t('threadPullRequests.button', { count });
+  const Icon = count === 0 ? GitBranch : (presentation?.Icon ?? GitPullRequestArrow);
   const current = panel?.isOpen ? shown : undefined;
   // The open menu's layer covers the page, the button too: a press over the button closes the
   // menu as any press outside it does, and gives the button back the focus a row may have had.

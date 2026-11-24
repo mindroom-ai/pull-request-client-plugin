@@ -288,8 +288,8 @@ const apiPull = (pull: Pull, head: string = headSha(pull)) => {
     mergeable_state: done
       ? null
       : pull.checks === 'running' || pull.checks === 'failing'
-      ? 'blocked'
-      : 'clean',
+        ? 'blocked'
+        : 'clean',
     auto_merge: null,
     head: { sha: head, ref: pull.branch, repo },
     base: { ref: pull.base ?? 'main', repo },
@@ -354,7 +354,7 @@ const gitHubAnswer = (
     const pull = ALL_PULLS.find(
       (candidate) => candidate.repo === repo && hasHead(candidate, id.split('...')[1] ?? '')
     );
-    const by = pull ? behind[pullPath(pull)] ?? 0 : 0;
+    const by = pull ? (behind[pullPath(pull)] ?? 0) : 0;
     return { behind_by: by, ahead_by: 3 };
   }
   if (kind === 'commits') {
@@ -532,7 +532,7 @@ const stubGitHub = async (
         const asked = ALL_PULLS.find(
           (candidate) => candidate.repo === variables.repo && candidate.number === variables.number
         );
-        const now = asked ? moved.get(pullPath(asked)) ?? asked.state : undefined;
+        const now = asked ? (moved.get(pullPath(asked)) ?? asked.state) : undefined;
         const state = now === 'merged' ? 'MERGED' : now === 'closed' ? 'CLOSED' : 'OPEN';
         const repository = { pullRequest: asked ? { state } : null };
         return { status: 200, json: { data: { node: { ref }, repository } } };

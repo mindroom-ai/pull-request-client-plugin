@@ -13,8 +13,7 @@ import { ChecksStatusLine } from './ChecksStatusLine';
 // on a click outside.
 const trap = vi.hoisted(() => ({
   options: undefined as
-    | { escapeDeactivates: () => boolean; clickOutsideDeactivates: () => boolean }
-    | undefined,
+    { escapeDeactivates: () => boolean; clickOutsideDeactivates: () => boolean } | undefined,
 }));
 vi.mock('focus-trap-react', () => ({
   default: ({

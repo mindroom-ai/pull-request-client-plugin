@@ -24,7 +24,7 @@ export const report = (isIntersecting: boolean, matches = (_target: Element) => 
   for (const observer of observers) {
     const entries = [...observer.targets]
       .filter(matches)
-      .map((target) => ({ target, isIntersecting } as IntersectionObserverEntry));
+      .map((target) => ({ target, isIntersecting }) as IntersectionObserverEntry);
     if (entries.length > 0) {
       observer.callback(entries, observer as unknown as IntersectionObserver);
     }

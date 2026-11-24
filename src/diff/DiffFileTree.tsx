@@ -282,8 +282,8 @@ function SizedDiffFileTree({
         focused: tree?.querySelector('file-tree-container')?.matches(':focus-within')
           ? 'row'
           : tree?.querySelector('.mrpr-tree-header')?.contains(document.activeElement)
-          ? 'header'
-          : null,
+            ? 'header'
+            : null,
       };
     },
     [carried, model]

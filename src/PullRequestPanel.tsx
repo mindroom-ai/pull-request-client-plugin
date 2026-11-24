@@ -369,8 +369,8 @@ function Header({
       target === 'title' && !collapsed
         ? headerRef.current?.querySelector<HTMLElement>('.mrpr-panel-title')
         : target === 'swap'
-        ? swapRef.current?.querySelector<HTMLElement>('[data-mrpr-swap-focus]')
-        : null;
+          ? swapRef.current?.querySelector<HTMLElement>('[data-mrpr-swap-focus]')
+          : null;
     next?.focus({ preventScroll: true });
   }, [collapsed]);
   const forkOwner =
@@ -662,8 +662,8 @@ function Panel({ roomId, request }: PanelProps) {
   const error = query.isError
     ? query.error
     : query.isFetching && lastError.current?.key === readAs
-    ? lastError.current.error
-    : undefined;
+      ? lastError.current.error
+      : undefined;
   const [commitScope, setCommitScope] = useState<{ pullRequestKey: string; sha?: string }>({
     pullRequestKey,
   });
@@ -685,10 +685,10 @@ function Panel({ roomId, request }: PanelProps) {
   const formReason: TokenFormReason | undefined = !ref
     ? undefined
     : !pr || !state
-    ? errorReason
-    : unreadable
-    ? 'unreadable'
-    : tokenForm.reason ?? (overriding && via === 'server' ? 'override' : undefined);
+      ? errorReason
+      : unreadable
+        ? 'unreadable'
+        : (tokenForm.reason ?? (overriding && via === 'server' ? 'override' : undefined));
   // Latched for the scope from the render it first shows in; a reason gone since leaves it
   // without a hint (`override`). Each latch is its own value: one of another scope is released,
   // and only the form shown for this latch may close it.

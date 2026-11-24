@@ -145,8 +145,8 @@ const itemKey = (item: ConversationItem): string =>
   item.kind === 'comment'
     ? `comment:${item.comment.id}`
     : item.kind === 'review'
-    ? `review:${item.review.id}`
-    : `thread:${item.thread.id}`;
+      ? `review:${item.review.id}`
+      : `thread:${item.thread.id}`;
 
 const eventKey = (event: TimelineEvent): string | string[] => {
   switch (event.kind) {

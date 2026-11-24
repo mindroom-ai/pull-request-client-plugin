@@ -717,18 +717,18 @@ export function CodeTab({
   const emptyNote = !viewFiles
     ? undefined
     : viewFiles.length === 0
-    ? t(shownCommit === undefined ? 'code.noChanges' : 'code.noCommitChanges')
-    : listed.length === 0
-    ? t('code.onlyTests')
-    : ignoreWhitespace &&
-      withoutDiff.length === 0 &&
-      shownDiffs.every(
-        (fileDiff) =>
-          fileDiff.hunks.length > 0 &&
-          fileDiff.hunks.every((hunk) => hunk.additionLines === 0 && hunk.deletionLines === 0)
-      )
-    ? t('code.onlyWhitespace')
-    : undefined;
+      ? t(shownCommit === undefined ? 'code.noChanges' : 'code.noCommitChanges')
+      : listed.length === 0
+        ? t('code.onlyTests')
+        : ignoreWhitespace &&
+            withoutDiff.length === 0 &&
+            shownDiffs.every(
+              (fileDiff) =>
+                fileDiff.hunks.length > 0 &&
+                fileDiff.hunks.every((hunk) => hunk.additionLines === 0 && hunk.deletionLines === 0)
+            )
+          ? t('code.onlyWhitespace')
+          : undefined;
 
   return (
     <div ref={rootRef} className="mrpr-root mrpr-code" style={pluginRootStyle()}>

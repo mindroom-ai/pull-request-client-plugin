@@ -310,8 +310,7 @@ export type TimelineEvent =
 
 // An event as the timeline sorts it, or an item of a conversation before runs are grouped.
 type TimelineEntry =
-  | Exclude<TimelineEvent, { kind: 'conversation' }>
-  | { at: string; item: ConversationItem };
+  Exclude<TimelineEvent, { kind: 'conversation' }> | { at: string; item: ConversationItem };
 
 function reviewEntries(review: Review): TimelineEntry[] {
   if (REVIEW_OUTCOMES[review.state] !== null) {
@@ -352,15 +351,15 @@ export function buildTimeline(
   const { pullRequest } = input;
   const entries: TimelineEntry[] = [
     { kind: 'opened', at: pullRequest.createdAt, actor: pullRequest.author },
-    ...input.commits.map(
-      (commit): TimelineEntry => ({ kind: 'commit', at: commit.committedAt, commit })
-    ),
-    ...input.comments.map(
-      (comment): TimelineEntry => ({
-        at: comment.createdAt,
-        item: { kind: 'comment', comment },
-      })
-    ),
+    ...input.commits.map((commit): TimelineEntry => ({
+      kind: 'commit',
+      at: commit.committedAt,
+      commit,
+    })),
+    ...input.comments.map((comment): TimelineEntry => ({
+      at: comment.createdAt,
+      item: { kind: 'comment', comment },
+    })),
     ...input.reviews.flatMap(reviewEntries),
     ...input.threads.flatMap(threadEntries),
     ...endEntries(pullRequest),

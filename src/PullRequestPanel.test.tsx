@@ -209,7 +209,7 @@ const report = (inView: boolean) =>
     for (const { callback, targets } of observers) {
       if (targets.length === 0) continue;
       callback(
-        targets.map((target) => ({ target, isIntersecting: inView } as IntersectionObserverEntry)),
+        targets.map((target) => ({ target, isIntersecting: inView }) as IntersectionObserverEntry),
         {} as IntersectionObserver
       );
     }
@@ -895,8 +895,8 @@ describe('PullRequestPanel', () => {
         url === GRAPHQL
           ? respond({ data: { repository } })
           : url.includes('/files')
-          ? respond([])
-          : respond(pull({ state: 'closed', merged_at: '2026-11-02T00:00:00Z' }))
+            ? respond([])
+            : respond(pull({ state: 'closed', merged_at: '2026-11-02T00:00:00Z' }))
       );
       const view = await show();
       expect(await view.findByRole('button', { name: 'More actions' })).toBeTruthy();
@@ -2631,7 +2631,7 @@ describe('the dense header', () => {
       await click(await view.findByRole('button', { name: 'Merge' }));
       await click(await view.findByRole('button', { name: 'Confirm merge?' }));
       const header = view.container.querySelector('.mrpr-header') as HTMLElement;
-      header.getBoundingClientRect = () => ({ top: bottom - 200, bottom } as DOMRect);
+      header.getBoundingClientRect = () => ({ top: bottom - 200, bottom }) as DOMRect;
       scrollTo.mockClear();
       await act(async () => answer());
       expect(await view.findByText(/Base branch was modified/)).toBeTruthy();

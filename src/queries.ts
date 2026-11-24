@@ -192,7 +192,7 @@ function watchProxyReads(cache: QueryCache) {
 }
 
 const enabledOf = (base: boolean, extra: RefetchOptions['enabled']) =>
-  !base || extra === false ? false : extra ?? true;
+  !base || extra === false ? false : (extra ?? true);
 
 async function withProxyRead<T>(
   { client, queryKey, signal, meta }: QueryFunctionContext,

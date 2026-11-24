@@ -608,14 +608,14 @@ function ResultLine({
               kind === 'failed' && status !== 0
                 ? 'actions.hint.server'
                 : kind === 'noAccess' && via === 'server'
-                ? connection === 'token'
-                  ? 'actions.hint.noAccessServerToken'
-                  : 'actions.hint.noAccessServer'
-                : kind === 'badToken' && via === 'server'
-                ? connection === 'token'
-                  ? 'actions.hint.badServerToken'
-                  : 'actions.hint.badConnection'
-                : `actions.hint.${kind}`
+                  ? connection === 'token'
+                    ? 'actions.hint.noAccessServerToken'
+                    : 'actions.hint.noAccessServer'
+                  : kind === 'badToken' && via === 'server'
+                    ? connection === 'token'
+                      ? 'actions.hint.badServerToken'
+                      : 'actions.hint.badConnection'
+                    : `actions.hint.${kind}`
             );
       const why = [hint, kind === 'badToken' ? null : detail].filter(Boolean).join(' ');
       text = (

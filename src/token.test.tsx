@@ -448,8 +448,8 @@ describe('the token saved in MindRoom', () => {
     const title = !auth
       ? 'with the App'
       : auth === 'Bearer ghp_new'
-      ? 'with the new token'
-      : 'with the token';
+        ? 'with the new token'
+        : 'with the token';
     return respond({ ...apiPull, title });
   };
   const type = (field: HTMLElement, value: string) =>

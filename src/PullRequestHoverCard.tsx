@@ -220,16 +220,16 @@ function Details({
     pr.state !== 'open'
       ? undefined
       : pr.mergeableState === 'dirty'
-      ? t('hoverCard.conflicts', { base: pr.baseRef })
-      : pr.mergeableState === 'behind'
-      ? t('hoverCard.behind', { base: pr.baseRef })
-      : undefined;
+        ? t('hoverCard.conflicts', { base: pr.baseRef })
+        : pr.mergeableState === 'behind'
+          ? t('hoverCard.behind', { base: pr.baseRef })
+          : undefined;
   const ended =
     pr.state === 'merged' && pr.mergedAt
       ? { at: pr.mergedAt, key: 'hoverCard.merged' }
       : pr.state === 'closed' && pr.closedAt
-      ? { at: pr.closedAt, key: 'hoverCard.closed' }
-      : { at: pr.updatedAt, key: 'updated' };
+        ? { at: pr.closedAt, key: 'hoverCard.closed' }
+        : { at: pr.updatedAt, key: 'updated' };
   const labels = splitOverflow(pr.labels, SHOWN_LABELS);
   const changed = pr.additions > 0 || pr.deletions > 0;
   return (

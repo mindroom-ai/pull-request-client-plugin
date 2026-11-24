@@ -98,7 +98,7 @@ export function ChangeBreakdownStat({
           wasOpenOnPress.current = event.pointerType === 'mouse' ? false : isOpen;
         }}
         onClick={(event) => {
-          const wasOpen = event.detail ? wasOpenOnPress.current ?? isOpen : isOpen;
+          const wasOpen = event.detail ? (wasOpenOnPress.current ?? isOpen) : isOpen;
           wasOpenOnPress.current = undefined;
           if (wasOpen) setAnchor(undefined);
           else open(event.currentTarget);

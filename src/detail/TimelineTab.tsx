@@ -56,15 +56,15 @@ const itemAuthor = (item: ConversationItem): Actor | null =>
   item.kind === 'comment'
     ? item.comment.author
     : item.kind === 'review'
-    ? item.review.author
-    : item.thread.comments[0]?.author ?? null;
+      ? item.review.author
+      : (item.thread.comments[0]?.author ?? null);
 
 const itemKey = (item: ConversationItem) =>
   item.kind === 'comment'
     ? `comment:${item.comment.id}`
     : item.kind === 'review'
-    ? `review:${item.review.id}`
-    : `thread:${item.thread.id}`;
+      ? `review:${item.review.id}`
+      : `thread:${item.thread.id}`;
 
 function uniqueActors(items: ConversationItem[]): Actor[] {
   const actors = new Map<string, Actor>();
@@ -246,12 +246,12 @@ const eventKey = (event: TimelineEvent, index: number) =>
   event.kind === 'commit'
     ? `commit:${event.commit.sha}`
     : event.kind === 'verdict'
-    ? `verdict:${event.review.id}`
-    : event.kind === 'thread'
-    ? `thread:${event.thread.id}`
-    : event.kind === 'conversation'
-    ? `conversation:${event.items[0] ? itemKey(event.items[0]) : index}`
-    : event.kind;
+      ? `verdict:${event.review.id}`
+      : event.kind === 'thread'
+        ? `thread:${event.thread.id}`
+        : event.kind === 'conversation'
+          ? `conversation:${event.items[0] ? itemKey(event.items[0]) : index}`
+          : event.kind;
 
 export function TimelineTab({
   pullRequestRef,
