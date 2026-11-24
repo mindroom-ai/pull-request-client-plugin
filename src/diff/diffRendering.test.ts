@@ -263,16 +263,24 @@ describe('partial diff hydration', () => {
     expect(hydrated.deletionLines[hydrated.hunks[1]!.deletionLineIndex]).toBe('const value = 1;\n');
   });
 
-  it('clones the partial diff so in-place hydration never mutates the parsed diff', () => {
+  it('copies the partial diff so in-place hydration never mutates the parsed diff and scopes cacheKey by sha', () => {
     const partial = parse();
-    const prepared = prepareFileDiff(partial);
+    const originalHunks = partial.hunks;
+    const originalAdditions = partial.additionLines;
+    const prepared = prepareFileDiff(partial, { sha: 'a'.repeat(40) });
+    const otherSha = prepareFileDiff(partial, { sha: 'b'.repeat(40) });
+    const wsWithSha = prepareFileDiff(partial, { ignoreWhitespace: true, sha: 'a'.repeat(40) });
     expect(prepared).not.toBe(partial);
+    expect(new Set([partial.cacheKey, prepared.cacheKey, otherSha.cacheKey]).size).toBe(3);
+    expect(wsWithSha.cacheKey).toMatch(/:a{40}:ignore-whitespace$/);
     hydratePartialDiff('merge', prepared, {
       oldFile: { name: partial.name, contents: greenhouseBefore },
       newFile: { name: partial.name, contents: greenhouseAfter },
     });
     expect(prepared.isPartial).toBe(false);
     expect(partial.isPartial).toBe(true);
+    expect(partial.hunks).toBe(originalHunks);
+    expect(partial.additionLines).toBe(originalAdditions);
     expect(prepareFileDiff(partial).isPartial).toBe(true);
   });
 });

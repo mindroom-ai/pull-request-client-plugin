@@ -81,7 +81,7 @@ import { PullRequestDiffStat, PullRequestMetaLine } from './presentation';
 import { loadDiffBlob, useCommitFiles } from './queries';
 import type { ReviewThread } from './reviewThreads';
 import { pluginRootStyle } from './theme';
-import { useGitHubAccess, type GitHubAccess } from './token';
+import { useGitHubAccess } from './token';
 
 /** A list the panel loads for the tab: its items once they have loaded, else why they did not. */
 export type ListState<T> =
@@ -328,12 +328,6 @@ export function CodeTab({
     if (!treeOpen) filesButtonRef.current?.focus({ preventScroll: true });
   }, [treeOpen]);
   const access = useGitHubAccess();
-  const [accessState, setAccessState] = useState(() => ({ access, generation: 0 }));
-  if (accessState.access !== access) {
-    setAccessState({ access, generation: accessState.generation + 1 });
-  }
-  const accessGeneration =
-    accessState.access === access ? accessState.generation : accessState.generation + 1;
   const canLoadDiffFiles = access.via !== undefined && !access.pending;
   const viewerRef = useRef<CodeViewHandle<ThreadGroup, undefined>>(null);
   const rowsRef = useRef(new Map<string, HTMLElement>());
@@ -392,7 +386,7 @@ export function CodeTab({
   // mutated in place by `loadDiffFiles` across views or accounts.
   const scope = `pull-request:${pullRequest.owner}/${pullRequest.repo}#${
     pullRequest.number
-  }:${view}:${String(access.key)}:${accessGeneration}:${themeKind}`;
+  }:${view}:${String(access.key)}:${themeKind}`;
   const { ignoreWhitespace, hideTests } = prefs;
   const parsedFiles = useMemo(() => {
     const patch = (viewFiles ?? [])
@@ -404,6 +398,10 @@ export function CodeTab({
     return parsed?.kind === 'files' ? orderDiffFilesLikeTree(orderDiffFiles(parsed.files)) : [];
   }, [viewFiles, scope]);
 
+  const parsedByPath = useMemo(
+    () => new Map(parsedFiles.map((file) => [resolveFileDiffPath(file), file])),
+    [parsedFiles]
+  );
   const testPaths = useMemo(
     () => new Set((viewFiles ?? []).map((file) => file.path).filter(isTestFile)),
     [viewFiles]
@@ -412,68 +410,87 @@ export function CodeTab({
     () => new Map(viewFiles?.map((file) => [file.path, file])),
     [viewFiles]
   );
-  const prepared = useMemo(() => {
-    const pairs = parsedFiles.map(
-      (parsed) => [prepareFileDiff(parsed, { ignoreWhitespace }), parsed] as const
-    );
-    return { files: pairs.map(([diff]) => diff), parsedByDiff: new Map(pairs) };
-  }, [parsedFiles, ignoreWhitespace]);
+  const preparedFiles = useMemo(
+    () =>
+      parsedFiles.map((parsed) =>
+        prepareFileDiff(parsed, {
+          ignoreWhitespace,
+          sha: sourceByPath.get(resolveFileDiffPath(parsed))?.sha,
+        })
+      ),
+    [parsedFiles, sourceByPath, ignoreWhitespace]
+  );
+  const cacheKeyByPath = useMemo(
+    () => new Map(preparedFiles.map((file) => [resolveFileDiffPath(file), file.cacheKey])),
+    [preparedFiles]
+  );
   const shownDiffs = useMemo(
     () =>
       hideTests
-        ? prepared.files.filter((fileDiff) => !testPaths.has(resolveFileDiffPath(fileDiff)))
-        : prepared.files,
-    [prepared.files, hideTests, testPaths]
+        ? preparedFiles.filter((fileDiff) => !testPaths.has(resolveFileDiffPath(fileDiff)))
+        : preparedFiles,
+    [preparedFiles, hideTests, testPaths]
   );
 
-  // Each prepared diff set owns one abortable, zero-retention in-flight map for click-to-expand.
-  const loaderRef = useRef<{
-    pullRequest: PullRequestRef;
-    access: GitHubAccess;
-    sourceByPath: ReadonlyMap<string, PullRequestFile>;
-    parsedByDiff: ReadonlyMap<FileDiffMetadata, FileDiffMetadata>;
+  // Abort in-flight blob reads on unmount or when the diff view, credentials, theme, or
+  // whitespace mode changes — not on unrelated file-list refreshes that retain existing items.
+  const sessionRef = useRef<{
     controller: AbortController;
     inFlight: Map<string, Promise<string | null>>;
   } | null>(null);
   useLayoutEffect(() => {
     const controller = new AbortController();
-    const session = {
-      pullRequest,
-      access,
-      sourceByPath,
-      parsedByDiff: prepared.parsedByDiff,
-      controller,
-      inFlight: new Map<string, Promise<string | null>>(),
-    };
-    loaderRef.current = session;
+    const session = { controller, inFlight: new Map<string, Promise<string | null>>() };
+    sessionRef.current = session;
     return () => {
       controller.abort();
-      if (loaderRef.current === session) loaderRef.current = null;
+      if (sessionRef.current === session) sessionRef.current = null;
     };
-    // `prepared` already changes whenever PR identity, commit view, access, theme, files or
-    // ignoreWhitespace changes, so keeping the effect on `[prepared]` avoids spurious aborts.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prepared]);
+  }, [scope, ignoreWhitespace]);
+
+  const loaderRef = useRef({ pullRequest, access, sourceByPath, parsedByPath, cacheKeyByPath });
+  useLayoutEffect(() => {
+    loaderRef.current = { pullRequest, access, sourceByPath, parsedByPath, cacheKeyByPath };
+  });
   const loadDiffFiles = useCallback(
     async (fileDiff: FileDiffMetadata): Promise<FileDiffLoadedFiles> => {
-      const session = loaderRef.current;
+      const session = sessionRef.current;
       const signal = session?.controller.signal;
       if (!session || !signal || signal.aborted) throw new Error('Diff expansion cancelled');
-      const parsed = session.parsedByDiff.get(fileDiff);
-      const path = parsed && canHydrateDiff(parsed) ? resolveFileDiffPath(parsed) : undefined;
-      const source = path ? session.sourceByPath.get(path) : undefined;
-      if (!parsed || !source?.sha || session.access.via === undefined || session.access.pending) {
+      const {
+        pullRequest: ref,
+        access: currentAccess,
+        sourceByPath: sources,
+        parsedByPath: parsedFilesByPath,
+        cacheKeyByPath: cacheKeys,
+      } = loaderRef.current;
+      const path = resolveFileDiffPath(fileDiff);
+      const parsed = parsedFilesByPath.get(path);
+      const source = sources.get(path);
+      const expectedKey = cacheKeys.get(path);
+      if (
+        !parsed ||
+        !canHydrateDiff(parsed) ||
+        !source?.sha ||
+        expectedKey === undefined ||
+        fileDiff.cacheKey !== expectedKey ||
+        currentAccess.via === undefined ||
+        currentAccess.pending
+      ) {
         throw new Error('Diff cannot be expanded');
       }
       const { sha } = source;
       const pending =
         session.inFlight.get(sha) ??
-        loadDiffBlob(session.pullRequest, sha, session.access, signal).finally(() => {
+        loadDiffBlob(ref, sha, currentAccess, signal).finally(() => {
           session.inFlight.delete(sha);
         });
       session.inFlight.set(sha, pending);
       const blob = await pending;
       signal.throwIfAborted();
+      if (loaderRef.current.cacheKeyByPath.get(path) !== expectedKey) {
+        throw new Error('Diff expansion cancelled');
+      }
       const old = blob === null ? null : reconstructOldFile(parsed, source, blob);
       if (blob === null || old === null) throw new Error('Diff cannot be expanded');
       return {

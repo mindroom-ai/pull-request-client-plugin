@@ -762,27 +762,134 @@ describe('CodeTab', () => {
       await chooseCommit(tab, 'All commits');
       expect(itemOf(greenhousePath)!.fileDiff.isPartial).toBe(true);
 
-      // Replacing the browser token and signing out both yield fresh partial diffs with distinct cacheKeys.
+      // Replacing the browser token under the same access.key preserves hydrated diffs while
+      // using the latest token for subsequent loads.
       const hydratedForTokenOne = await hydrateInPlace();
       await act(async () => {
         localStorage.setItem(tokenKey, 'token-two');
         window.dispatchEvent(new StorageEvent('storage', { key: tokenKey }));
       });
-      const tokenTwoDiff = itemOf(greenhousePath)!.fileDiff;
-      expect(tokenTwoDiff).not.toBe(hydratedForTokenOne);
-      expect(tokenTwoDiff.isPartial).toBe(true);
-      expect(tokenTwoDiff.cacheKey).not.toBe(hydratedForTokenOne.cacheKey);
+      expect(itemOf(greenhousePath)!.fileDiff).toBe(hydratedForTokenOne);
+      fetchMock.mockClear();
+      fetchMock.mockImplementation(async (url) =>
+        url === endpoint + otherSha ? response() : respond({}, 404)
+      );
+      await loader()!(itemOf(other.path)!.fileDiff);
+      const authHeader = new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get('authorization');
+      expect(authHeader).toBe('Bearer token-two');
 
-      const hydratedForTokenTwo = await hydrateInPlace();
+      // Signing out changes access.key and yields a fresh partial diff with a distinct cacheKey.
       await act(async () => {
         localStorage.removeItem(tokenKey);
         window.dispatchEvent(new StorageEvent('storage', { key: tokenKey }));
       });
       const anonDiff = itemOf(greenhousePath)!.fileDiff;
-      expect(anonDiff).not.toBe(hydratedForTokenTwo);
+      expect(anonDiff).not.toBe(hydratedForTokenOne);
       expect(anonDiff.isPartial).toBe(true);
-      expect(anonDiff.cacheKey).not.toBe(hydratedForTokenTwo.cacheKey);
+      expect(anonDiff.cacheKey).not.toBe(hydratedForTokenOne.cacheKey);
       expect(loader()).toBeUndefined();
+    });
+
+    it('expands a Pierre-retained fileDiff after a binary-only files refresh without aborting in-flight reads', async () => {
+      localStorage.setItem(tokenKey, 'e2e-token');
+      const client = new QueryClient();
+      const binaryBefore = file({ path: 'logo.png', patch: null, sha: '1'.repeat(40) });
+      const binaryAfter = file({ path: 'logo.png', patch: null, sha: '2'.repeat(40) });
+      let releaseInFlight!: () => void;
+      const waiting = new Promise<void>((resolve) => {
+        releaseInFlight = resolve;
+      });
+      fetchMock.mockImplementation(async (url, init) => {
+        if (url === endpoint + otherSha) {
+          await new Promise<void>((resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => reject(init.signal?.reason));
+            void waiting.then(resolve);
+          });
+          return response();
+        }
+        return url === endpoint + sha ? response() : respond({}, 404);
+      });
+      const renderWith = (files: PullRequestFile[]) => (
+        <QueryClientProvider client={client}>
+          <GitHubServerContext.Provider value={{ server: undefined, pending: false }}>
+            <Holder files={files} pullRequest={request} />
+          </GitHubServerContext.Provider>
+        </QueryClientProvider>
+      );
+      const tab = await renderPluginComponent(renderWith([testFile, other, binaryBefore]), {
+        id: 'pull-requests',
+        plugin,
+        themeKind: 'light',
+      });
+      const retainedDiff = itemOf(greenhousePath)!.fileDiff;
+      const beforeVersion = versionOf(greenhousePath);
+      const inFlightOther = loader()!(itemOf(other.path)!.fileDiff);
+
+      // Refresh `files` with only a binary file change; unchanged text files keep their version.
+      await act(async () => {
+        tab.rerender(renderWith([testFile, other, binaryAfter]));
+      });
+      expect(versionOf(greenhousePath)).toBe(beforeVersion);
+
+      // Invoking `loadDiffFiles` with Pierre's retained `fileDiff` from before the refresh succeeds.
+      await expect(loader()!(retainedDiff)).resolves.toEqual({
+        oldFile: { name: greenhousePath, contents: greenhouseBefore },
+        newFile: { name: greenhousePath, contents: greenhouseAfter },
+      });
+
+      // The in-flight expansion of `other` was not aborted by the binary-only refresh.
+      releaseInFlight();
+      await expect(inFlightOther).resolves.toEqual({
+        oldFile: { name: other.path, contents: greenhouseBefore },
+        newFile: { name: other.path, contents: greenhouseAfter },
+      });
+      expect(blobCalls()).toEqual([endpoint + otherSha, endpoint + sha]);
+    });
+
+    it('bumps cacheKey and version when a file sha changes with the same patch and loads the new sha', async () => {
+      localStorage.setItem(tokenKey, 'e2e-token');
+      const client = new QueryClient();
+      const rebasedAfter = greenhouseAfter.replace('fresh soil', 'fresh compost');
+      const rebasedBefore = greenhouseBefore.replace('fresh soil', 'fresh compost');
+      fetchMock.mockImplementation(async (url) => {
+        if (url === endpoint + sha) return response(greenhouseAfter);
+        if (url === endpoint + otherSha) return response(rebasedAfter);
+        return respond({}, 404);
+      });
+      const renderWith = (files: PullRequestFile[]) => (
+        <QueryClientProvider client={client}>
+          <GitHubServerContext.Provider value={{ server: undefined, pending: false }}>
+            <Holder files={files} pullRequest={request} />
+          </GitHubServerContext.Provider>
+        </QueryClientProvider>
+      );
+      const tab = await renderPluginComponent(renderWith([testFile]), {
+        id: 'pull-requests',
+        plugin,
+        themeKind: 'light',
+      });
+      const oldDiff = itemOf(greenhousePath)!.fileDiff;
+      const oldVersion = versionOf(greenhousePath);
+      const oldFiles = await loader()!(oldDiff);
+      Object.assign(oldDiff, hydratePartialDiff('clone', oldDiff, oldFiles));
+      expect(oldDiff.isPartial).toBe(false);
+
+      // Rebase changes the blob SHA while keeping the patch hunks identical.
+      await act(async () => {
+        tab.rerender(renderWith([file({ ...testFile, sha: otherSha })]));
+      });
+      const newDiff = itemOf(greenhousePath)!.fileDiff;
+      expect(newDiff.isPartial).toBe(true);
+      expect(newDiff.cacheKey).not.toBe(oldDiff.cacheKey);
+      expect(versionOf(greenhousePath)).not.toBe(oldVersion);
+
+      // The stale diff rejects; expanding the refreshed item loads the new blob SHA.
+      await expect(loader()!(oldDiff)).rejects.toThrow();
+      await expect(loader()!(newDiff)).resolves.toEqual({
+        oldFile: { name: greenhousePath, contents: rebasedBefore },
+        newFile: { name: greenhousePath, contents: rebasedAfter },
+      });
+      expect(blobCalls()).toEqual([endpoint + sha, endpoint + otherSha]);
     });
 
     it('bounds pull request and commit file list cache retention to 60 seconds', async () => {

@@ -1,12 +1,7 @@
 // Ported from T3 Code (https://github.com/pingdotgg/t3code, apps/web/src/lib/diffRendering.ts at 8ab427c6), MIT, Copyright (c) 2026 T3 Tools Inc. See NOTICE.
 // Patch parsing, whitespace hiding and the diff surface's theme, the part of T3 Code's diff
 // rendering the Code tab uses.
-import {
-  cloneFileDiffMetadata,
-  parseDiffFromFile,
-  parsePatchFiles,
-  type FileDiffMetadata,
-} from '@pierre/diffs';
+import { parseDiffFromFile, parsePatchFiles, type FileDiffMetadata } from '@pierre/diffs';
 import { GIT_LFS_POINTER_HEADER, MAX_DIFF_BLOB_BYTES, type DiffSource } from './diffSource';
 
 export const DIFF_THEME_NAMES = {
@@ -195,10 +190,11 @@ export function reconstructOldFile(
 
 export function prepareFileDiff(
   file: FileDiffMetadata,
-  { ignoreWhitespace = false }: { ignoreWhitespace?: boolean } = {}
+  { ignoreWhitespace = false, sha }: { ignoreWhitespace?: boolean; sha?: string | null } = {}
 ): FileDiffMetadata {
-  // Hand Pierre a fresh object: on-demand `loadDiffFiles` mutates the diff it is given in place.
-  const copy = cloneFileDiffMetadata(file);
+  // Hand Pierre a fresh object: on-demand `loadDiffFiles` replaces top-level fields in place.
+  const cacheKey = file.cacheKey && sha ? `${file.cacheKey}:${sha}` : file.cacheKey;
+  const copy = cacheKey === file.cacheKey ? { ...file } : { ...file, cacheKey };
   if (!ignoreWhitespace) return copy;
   try {
     return hideWhitespaceChanges(copy);
