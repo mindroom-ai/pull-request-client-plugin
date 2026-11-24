@@ -1,7 +1,7 @@
 // Ported from T3 Code (https://github.com/pingdotgg/t3code, apps/web/src/components/pullRequest/PullRequestChecksPopover.tsx at 8ab427c6), MIT, Copyright (c) 2026 T3 Tools Inc. See NOTICE.
 // The panel header's checks line: the state's icon and the summary, which open the checks popover.
 // It loads the checks of the pull request's head commit itself, so a failure shows here only.
-import { useCallback, useEffect, useRef, useState, type FocusEvent } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import FocusTrap from 'focus-trap-react';
 import type { RectCords } from 'folds';
 import { usePluginTranslation } from '@mindroom/client-sdk/core';
@@ -96,11 +96,17 @@ export function ChecksStatusLine({
       const target = event.target instanceof Node ? event.target : null;
       if (!buttonRef.current?.contains(target) && !popoverRef.current?.contains(target)) close();
     };
+    const onFocusIn = (event: FocusEvent) => {
+      const target = event.target instanceof Node ? event.target : null;
+      if (!buttonRef.current?.contains(target) && !popoverRef.current?.contains(target)) close();
+    };
     document.addEventListener('keydown', onKeyDown);
     document.addEventListener('pointerdown', onPointerDown, true);
+    document.addEventListener('focusin', onFocusIn, true);
     return () => {
       document.removeEventListener('keydown', onKeyDown);
       document.removeEventListener('pointerdown', onPointerDown, true);
+      document.removeEventListener('focusin', onFocusIn, true);
     };
   }, [hoverOpen, close]);
   if (query.isError) {
@@ -133,6 +139,18 @@ export function ChecksStatusLine({
       if (popoverRef.current?.contains(document.activeElement)) return;
       setPopover((cur) => (cur?.mode === 'hover' ? undefined : cur));
     }, CHECKS_HOVER_CLOSE_MS);
+  };
+  const closeOutside = (event?: MouseEvent | TouchEvent) => {
+    const box = buttonRef.current?.getBoundingClientRect();
+    refocusRef.current =
+      event instanceof globalThis.MouseEvent &&
+      !!box &&
+      event.clientX >= box.left &&
+      event.clientX <= box.right &&
+      event.clientY >= box.top &&
+      event.clientY <= box.bottom;
+    if (refocusRef.current) event?.preventDefault();
+    return close();
   };
   return (
     <>
@@ -194,7 +212,7 @@ export function ChecksStatusLine({
               fallbackFocus: () => popoverRef.current ?? buttonRef.current ?? document.body,
               preventScroll: true,
               returnFocusOnDeactivate: false,
-              clickOutsideDeactivates: close,
+              clickOutsideDeactivates: closeOutside,
               escapeDeactivates: () => {
                 refocusRef.current = true;
                 return close();
@@ -203,7 +221,7 @@ export function ChecksStatusLine({
           >
             <Menu
               ref={popoverRef}
-              tabIndex={-1}
+              tabIndex={hoverOpen ? undefined : -1}
               role="dialog"
               aria-label={t('checksPopover.label')}
               style={{ pointerEvents: 'auto' }}
@@ -211,17 +229,6 @@ export function ChecksStatusLine({
                 if (event.pointerType === 'mouse') clearHoverTimer();
               }}
               onPointerLeave={onHoverLeave}
-              onBlur={(event: FocusEvent<HTMLDivElement>) => {
-                if (!hoverOpen) return;
-                const next = event.relatedTarget;
-                if (
-                  next instanceof Node &&
-                  !popoverRef.current?.contains(next) &&
-                  !buttonRef.current?.contains(next)
-                ) {
-                  close();
-                }
-              }}
             >
               <div className="mrpr-root mrpr-popover" style={pluginRootStyle()}>
                 <ChecksPopover
