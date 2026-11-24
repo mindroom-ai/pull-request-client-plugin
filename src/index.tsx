@@ -28,6 +28,8 @@ const plugin: ClientPlugin = {
       id: 'pull-request',
       label: 'panelLabel',
       icon: Icons.Code,
+      // Opened from pull request links, cards, chips, and the thread PR button, not an empty menu entry.
+      placement: 'none',
       remember: true,
       Component: PullRequestPanel,
       // Its top row shows the pull request and its own Close, in place of the room's title row.

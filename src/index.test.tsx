@@ -13,4 +13,8 @@ describe('plugin', () => {
     expect(JSON.stringify(request)).toBe(JSON.stringify(parsePullRequestUrl(url)));
     expect(request).toEqual({ owner: 'mindroom-ai', repo: 'mindroom-chat', number: 490 });
   });
+
+  it('hides the pull-request side panel from the room header and room menu', () => {
+    expect(plugin.sidePanels?.[0]).toMatchObject({ id: 'pull-request', placement: 'none' });
+  });
 });
