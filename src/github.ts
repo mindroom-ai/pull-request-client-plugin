@@ -251,7 +251,8 @@ async function readGitHub(
   token: GitHubAuth | undefined,
   signal: AbortSignal | undefined,
   accept: string,
-  maxBytes?: number
+  maxBytes?: number,
+  reload = false
 ): Promise<Response> {
   const withToken = Boolean(token);
   const { budget, who } = budgetOf(token);
@@ -263,9 +264,9 @@ async function readGitHub(
   let response: Response;
   try {
     // GitHub allows a minute of caching, so a read just after a write could show the state from
-    // before it. With a token the browser revalidates by ETag, and an authorized 304 costs no rate
-    // limit. Without one a 304 still counts, and no write can have happened, so the cache serves.
-    const cache: RequestCache = token ? 'no-cache' : 'default';
+    // before it. With a token the browser revalidates by ETag (`no-cache`), or skips cached ETags
+    // (`reload`) after a write or manual refresh. Without one a 304 still counts, so the cache serves.
+    const cache: RequestCache = token ? (reload ? 'reload' : 'no-cache') : 'default';
     response = await githubFetch(token, path, { method: 'GET', accept, signal, cache, maxBytes });
   } catch (error) {
     // An aborted request is the caller's own doing, not a failure of GitHub.
@@ -291,9 +292,10 @@ async function getJson(
   path: string,
   token: GitHubAuth | undefined,
   signal: AbortSignal | undefined,
-  accept: string = JSON_MEDIA
+  accept: string = JSON_MEDIA,
+  reload = false
 ): Promise<unknown> {
-  const response = await readGitHub(path, token, signal, accept);
+  const response = await readGitHub(path, token, signal, accept, undefined, reload);
   try {
     return await response.json();
   } catch {
@@ -450,10 +452,17 @@ function autoMerge(method: unknown): PullRequest['autoMerge'] {
 export async function fetchPullRequest(
   ref: PullRequestRef,
   token: GitHubAuth | undefined,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  options?: { reload?: boolean }
 ): Promise<PullRequest> {
   const raw = record(
-    await getJson(`/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}`, token, signal, FULL_MEDIA)
+    await getJson(
+      `/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}`,
+      token,
+      signal,
+      FULL_MEDIA,
+      options?.reload
+    )
   );
   if (!raw) throw new GitHubError('failed', 200);
   const user = record(raw.user);
@@ -1188,9 +1197,15 @@ export async function runPullRequestAction(
   const pull = `${repoPath(ref)}/pulls/${ref.number}`;
   const pullRequestId = pr.nodeId;
   switch (action) {
-    case 'merge':
-      await sendRest('PUT', `${pull}/merge`, { merge_method: method, sha: pr.headSha }, token);
+    case 'merge': {
+      const answer = record(
+        await sendRest('PUT', `${pull}/merge`, { merge_method: method, sha: pr.headSha }, token)
+      );
+      if (answer?.merged === false) {
+        throw new GitHubWriteError('refused', 200, reason(answer.message, token));
+      }
       return 'done';
+    }
     case 'close':
       await sendRest('PATCH', pull, { state: 'closed' }, token);
       return 'done';

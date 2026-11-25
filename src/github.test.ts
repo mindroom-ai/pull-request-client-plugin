@@ -144,6 +144,16 @@ describe('fetchPullRequest', () => {
     expect(calls[0]![1].cache).toBe('default');
   });
 
+  it('uses cache reload when authenticated and reload is set, and keeps default without a token', async () => {
+    const fetchMock = vi.fn(() => Promise.resolve(json(apiPull)));
+    vi.stubGlobal('fetch', fetchMock);
+    await fetchPullRequest(ref, 't', undefined, { reload: true });
+    await fetchPullRequest(ref, undefined, undefined, { reload: true });
+    const calls = fetchMock.mock.calls as unknown as [string, RequestInit][];
+    expect(calls[0]![1].cache).toBe('reload');
+    expect(calls[1]![1].cache).toBe('default');
+  });
+
   it('maps an open pull request', async () => {
     vi.stubGlobal('fetch', () => Promise.resolve(json(apiPull)));
     expect(await fetchPullRequest(ref, undefined)).toEqual({
@@ -1181,6 +1191,19 @@ describe('runPullRequestAction', () => {
       url: 'https://api.github.com/repos/o/r/pulls/7/merge',
       body: { merge_method: 'squash', sha: 'head7' },
     });
+  });
+
+  it('throws refused when a 200 merge response has merged: false', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve(json({ merged: false, message: 'Pull Request is not mergeable' }))
+      )
+    );
+    const error = await runPullRequestAction(writeRef, writePull, 'merge', 'squash', 'tok').catch(
+      (caught: unknown) => caught
+    );
+    expect(error).toEqual(new GitHubWriteError('refused', 200, 'Pull Request is not mergeable'));
   });
 
   it.each([

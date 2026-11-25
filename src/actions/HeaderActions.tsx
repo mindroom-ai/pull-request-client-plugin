@@ -38,7 +38,7 @@ import {
   type PullRequestRef,
 } from '../github';
 import {
-  pullRequestKey,
+  reloadPullRequest,
   repositoryKey,
   useChecks,
   useHeadBranchSha,
@@ -82,13 +82,12 @@ const SHOWN_DONE: ReadonlySet<PullRequestAction> = new Set([
 
 /**
  * Whether a success is only announced, not shown as a line: the header shows it itself. Not
- * while the pull request could not be read again after the action and the one on screen is
- * still from before it: the header then offers Merge on a merged pull request, and the line is
- * all that says it is merged.
+ * while the pull request on screen does not yet reflect the action (whether the read failed or
+ * returned stale state): the line is then what says the action succeeded.
  */
 function isOnlyAnnounced(result: ActionResult | null, pr: PullRequest): boolean {
   if (result?.outcome !== 'done' || SHOWN_DONE.has(result.action)) return false;
-  return result.unread !== true || showsOutcome(pr, result.action);
+  return showsOutcome(pr, result.action);
 }
 
 /**
@@ -224,7 +223,7 @@ export function useHeaderActions({
     run();
   };
   const refresh = () => {
-    void queryClient.invalidateQueries({ queryKey: pullRequestKey(pullRequestRef) });
+    void reloadPullRequest(queryClient, pullRequestRef);
     void queryClient.invalidateQueries({ queryKey: repositoryKey(pullRequestRef) });
   };
 

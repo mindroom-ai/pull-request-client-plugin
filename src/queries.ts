@@ -118,6 +118,33 @@ export async function refreshPullRequest(
   return shown.every((query) => query.state.status !== 'error');
 }
 
+/** Reloads a pull request's queries bypassing cached ETags (after a write or manual refresh). */
+export const reloadPullRequest = (queryClient: QueryClient, ref: PullRequestRef): Promise<void> =>
+  invalidateAfterWrite(queryClient, { queryKey: pullRequestKey(ref) });
+
+/** Records a confirmed merge in the summary cache so a stale pre-merge read cannot regress it. */
+export async function markPullRequestMerged(
+  queryClient: QueryClient,
+  ref: PullRequestRef,
+  access: AccessKey
+): Promise<void> {
+  const queryKey = keyOf(ref, access);
+  await queryClient.cancelQueries({ queryKey, exact: true });
+  queryClient.setQueryData<PullRequest>(queryKey, (current) =>
+    current && !refusedData.has(current) && current.state !== 'merged'
+      ? { ...current, state: 'merged' }
+      : current
+  );
+}
+
+/** Reloads one active summary query bypassing cached ETags after a stale post-write read. */
+export const recheckStalePullRequest = (
+  queryClient: QueryClient,
+  ref: PullRequestRef,
+  access: AccessKey
+): Promise<void> =>
+  invalidateAfterWrite(queryClient, { queryKey: keyOf(ref, access), exact: true, type: 'active' });
+
 type QueryState = { state: { data: unknown; error: unknown } };
 
 // What a pull request's query read before GitHub refused it, until a read works again: no answer,
@@ -254,9 +281,26 @@ const pullRequestQuery = (
   queryFn: (context: QueryFunctionContext) => {
     const { client, queryKey, signal } = context;
     const read = () => {
+      const query = client.getQueryCache().get(client.defaultQueryOptions({ queryKey }).queryHash);
+      const reload = query !== undefined && writeRefreshes.has(query);
       const before = client.getQueryData<PullRequest>(queryKey);
-      return fetchPullRequest(ref as PullRequestRef, access.authFor(access.key), signal).then(
-        (pr) => (before && refusedData.delete(before), pr),
+      return fetchPullRequest(ref as PullRequestRef, access.authFor(access.key), signal, {
+        reload,
+      }).then(
+        (pr) => {
+          if (
+            before !== undefined &&
+            !refusedData.has(before) &&
+            before.state === 'merged' &&
+            pr.state !== 'merged' &&
+            before.nodeId !== '' &&
+            before.nodeId === pr.nodeId
+          ) {
+            return before;
+          }
+          if (before) refusedData.delete(before);
+          return pr;
+        },
         (error: unknown) => {
           if (before && refused(error)) refusedData.add(before);
           throw error;

@@ -13,9 +13,15 @@ import {
   type PullRequestRef,
   type Repository,
 } from '../github';
-import { refreshPullRequest, useRepository } from '../queries';
+import {
+  markPullRequestMerged,
+  pullRequestKey,
+  recheckStalePullRequest,
+  refreshPullRequest,
+  useRepository,
+} from '../queries';
 import { useGitHubAccess } from '../token';
-import { resolveMergeMethod } from './actions.logic';
+import { resolveMergeMethod, showsOutcome } from './actions.logic';
 
 // `requested`: GitHub took an update of the branch, but answered before it had made it.
 // `unread`: GitHub took the action, but the pull request could not be read again after it, so
@@ -29,6 +35,22 @@ export type ActionResult =
 // panel opened again on a pull request mid-action shows it running. By `actionKey`.
 type Entry = { pending: PullRequestAction | null; result: ActionResult | null };
 const IDLE: Entry = { pending: null, result: null };
+const STALE_RECHECK_MS = 1_500;
+const REVERSIBLE_STATE_ACTIONS: ReadonlySet<PullRequestAction> = new Set([
+  'close',
+  'reopen',
+  'ready',
+  'draft',
+  'enable-auto-merge',
+  'disable-auto-merge',
+]);
+const staleRechecks = new Map<string, ReturnType<typeof setTimeout>>();
+
+const cancelStaleRecheck = (key: string) => {
+  clearTimeout(staleRechecks.get(key));
+  staleRechecks.delete(key);
+};
+
 const entries = new Map<string, Entry>();
 const listeners = new Set<() => void>();
 
@@ -52,6 +74,8 @@ function subscribe(listener: () => void) {
  * would start with the outcome of the one before it.
  */
 export function resetPullRequestActions() {
+  staleRechecks.forEach((timer) => clearTimeout(timer));
+  staleRechecks.clear();
   entries.clear();
   listeners.forEach((listener) => listener());
 }
@@ -123,10 +147,14 @@ export function usePullRequestActions(
     const { key: used, auth } = access.current();
     if (auth === undefined) return;
     if (MERGES.has(action) && method === null) return;
+    cancelStaleRecheck(key);
     setEntry(key, { pending: action, result: null });
     const finish = async (result: ActionResult) => {
       let read = false;
       try {
+        if (result.outcome === 'done' && result.action === 'merge') {
+          await markPullRequestMerged(queryClient, ref, used);
+        }
         // Whatever came, GitHub may hold another state than the one loaded: a refusal says it
         // moved, and a failed answer may come after GitHub took the write. The action runs on
         // until that state is read: unlocked before, the controls would offer the pull request
@@ -137,6 +165,23 @@ export function usePullRequestActions(
         const outcome =
           !read && result.outcome !== 'failed' ? { ...result, unread: true as const } : result;
         setEntry(key, { pending: null, result: outcome });
+        if (read && result.outcome === 'done' && REVERSIBLE_STATE_ACTIONS.has(result.action)) {
+          const data = queryClient.getQueryCache().find<PullRequest>({
+            queryKey: [...pullRequestKey(ref), used],
+            exact: true,
+            type: 'active',
+          })?.state.data;
+          if (data !== undefined && !showsOutcome(data, result.action)) {
+            cancelStaleRecheck(key);
+            staleRechecks.set(
+              key,
+              setTimeout(() => {
+                staleRechecks.delete(key);
+                void recheckStalePullRequest(queryClient, ref, used);
+              }, STALE_RECHECK_MS)
+            );
+          }
+        }
       }
     };
     // Only the merges read the method, and they do not start without one.
