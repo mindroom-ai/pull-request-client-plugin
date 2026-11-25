@@ -356,6 +356,76 @@ describe('useGitHubAccess', () => {
       vi.useRealTimers();
     }
   });
+
+  it('does not re-fetch anonymous 404 PRs on failed status polls, then recovers', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
+    let view: Awaited<ReturnType<typeof show>> | undefined;
+    try {
+      const fetchMock = vi.fn(() =>
+        Promise.resolve(new Response(JSON.stringify({ message: 'Not Found' }), { status: 404 }))
+      );
+      vi.stubGlobal('fetch', fetchMock);
+      let status: () => Promise<unknown> = () =>
+        Promise.reject(new MindroomServerError('Unavailable', 503));
+      let statusCalls = 0;
+      const server = serverWith(() => status());
+      server.request.mockImplementation((path: string) => {
+        if (path === '/api/github/status') {
+          statusCalls += 1;
+          return status();
+        }
+        if (path === '/api/github/request') {
+          return Promise.resolve({ status: 200, body: apiPull, headers: {} });
+        }
+        return Promise.reject(new Error(`unexpected ${path}`));
+      });
+
+      const rendered = await show(server, <Reader />);
+      view = rendered;
+      const statusState = () => client.getQueryState(['pull-requests-github-status', ORIGIN]);
+      await waitUntil(() => expect(client.getQueryState([...PULL, false])?.status).toBe('error'));
+      expect(statusCalls).toBe(1);
+      expect(accesses.reader).toMatchObject({ via: undefined, key: false, pending: false });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      // Two subsequent failed 30s status polls keep pending false and do not re-fetch anonymously.
+      for (const expectedCalls of [2, 3]) {
+        let failPoll: ((error: unknown) => void) | undefined;
+        status = () =>
+          new Promise((_, reject) => {
+            failPoll = reject;
+          });
+        await act(async () => vi.advanceTimersByTime(30_000));
+        await waitUntil(() => expect(statusCalls).toBe(expectedCalls));
+        // Even while a retry poll is in flight without cached status data, pending stays false.
+        await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+        expect(statusState()).toMatchObject({ status: 'pending', fetchStatus: 'fetching' });
+        expect(accesses.reader?.pending).toBe(false);
+        await act(async () => {
+          failPoll?.(new MindroomServerError('Unavailable', 503));
+        });
+        await waitUntil(() => expect(statusState()?.errorUpdateCount).toBe(expectedCalls));
+        await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+        expect(accesses.reader?.pending).toBe(false);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+      }
+
+      // Once the next status poll succeeds, the mounted PR recovers through the server.
+      status = () => Promise.resolve({ connected: true, login: 'octo' });
+      await act(async () => vi.advanceTimersByTime(30_000));
+      await waitUntil(() => expect(rendered.getByText('T')).toBeTruthy());
+      expect(statusCalls).toBe(4);
+      expect(accesses.reader).toMatchObject({ via: 'server', login: 'octo', pending: false });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(server.request).toHaveBeenCalledWith(
+        '/api/github/request',
+        expect.objectContaining({ method: 'POST' })
+      );
+    } finally {
+      view?.unmount();
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('a change of the connection', () => {

@@ -728,7 +728,8 @@ function RemoveButton({
 /**
  * How to reach GitHub: the token stored in the browser comes first; else, while the room's
  * MindRoom server says the person's GitHub account is connected there, through that server;
- * else anonymously. The server is asked once for the status, and not while a token is stored.
+ * else anonymously. The server is asked for the status (retrying transient failures after a
+ * cooldown), and not while a token is stored.
  */
 export function useGitHubAccess(): GitHubAccess {
   const { token } = useGitHubToken();
@@ -806,7 +807,9 @@ export function useGitHubAccess(): GitHubAccess {
             : false,
       pending:
         token === undefined &&
-        (serverPending || (server !== undefined && (status.isPending || credential.writing))),
+        (serverPending ||
+          (server !== undefined &&
+            ((status.isPending && !status.isFetched) || credential.writing))),
       current,
       authFor,
       recheck,
@@ -823,6 +826,7 @@ export function useGitHubAccess(): GitHubAccess {
       recheck,
       server,
       serverPending,
+      status.isFetched,
       status.isPending,
       token,
       unreadable,
