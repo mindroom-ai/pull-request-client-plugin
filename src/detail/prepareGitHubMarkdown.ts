@@ -1,4 +1,4 @@
-// Two strictly O(N) stages for GitHub Markdown descriptions and comments:
+// Two fast single-pass stages for GitHub Markdown descriptions and comments:
 // Stage A (`stripGitHubHtmlComments`) removes HTML comments outside code before `useMarkdownHtml`.
 // Stage B (`linkifyGitHubHtml`) links verified GitHub refs/commits/videos in sanitized HTML.
 import type { GitHubBodyMeta } from '../githubBody';
@@ -7,23 +7,26 @@ import { ATTACHMENT_PATH, httpsUrl, own } from '../images';
 const ASCII_PUNCT = /[!"#$%&'()*+,-./:;<=>?@[\\\]^_`{|}~]/u;
 const BQ_PREFIX = /^(?: {0,3}> ?)+/u;
 const INDENTED_CODE = /^(?: {4}| {0,3}\t)/u;
+const LIST_PREFIX = /^(?: {0,3}(?:[-+*]|\d{1,9}[.)])[ \t]+)*/u;
 const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})(.*)$/u;
-const FENCE_CLOSE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/u;
+const FENCE_CLOSE = /^([ \t]*)(`{3,}|~{3,})[ \t]*$/u;
 const ATX_HEADING = /^ {0,3}#{1,6}(?:[ \t]|$)/u;
-const PARA_BREAK = /^(?:[ \t]*$| {0,3}(?:<!--|#{1,6}(?:[ \t]|$)|`{3,}[^`]*$|~{3,}))/u;
+const PARA_BREAK = /^(?:[ \t]*$| {0,3}(?:<!--|#{1,6}(?:[ \t]|$)))/u;
 const escapeHtml = (v: string) =>
   v.replace(/[&"'<>]/gu, (c) =>
     c === '&' ? '&amp;' : c === '"' ? '&quot;' : c === "'" ? '&#39;' : c === '<' ? '&lt;' : '&gt;'
   );
+const cols = (ws: string) => [...ws].reduce((c, ch) => c + (ch === '\t' ? 4 - (c % 4) : 1), 0);
 const stripBq = (line: string) => line.slice(BQ_PREFIX.exec(line)?.[0].length ?? 0);
 const parseFence = (rest: string) => {
-  const m = FENCE_OPEN.exec(rest);
+  const listPrefix = LIST_PREFIX.exec(rest)?.[0] ?? '';
+  const m = FENCE_OPEN.exec(rest.slice(listPrefix.length));
   return m && (m[1]![0] === '~' || !m[2]!.includes('`'))
-    ? { char: m[1]![0]!, len: m[1]!.length }
+    ? { char: m[1]![0]!, len: m[1]!.length, maxIndent: cols(listPrefix) + 3 }
     : null;
 };
 
-/** Stage A: strips HTML comments outside code blocks/spans in O(N) time, or returns `null`. */
+/** Stage A: strips HTML comments outside code blocks/spans in a linear-time scan, or returns `null`. */
 export function stripGitHubHtmlComments(body: string): string | null {
   const s = body.includes('\r') ? body.replace(/\r\n?/gu, '\n') : body;
   if (!s.includes('<!--')) return s.trim() ? s : null;
@@ -31,7 +34,7 @@ export function stripGitHubHtmlComments(body: string): string | null {
   const out: string[] = [];
   const gap: string[] = [];
   const noCloseLen = new Set<number>();
-  let fence: { char: string; len: number } | null = null;
+  let fence: { char: string; len: number; maxIndent: number } | null = null;
   let afterBlankOrCode = true;
   let noMoreCommentClose = false;
   let gapHasComment = false;
@@ -55,7 +58,8 @@ export function stripGitHubHtmlComments(body: string): string | null {
       noCloseLen.clear();
       for (paraLimit = lineEnd; paraLimit < s.length;) {
         const next = endOfLine(paraLimit + 1);
-        if (PARA_BREAK.test(stripBq(s.slice(paraLimit + 1, next)))) break;
+        const r = stripBq(s.slice(paraLimit + 1, next));
+        if (PARA_BREAK.test(r) || parseFence(r)) break;
         paraLimit = next;
       }
     }
@@ -79,7 +83,12 @@ export function stripGitHubHtmlComments(body: string): string | null {
     if (fence) {
       emit(line, 0);
       const close = FENCE_CLOSE.exec(rest);
-      if (close && close[1]![0] === fence.char && close[1]!.length >= fence.len) {
+      if (
+        close &&
+        cols(close[1]!) <= fence.maxIndent &&
+        close[2]![0] === fence.char &&
+        close[2]!.length >= fence.len
+      ) {
         fence = null;
         afterBlankOrCode = true;
       }
@@ -202,7 +211,7 @@ function linkifyTextSegment(
 
 /**
  * Stage B: links verified GitHub issues, PRs, mentions, commits, and bare video attachment URLs
- * in sanitized HTML outside `<a>`, `<code>`, and `<pre>` elements in one strictly O(N) pass.
+ * in sanitized HTML outside `<a>`, `<code>`, and `<pre>` elements in a single linear-time scan.
  */
 export function linkifyGitHubHtml(html: string, bodyMeta?: GitHubBodyMeta): string {
   if (!bodyMeta || !Object.values(bodyMeta).some((m) => Object.keys(m).length > 0)) return html;
