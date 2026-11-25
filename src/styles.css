@@ -1117,7 +1117,8 @@
   }
   /* Desktop framed bars can wrap onto two rows; give their buttons real 44 px heights and disable
      the single-row pseudo-element expansion so wrapped rows never overlap hit targets. */
-  .mrpr-panel-framed > .mrpr-bar .mrpr-header-more {
+  .mrpr-panel-framed > .mrpr-bar .mrpr-header-more,
+  .mrpr-panel-framed > .mrpr-bar .mrpr-bar-details {
     min-block-size: max(44px, 2.75rem);
   }
   .mrpr-panel-framed > .mrpr-bar .mrpr-header-more::after {
@@ -1150,13 +1151,15 @@
 }
 .mrpr-panel-framed > .mrpr-bar > .mrpr-bar-swap {
   display: flex;
-  flex: 1 1 0;
+  flex: 1 1 min(9rem, 144px);
+  min-inline-size: 0;
   max-inline-size: 100%;
+  align-self: stretch;
   align-items: center;
   gap: 0.25rem;
 }
 .mrpr-panel-framed > .mrpr-bar > .mrpr-bar-swap > .mrpr-bar-details {
-  min-inline-size: auto;
+  min-inline-size: 0;
   max-inline-size: 100%;
 }
 .mrpr-panel-framed > .mrpr-bar > .mrpr-bar-label {
