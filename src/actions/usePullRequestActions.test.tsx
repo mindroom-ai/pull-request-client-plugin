@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act } from '../testing/act';
+import { MindroomServerError, type MindroomServer } from '@mindroom/client-sdk/server';
 import { renderPluginComponent } from '@mindroom/client-sdk/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { PullRequest, PullRequestRef } from '../github';
+import { GitHubWriteError, type PullRequest, type PullRequestRef } from '../github';
 import plugin from '../index';
 import { usePullRequest, usePullRequestFiles } from '../queries';
-import { useGitHubToken } from '../token';
+import { GitHubServerContext, useGitHubToken } from '../token';
 import { resetPullRequestActions, usePullRequestActions } from './usePullRequestActions';
 
 const STORAGE = 'mindroom.plugin:%40plugin-tester%3Aexample.org/pull-requests/';
@@ -206,7 +207,7 @@ beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   localStorage.clear();
   localStorage.setItem(`${STORAGE}githubToken`, 'tok');
-  client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client = new QueryClient({ defaultOptions: { queries: { retry: false, retryDelay: 0 } } });
   writeAnswer = async () => respond({ merged: true });
   pullAnswer = async () => respond(apiPull());
   filesAnswer = async () => respond([]);
@@ -264,6 +265,75 @@ describe('usePullRequestActions', () => {
     await show(refA, pull);
     await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not ask again on mount after a 403 repository write refusal', async () => {
+    fetchMock.mockImplementation(async () => respond({ message: 'Forbidden' }, 403));
+    const first = await show(refA, pull);
+    await waitUntil(() =>
+      expect(client.getQueryState(['pull-requests', 'repo', 'o', 'r', true])?.status).toBe('error')
+    );
+    const error = client.getQueryState(['pull-requests', 'repo', 'o', 'r', true])?.error;
+    expect(error).toBeInstanceOf(GitHubWriteError);
+    expect(error).toMatchObject({ kind: 'noAccess', status: 403 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    first.unmount();
+    fetchMock.mockImplementation(async () => respond({ data: { repository } }));
+    await show(refA, pull);
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(actions.repo).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries the repository on mount after a transient 502 failure', async () => {
+    fetchMock.mockImplementation(async () => respond({ message: 'Bad Gateway' }, 502));
+    const first = await show(refA, pull);
+    await waitUntil(() =>
+      expect(client.getQueryState(['pull-requests', 'repo', 'o', 'r', true])?.status).toBe('error')
+    );
+    const error = client.getQueryState(['pull-requests', 'repo', 'o', 'r', true])?.error;
+    expect(error).toBeInstanceOf(GitHubWriteError);
+    expect(error).toMatchObject({ kind: 'failed', status: 502 });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    first.unmount();
+    fetchMock.mockImplementation(async () => respond({ data: { repository } }));
+    await show(refA, pull);
+    await loaded();
+    expect(actions.repo?.canWrite).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it('retries the repository on mount after a transient MindRoom 503 failure', async () => {
+    localStorage.clear();
+    const origin = 'https://mindroom.example.org';
+    let failRepo = true;
+    const request = vi.fn((path: string) => {
+      if (path === '/api/github/status') {
+        return Promise.resolve({ connected: true, login: 'octo' });
+      }
+      if (failRepo) return Promise.reject(new MindroomServerError('Unavailable', 503));
+      return Promise.resolve({ status: 200, body: { data: { repository } }, headers: {} });
+    });
+    const server = { origin, request } as unknown as MindroomServer & { request: typeof request };
+    const showServed = () =>
+      renderPluginComponent(
+        <QueryClientProvider client={client}>
+          <GitHubServerContext.Provider value={{ server, pending: false }}>
+            <Probe pullRequestRef={refA} pullRequest={pull} />
+          </GitHubServerContext.Provider>
+        </QueryClientProvider>,
+        { id: 'pull-requests', plugin }
+      );
+    const repoKey = ['pull-requests', 'repo', 'o', 'r', `server:${origin}:octo:0`];
+    const first = await showServed();
+    await waitUntil(() => expect(client.getQueryState(repoKey)?.status).toBe('error'));
+    expect(actions.repo).toBeUndefined();
+    first.unmount();
+    failRepo = false;
+    await showServed();
+    await loaded();
+    expect(actions.repo?.canWrite).toBe(true);
+    expect(request.mock.calls.filter(([path]) => path === '/api/github/request')).toHaveLength(4);
   });
 
   it('reuses the repository in a panel opened again', async () => {

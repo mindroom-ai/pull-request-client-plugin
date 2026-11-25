@@ -34,9 +34,13 @@ import { useGitHubAccess, type AccessKey, type GitHubAccess } from './token';
 
 // A refusal GitHub gave twice would be the same again; only a failed request is worth another try.
 // A read cancelled because its key no longer names the access (`authFor`) is not tried again.
+const isWriteRefusal = (error: unknown): boolean =>
+  error instanceof GitHubWriteError && error.kind !== 'failed';
+
 const retry = (count: number, error: Error) =>
   isCancelledError(error) ||
-  ((error instanceof GitHubError || error instanceof GitHubWriteError) && error.kind !== 'failed')
+  (error instanceof GitHubError && error.kind !== 'failed') ||
+  isWriteRefusal(error)
     ? false
     : count < 2;
 
@@ -361,7 +365,7 @@ export function useRepository(ref: PullRequestRef | undefined) {
     },
     enabled: access.via !== undefined && ref !== undefined,
     staleTime: 600_000,
-    retryOnMount: false,
+    retryOnMount: (query: QueryState) => !isWriteRefusal(query.state.error),
     retry,
   });
 }

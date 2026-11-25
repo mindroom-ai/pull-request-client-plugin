@@ -121,11 +121,22 @@ const UNREADABLE: ServerStatus = { connected: false, login: undefined, unreadabl
 // Not under `pull-requests`, whose queries a new token asks again: the status is the server's.
 const statusKey = (origin: string) => ['pull-requests-github-status', origin] as const;
 
+const STATUS_RETRY_MS = 30_000;
+
 // The connection changes when the person connects or disconnects GitHub in MindRoom, rarely. One
 // that is not there is asked again sooner, on focus, so that connecting shows soon; never at once,
 // so that a server whose status and requests disagree cannot keep the parts switching.
 const statusStaleTime = (status: ServerStatus | undefined) =>
-  status?.connected ? 300_000 : 30_000;
+  status?.connected ? 300_000 : STATUS_RETRY_MS;
+
+// Network errors and 5xx outages can clear once the server comes back (503 github_token_unreadable
+// is already mapped to UNREADABLE data); 4xx refusals are not polled on an interval.
+const isTransientStatusError = (error: unknown): boolean =>
+  !(error instanceof MindroomServerError) || error.status === 0 || error.status >= 500;
+
+// Throttle retries during an outage so mounted chips and focus changes do not hammer a down server.
+const statusErrorStale = (errorUpdatedAt: number): boolean =>
+  errorUpdatedAt === 0 || Date.now() - errorUpdatedAt >= STATUS_RETRY_MS;
 
 /** Which connection a status names, for telling when it changed. */
 const identity = (status: ServerStatus) =>
@@ -732,7 +743,13 @@ export function useGitHubAccess(): GitHubAccess {
     // Not while a token is saved or removed there: that asks, or answers, the status itself.
     enabled: server !== undefined && token === undefined && !credential.writing,
     staleTime: statusStaleTime(queryClient.getQueryData<ServerStatus>(statusKey(origin))),
-    retryOnMount: false,
+    retryOnMount: (query) => statusErrorStale(query.state.errorUpdatedAt),
+    refetchOnWindowFocus: (query) =>
+      query.state.status !== 'error' || statusErrorStale(query.state.errorUpdatedAt),
+    refetchInterval: (query) =>
+      query.state.status === 'error' && isTransientStatusError(query.state.error)
+        ? STATUS_RETRY_MS
+        : false,
   });
   const connected = server !== undefined && token === undefined && status.data?.connected === true;
   const login = connected ? status.data?.login : undefined;

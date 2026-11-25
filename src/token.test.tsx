@@ -255,6 +255,107 @@ describe('useGitHubAccess', () => {
       vi.useRealTimers();
     }
   });
+
+  it('throttles remount retries for a failed status for 30s and recovers after', async () => {
+    let status: () => Promise<unknown> = () =>
+      Promise.reject(new MindroomServerError('Unavailable', 503));
+    const server = serverWith(() => status());
+    const first = await show(server);
+    await waitUntil(() => expect(accesses.a?.pending).toBe(false));
+    expect(accesses.a).toMatchObject({ via: undefined, key: false });
+    expect(server.request).toHaveBeenCalledTimes(1);
+    first.unmount();
+    status = () => Promise.resolve({ connected: true, login: 'octo' });
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + 10_000 });
+    try {
+      const second = await show(server);
+      await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+      expect(server.request).toHaveBeenCalledTimes(1);
+      expect(accesses.a).toMatchObject({ via: undefined, key: false });
+      second.unmount();
+      vi.setSystemTime(Date.now() + 30_000);
+      await show(server);
+      await waitUntil(() => expect(accesses.a?.via).toBe('server'));
+      expect(accesses.a).toMatchObject({ via: 'server', login: 'octo', key: keyAs('octo') });
+      expect(server.request).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('asks a failed status again on focus after 30s, not before', async () => {
+    let status: () => Promise<unknown> = () =>
+      Promise.reject(new MindroomServerError('Unavailable', 503));
+    const server = serverWith(() => status());
+    await show(server);
+    await waitUntil(() => expect(accesses.a?.pending).toBe(false));
+    expect(server.request).toHaveBeenCalledTimes(1);
+    status = () => Promise.resolve({ connected: true, login: 'octo' });
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + 10_000 });
+    try {
+      act(() => {
+        focusManager.setFocused(false);
+        focusManager.setFocused(true);
+      });
+      await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+      expect(server.request).toHaveBeenCalledTimes(1);
+      expect(accesses.a?.via).toBeUndefined();
+      vi.setSystemTime(Date.now() + 30_000);
+      act(() => {
+        focusManager.setFocused(false);
+        focusManager.setFocused(true);
+      });
+      await waitUntil(() => expect(accesses.a?.via).toBe('server'));
+      expect(server.request).toHaveBeenCalledTimes(2);
+    } finally {
+      focusManager.setFocused(undefined);
+      vi.useRealTimers();
+    }
+  });
+
+  it('polls every 30s after a transient 503 failure and stops once recovered', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
+    let view: Awaited<ReturnType<typeof show>> | undefined;
+    try {
+      let status: () => Promise<unknown> = () =>
+        Promise.reject(new MindroomServerError('Unavailable', 503));
+      const server = serverWith(() => status());
+      view = await show(server);
+      await waitUntil(() => expect(accesses.a?.pending).toBe(false));
+      expect(server.request).toHaveBeenCalledTimes(1);
+      status = () => Promise.resolve({ connected: true, login: 'octo' });
+      await act(async () => vi.advanceTimersByTime(10_000));
+      expect(server.request).toHaveBeenCalledTimes(1);
+      await act(async () => vi.advanceTimersByTime(20_000));
+      await waitUntil(() => expect(accesses.a?.via).toBe('server'));
+      expect(server.request).toHaveBeenCalledTimes(2);
+      // Stops polling once connected.
+      await act(async () => vi.advanceTimersByTime(60_000));
+      await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+      expect(server.request).toHaveBeenCalledTimes(2);
+    } finally {
+      view?.unmount();
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not poll on an interval after a non-transient 404 status error', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
+    let view: Awaited<ReturnType<typeof show>> | undefined;
+    try {
+      const server = serverWith(() => Promise.reject(new MindroomServerError('Not Found', 404)));
+      view = await show(server);
+      await waitUntil(() => expect(accesses.a?.pending).toBe(false));
+      expect(server.request).toHaveBeenCalledTimes(1);
+      await act(async () => vi.advanceTimersByTime(60_000));
+      await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+      expect(server.request).toHaveBeenCalledTimes(1);
+      expect(accesses.a).toMatchObject({ via: undefined, key: false });
+    } finally {
+      view?.unmount();
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('a change of the connection', () => {
