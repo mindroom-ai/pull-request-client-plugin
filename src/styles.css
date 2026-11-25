@@ -1152,15 +1152,22 @@
 .mrpr-panel-framed > .mrpr-bar > .mrpr-bar-swap {
   display: flex;
   flex: 1 1 min(9rem, 144px);
-  min-inline-size: 0;
   max-inline-size: 100%;
   align-self: stretch;
   align-items: center;
   gap: 0.25rem;
 }
 .mrpr-panel-framed > .mrpr-bar > .mrpr-bar-swap > .mrpr-bar-details {
-  min-inline-size: 0;
+  min-inline-size: auto;
   max-inline-size: 100%;
+}
+/* Zero inline-size keeps truncated repo names and collapsed titles out of the bar's min-content
+   wrap threshold so non-shrinking PR numbers and badges trigger wrapping instead of overlapping
+   the control pill, while max-inline-size: max-content hugs short text. */
+.mrpr-panel-framed > .mrpr-bar > .mrpr-bar-swap .mrpr-truncate {
+  inline-size: 0;
+  flex: 1 1 0;
+  max-inline-size: max-content;
 }
 .mrpr-panel-framed > .mrpr-bar > .mrpr-bar-label {
   flex: 1 1 5rem;
