@@ -2768,6 +2768,20 @@ describe('floating control pill', () => {
     expect(setLayout).toHaveBeenCalledWith('beside');
   });
 
+  it('uses localized fillLabel and foldLabel from the host frame when provided', async () => {
+    panelControl.close = vi.fn();
+    const view = await showWithFrame(REQUEST, {
+      label: 'Pull request',
+      layout: 'beside',
+      setLayout: vi.fn(),
+      fillLabel: 'Remplir le salon avec Pull request',
+      foldLabel: 'Replier Pull request sur le bord',
+    });
+    await view.findByText('Add pull request cards');
+    expect(view.getByRole('button', { name: 'Remplir le salon avec Pull request' })).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Replier Pull request sur le bord' })).toBeTruthy();
+  });
+
   it('omits Fill and Fold when no panel frame is provided or when folded', async () => {
     panelControl.close = vi.fn();
     const phoneView = await showWithFrame(REQUEST, undefined);

@@ -159,12 +159,21 @@ function useScrolledAway(
   useEffect(() => {
     const element = bar.current;
     if (!element || typeof ResizeObserver === 'undefined') return undefined;
+    const panel = element.closest<HTMLElement>('.mrpr-panel');
     const observer = new ResizeObserver((entries) => {
       const entry = entries[entries.length - 1];
-      if (entry) setBarSize(Math.round(entry.contentRect.height));
+      if (!entry) return;
+      const borderHeight =
+        entry.borderBoxSize?.[0]?.blockSize ?? element.getBoundingClientRect().height;
+      const height = Math.round(borderHeight > 0 ? borderHeight : entry.contentRect.height);
+      setBarSize(height);
+      if (panel && height > 0) panel.style.setProperty('--mrpr-bar-actual-size', `${height}px`);
     });
     observer.observe(element);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      panel?.style.removeProperty('--mrpr-bar-actual-size');
+    };
   }, [bar]);
   useEffect(() => {
     const element = header.current;

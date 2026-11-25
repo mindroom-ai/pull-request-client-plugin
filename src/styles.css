@@ -734,7 +734,7 @@
 }
 .mrpr-panel-scrolls > .mrpr-tabbar {
   position: sticky;
-  inset-block-start: var(--mrpr-bar-size);
+  inset-block-start: var(--mrpr-bar-actual-size, var(--mrpr-bar-size));
   z-index: 3;
   background: var(--pr-panel);
 }
@@ -746,11 +746,15 @@
 .mrpr-panel-scrolls
   > .mrpr-tabpanel
   :is(a, button, input, select, textarea, [tabindex], .mrpr-comment-clip) {
-  scroll-margin-block-start: calc(var(--mrpr-bar-size) + var(--mrpr-tabbar-size));
+  scroll-margin-block-start: calc(
+    var(--mrpr-bar-actual-size, var(--mrpr-bar-size)) + var(--mrpr-tabbar-size)
+  );
 }
 /* A section's heading stays under the tab bar, with the part of its padding the tab bar covers. */
 .mrpr-panel-scrolls .mrpr-section-heading {
-  inset-block-start: calc(var(--mrpr-bar-size) + var(--mrpr-tabbar-size) - 0.75rem);
+  inset-block-start: calc(
+    var(--mrpr-bar-actual-size, var(--mrpr-bar-size)) + var(--mrpr-tabbar-size) - 0.75rem
+  );
 }
 
 .mrpr-panel-note {
@@ -841,6 +845,12 @@
   border: 1px solid var(--pr-surface-subtle-line);
   border-radius: 0.625rem;
   background: var(--pr-surface-subtle);
+}
+.mrpr-bar-pill-core {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 2px;
 }
 .mrpr-bar-pill-sep {
   flex-shrink: 0;
@@ -1095,7 +1105,7 @@
   }
   .mrpr-bar .mrpr-header-more::after {
     position: absolute;
-    inset-block: calc((100% - max(44px, 2.75rem)) / 2);
+    inset-block: calc((100% - var(--mrpr-bar-size)) / 2);
     inset-inline: 0;
     content: '';
   }
@@ -1105,80 +1115,17 @@
     inset-inline: 0;
     content: '';
   }
-}
-
-/* Narrow desktop side panels (down to the 200 px host minimum) wrap the breadcrumbs above the
-   floating control pill so Fill, Fold, and Close stay visible and clickable without shrinking
-   touch targets. Phones omit Fill and Fold (`.mrpr-panel-framed` is unset) and keep a single row. */
-@container mrpr-panel (max-width: 19rem) {
-  .mrpr-panel-framed > .mrpr-bar,
-  .mrpr-panel-framed.mrpr-panel-scrolls > .mrpr-tabbar,
-  .mrpr-panel-framed.mrpr-panel-scrolls > .mrpr-tabpanel,
-  .mrpr-panel-framed.mrpr-panel-scrolls .mrpr-section-heading {
-    --mrpr-bar-size: 5rem;
+  /* Desktop framed bars can wrap onto two rows; give their buttons real 44 px heights and disable
+     the single-row pseudo-element expansion so wrapped rows never overlap hit targets. */
+  .mrpr-panel-framed > .mrpr-bar .mrpr-header-more {
+    min-block-size: max(44px, 2.75rem);
   }
-  .mrpr-panel-framed > .mrpr-bar {
-    flex-wrap: wrap;
-    align-content: center;
-    row-gap: 0.25rem;
-    padding-inline: 0.75rem 0.625rem;
+  .mrpr-panel-framed > .mrpr-bar .mrpr-header-more::after {
+    content: none;
   }
-  .mrpr-panel-framed > .mrpr-bar > .mrpr-bar-swap,
-  .mrpr-panel-framed > .mrpr-bar > .mrpr-bar-label {
-    display: flex;
-    flex: 1 1 100%;
-    min-inline-size: 0;
-    align-items: center;
-    gap: 0.25rem;
-  }
-  .mrpr-panel-framed > .mrpr-bar > .mrpr-bar-end {
-    max-inline-size: 100%;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-  }
-}
-
-@media (any-pointer: coarse) {
-  @container mrpr-panel (max-width: 24rem) {
-    .mrpr-panel-framed > .mrpr-bar,
-    .mrpr-panel-framed.mrpr-panel-scrolls > .mrpr-tabbar,
-    .mrpr-panel-framed.mrpr-panel-scrolls > .mrpr-tabpanel,
-    .mrpr-panel-framed.mrpr-panel-scrolls .mrpr-section-heading {
-      --mrpr-bar-size: 5.75rem;
-    }
-    .mrpr-panel-framed > .mrpr-bar {
-      flex-wrap: wrap;
-      align-content: center;
-      row-gap: 0.25rem;
-      padding-inline: 0.75rem 0.625rem;
-    }
-    .mrpr-panel-framed > .mrpr-bar > .mrpr-bar-swap,
-    .mrpr-panel-framed > .mrpr-bar > .mrpr-bar-label {
-      display: flex;
-      flex: 1 1 100%;
-      min-inline-size: 0;
-      align-items: center;
-      gap: 0.25rem;
-    }
-    .mrpr-panel-framed > .mrpr-bar .mrpr-header-more {
-      min-block-size: max(44px, 2.75rem);
-    }
-    .mrpr-panel-framed > .mrpr-bar .mrpr-header-more::after {
-      content: none;
-    }
-    .mrpr-panel-framed > .mrpr-bar > .mrpr-bar-end {
-      max-inline-size: 100%;
-      flex-wrap: wrap;
-      justify-content: flex-end;
-    }
-  }
-  @container mrpr-panel (max-width: 18rem) {
-    .mrpr-panel-framed > .mrpr-bar,
-    .mrpr-panel-framed.mrpr-panel-scrolls > .mrpr-tabbar,
-    .mrpr-panel-framed.mrpr-panel-scrolls > .mrpr-tabpanel,
-    .mrpr-panel-framed.mrpr-panel-scrolls .mrpr-section-heading {
-      --mrpr-bar-size: 8.75rem;
-    }
+  /* At ultra-narrow coarse widths (down to 200 px at any Page Zoom), break the pill cleanly between
+     panel actions and Fill/Fold/Close. */
+  @container mrpr-panel (max-width: 260px) {
     .mrpr-panel-framed > .mrpr-bar {
       padding-inline: 0.5rem;
     }
@@ -1188,6 +1135,47 @@
       block-size: 0;
       margin: 0;
     }
+  }
+}
+
+/* Desktop framed side panels wrap the bar naturally whenever breadcrumbs, badges, and the floating
+   control pill do not fit on one row (e.g. 200 px minimum width, 400 px touch desktops with
+   Auto-merge badges, or 50% Page Zoom). Phones omit `.mrpr-panel-framed` and stay a single row. */
+.mrpr-panel-framed > .mrpr-bar {
+  block-size: auto;
+  min-block-size: var(--mrpr-bar-size);
+  flex-wrap: wrap;
+  row-gap: 0.25rem;
+  padding-block: 0.25rem;
+}
+.mrpr-panel-framed > .mrpr-bar > .mrpr-bar-swap {
+  display: flex;
+  flex: 1 1 0;
+  max-inline-size: 100%;
+  align-items: center;
+  gap: 0.25rem;
+}
+.mrpr-panel-framed > .mrpr-bar > .mrpr-bar-swap > .mrpr-bar-details {
+  min-inline-size: auto;
+  max-inline-size: 100%;
+}
+.mrpr-panel-framed > .mrpr-bar > .mrpr-bar-label {
+  flex: 1 1 5rem;
+}
+.mrpr-panel-framed > .mrpr-bar > .mrpr-bar-end {
+  max-inline-size: 100%;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+@container mrpr-panel (max-width: 220px) {
+  .mrpr-panel-framed > .mrpr-bar {
+    padding-inline: 0.5rem;
+  }
+  .mrpr-panel-framed > .mrpr-bar > .mrpr-bar-end > .mrpr-bar-pill-sep {
+    flex-basis: 100%;
+    inline-size: 100%;
+    block-size: 0;
+    margin: 0;
   }
 }
 
