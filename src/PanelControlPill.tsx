@@ -4,6 +4,38 @@ import { ChevronRight, Maximize2, Minimize2, X } from 'lucide-react';
 import { usePanelFrame, usePluginTranslation, useRoomSidePanel } from '@mindroom/client-sdk/core';
 import { IconTooltip } from '@mindroom/client-sdk/ui';
 
+function PillButton({
+  label,
+  pressed,
+  onClick,
+  icon,
+}: {
+  label: string;
+  pressed?: boolean;
+  onClick: () => void;
+  icon: ReactNode;
+}) {
+  return (
+    <IconTooltip label={label} align="End">
+      {(triggerRef) => (
+        <PlainIconButton
+          ref={triggerRef}
+          size="300"
+          radii="300"
+          variant="SurfaceVariant"
+          fill="None"
+          className="mrpr-header-more"
+          aria-label={label}
+          aria-pressed={pressed}
+          onClick={onClick}
+        >
+          {icon}
+        </PlainIconButton>
+      )}
+    </IconTooltip>
+  );
+}
+
 /**
  * The top-right floating control pill (`title: 'own'`, `frameControls: 'own'`): optional
  * panel-specific controls (Hide details, More actions), a subtle separator, Fill and Fold on
@@ -25,7 +57,6 @@ export function PanelControlPill({ children }: { children?: ReactNode }) {
   const foldLabel = activeFrame
     ? (activeFrame.foldLabel ?? t('foldPanel', { label: activeFrame.label }))
     : '';
-  const closeLabel = t('closePanel');
 
   return (
     <span className="mrpr-bar-end">
@@ -35,62 +66,31 @@ export function PanelControlPill({ children }: { children?: ReactNode }) {
         <span className="mrpr-bar-pill-core">
           {activeFrame ? (
             <>
-              <IconTooltip label={fillLabel} align="End">
-                {(triggerRef) => (
-                  <PlainIconButton
-                    ref={triggerRef}
-                    size="300"
-                    radii="300"
-                    variant="SurfaceVariant"
-                    fill="None"
-                    className="mrpr-header-more"
-                    aria-label={fillLabel}
-                    aria-pressed={filled}
-                    onClick={() => activeFrame.setLayout(filled ? 'beside' : 'filled')}
-                  >
-                    {filled ? (
-                      <Minimize2 aria-hidden className="mrpr-button-icon" />
-                    ) : (
-                      <Maximize2 aria-hidden className="mrpr-button-icon" />
-                    )}
-                  </PlainIconButton>
-                )}
-              </IconTooltip>
-              <IconTooltip label={foldLabel} align="End">
-                {(triggerRef) => (
-                  <PlainIconButton
-                    ref={triggerRef}
-                    size="300"
-                    radii="300"
-                    variant="SurfaceVariant"
-                    fill="None"
-                    className="mrpr-header-more"
-                    aria-label={foldLabel}
-                    onClick={() => activeFrame.setLayout('folded')}
-                  >
-                    <ChevronRight aria-hidden className="mrpr-button-icon mrpr-fold-icon" />
-                  </PlainIconButton>
-                )}
-              </IconTooltip>
+              <PillButton
+                label={fillLabel}
+                pressed={filled}
+                onClick={() => activeFrame.setLayout(filled ? 'beside' : 'filled')}
+                icon={
+                  filled ? (
+                    <Minimize2 aria-hidden className="mrpr-button-icon" />
+                  ) : (
+                    <Maximize2 aria-hidden className="mrpr-button-icon" />
+                  )
+                }
+              />
+              <PillButton
+                label={foldLabel}
+                onClick={() => activeFrame.setLayout('folded')}
+                icon={<ChevronRight aria-hidden className="mrpr-button-icon mrpr-fold-icon" />}
+              />
             </>
           ) : null}
           {panel ? (
-            <IconTooltip label={closeLabel} align="End">
-              {(triggerRef) => (
-                <PlainIconButton
-                  ref={triggerRef}
-                  size="300"
-                  radii="300"
-                  variant="SurfaceVariant"
-                  fill="None"
-                  className="mrpr-header-more"
-                  aria-label={closeLabel}
-                  onClick={panel.close}
-                >
-                  <X aria-hidden className="mrpr-button-icon" />
-                </PlainIconButton>
-              )}
-            </IconTooltip>
+            <PillButton
+              label={t('closePanel')}
+              onClick={panel.close}
+              icon={<X aria-hidden className="mrpr-button-icon" />}
+            />
           ) : null}
         </span>
       ) : null}
