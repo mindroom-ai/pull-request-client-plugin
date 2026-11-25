@@ -13,8 +13,10 @@ export function pluginRootStyle(): CSSProperties {
     '--pr-border': color.Surface.ContainerLine,
     '--pr-surface': color.Surface.Container,
     '--pr-surface-subtle': color.SurfaceVariant.Container,
-    // The side panel's own background, which the app's panel frame draws behind it.
-    '--pr-panel': color.Background.Container,
+    '--pr-surface-subtle-line': color.SurfaceVariant.ContainerLine,
+    '--pr-surface-subtle-hover': color.SurfaceVariant.ContainerHover,
+    // The side panel's own floating card background, matching the center conversation card.
+    '--pr-panel': color.Surface.Container,
     '--pr-hover': color.Surface.ContainerHover,
     '--pr-added': color.Success.Main,
     '--pr-removed': color.Critical.Main,

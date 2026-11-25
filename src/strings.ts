@@ -109,9 +109,11 @@ export const en = {
   tab: { summary: 'Summary', timeline: 'Timeline', code: 'Code' },
   // In the More actions menu, over the command it copies.
   copyCheckout: 'Copy checkout command',
-  // The panel's own Close, at the end of its top row, and the bar that stands for the header
-  // once it scrolled away or collapsed on the Code tab.
+  // The panel's own frame controls and Close, at the end of its top row, and the bar that stands
+  // for the header once it scrolled away or collapsed on the Code tab.
   closePanel: 'Close pull request panel',
+  fillPanel: 'Fill the room with {{label}}',
+  foldPanel: 'Fold {{label}} to the edge',
   showDetails: 'Show details of pull request #{{number}}: {{title}}',
   hideDetails: 'Hide pull request details',
   badge: { autoMerge: 'Auto-merge ({{method}})' },

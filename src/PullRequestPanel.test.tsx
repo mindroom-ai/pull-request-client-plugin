@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { notifyManager, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act } from './testing/act';
+import type { PanelFrame } from '@mindroom/client-sdk/core';
 import { MindroomServerError } from '@mindroom/client-sdk/server';
 import { renderPluginComponent } from '@mindroom/client-sdk/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -2681,5 +2682,179 @@ describe('the dense header', () => {
     const branches = view.container.querySelector<HTMLElement>('.mrpr-branches');
     expect(branches?.textContent).toMatch(/^main.*feature$/);
     expect(branches?.querySelector('button')).toBeNull();
+  });
+});
+
+describe('floating control pill', () => {
+  afterEach(() => {
+    panelControl.close = undefined;
+  });
+
+  const showWithFrame = async (request: unknown, frame?: PanelFrame) => {
+    client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return renderPluginComponent(
+      <QueryClientProvider client={client}>
+        <PullRequestPanel roomId="!room:example.org" request={request} />
+      </QueryClientProvider>,
+      { id: 'pull-requests', plugin, frame }
+    );
+  };
+
+  const pillLabels = (container: HTMLElement) =>
+    Array.from(container.querySelectorAll('.mrpr-bar-end button')).map((button) =>
+      button.getAttribute('aria-label')
+    );
+
+  it('renders Fill, Fold, and Close in the pill on desktop and toggles layout on click', async () => {
+    const close = vi.fn();
+    const setLayout = vi.fn();
+    panelControl.close = close;
+    const view = await showWithFrame(REQUEST, {
+      label: 'Pull request',
+      layout: 'beside',
+      setLayout,
+    });
+    await view.findByText('Add pull request cards');
+    expect(
+      view.container.querySelector('.mrpr-bar')?.classList.contains('mrpr-bar-collapsed')
+    ).toBe(false);
+    expect(view.container.querySelectorAll('.mrpr-bar-end .mrpr-bar-pill-sep')).toHaveLength(1);
+    expect(pillLabels(view.container)).toEqual([
+      'More actions',
+      'Fill the room with Pull request',
+      'Fold Pull request to the edge',
+      'Close pull request panel',
+    ]);
+
+    const fill = view.getByRole('button', { name: 'Fill the room with Pull request' });
+    expect(fill.getAttribute('aria-pressed')).toBe('false');
+    await click(fill);
+    expect(setLayout).toHaveBeenCalledWith('filled');
+
+    const fold = view.getByRole('button', { name: 'Fold Pull request to the edge' });
+    await click(fold);
+    expect(setLayout).toHaveBeenCalledWith('folded');
+
+    await click(view.getByRole('button', { name: 'Close pull request panel' }));
+    expect(close).toHaveBeenCalledTimes(1);
+
+    // On the Code tab, Hide details joins More actions before the separator, and collapsing marks the bar.
+    await click(view.getByRole('tab', { name: 'Code' }));
+    expect(pillLabels(view.container)).toEqual([
+      'Hide pull request details',
+      'More actions',
+      'Fill the room with Pull request',
+      'Fold Pull request to the edge',
+      'Close pull request panel',
+    ]);
+    await click(view.getByRole('button', { name: 'Hide pull request details' }));
+    expect(
+      view.container.querySelector('.mrpr-bar')?.classList.contains('mrpr-bar-collapsed')
+    ).toBe(true);
+  });
+
+  it('marks Fill pressed when filled and returns to beside on click', async () => {
+    const setLayout = vi.fn();
+    panelControl.close = vi.fn();
+    const view = await showWithFrame(REQUEST, {
+      label: 'Pull request',
+      layout: 'filled',
+      setLayout,
+    });
+    await view.findByText('Add pull request cards');
+    const fill = view.getByRole('button', { name: 'Fill the room with Pull request' });
+    expect(fill.getAttribute('aria-pressed')).toBe('true');
+    await click(fill);
+    expect(setLayout).toHaveBeenCalledWith('beside');
+  });
+
+  it('omits Fill and Fold when no panel frame is provided or when folded', async () => {
+    panelControl.close = vi.fn();
+    const phoneView = await showWithFrame(REQUEST, undefined);
+    await phoneView.findByText('Add pull request cards');
+    expect(phoneView.queryByRole('button', { name: /Fill the room/ })).toBeNull();
+    expect(phoneView.queryByRole('button', { name: /Fold .* to the edge/ })).toBeNull();
+    expect(pillLabels(phoneView.container)).toEqual(['More actions', 'Close pull request panel']);
+    expect(phoneView.container.querySelectorAll('.mrpr-bar-pill-sep')).toHaveLength(1);
+    phoneView.unmount();
+
+    const foldedView = await showWithFrame(REQUEST, {
+      label: 'Pull request',
+      layout: 'folded',
+      setLayout: vi.fn(),
+    });
+    await foldedView.findByText('Add pull request cards');
+    expect(foldedView.queryByRole('button', { name: /Fill the room/ })).toBeNull();
+    expect(foldedView.queryByRole('button', { name: /Fold .* to the edge/ })).toBeNull();
+    expect(pillLabels(foldedView.container)).toEqual(['More actions', 'Close pull request panel']);
+    foldedView.unmount();
+
+    // Without frame controls or Close, no trailing separator appears after More actions.
+    panelControl.close = undefined;
+    const standaloneView = await showWithFrame(REQUEST, undefined);
+    await standaloneView.findByText('Add pull request cards');
+    expect(pillLabels(standaloneView.container)).toEqual(['More actions']);
+    expect(standaloneView.container.querySelector('.mrpr-bar-pill-sep')).toBeNull();
+  });
+
+  it.each<
+    [
+      string,
+      unknown,
+      () => void,
+      (view: Awaited<ReturnType<typeof renderPluginComponent>>) => Promise<void>,
+    ]
+  >([
+    [
+      'empty',
+      undefined,
+      () => undefined,
+      async (view) => {
+        expect(view.getByText(EMPTY)).toBeTruthy();
+      },
+    ],
+    [
+      'loading',
+      REQUEST,
+      () => {
+        fetchMock.mockImplementation(() => new Promise<Response>(() => undefined));
+      },
+      async (view) => {
+        expect(view.getByText('Loading pull request')).toBeTruthy();
+      },
+    ],
+    [
+      'error with token form',
+      REQUEST,
+      () => {
+        fetchMock.mockImplementation(async () => respond({ message: 'Not Found' }, 404));
+      },
+      async (view) => {
+        expect(await view.findByLabelText('GitHub token')).toBeTruthy();
+      },
+    ],
+  ])('keeps Fill, Fold, and Close available in the %s state', async (_name, req, setup, ready) => {
+    setup();
+    const close = vi.fn();
+    const setLayout = vi.fn();
+    panelControl.close = close;
+    const view = await showWithFrame(req, {
+      label: 'Pull request',
+      layout: 'beside',
+      setLayout,
+    });
+    await ready(view);
+    expect(view.container.querySelector('.mrpr-bar-pill-sep')).toBeNull();
+    expect(pillLabels(view.container)).toEqual([
+      'Fill the room with Pull request',
+      'Fold Pull request to the edge',
+      'Close pull request panel',
+    ]);
+    await click(view.getByRole('button', { name: 'Fill the room with Pull request' }));
+    expect(setLayout).toHaveBeenCalledWith('filled');
+    await click(view.getByRole('button', { name: 'Fold Pull request to the edge' }));
+    expect(setLayout).toHaveBeenCalledWith('folded');
+    await click(view.getByRole('button', { name: 'Close pull request panel' }));
+    expect(close).toHaveBeenCalledTimes(1);
   });
 });

@@ -2,6 +2,7 @@
 // The side panel: the header of the pull request a link opened, then its Summary and its Code.
 // It shows its own name and Close (`title: 'own'`), so the room draws no title row above it.
 import {
+  Children,
   useContext,
   useEffect,
   useId,
@@ -14,8 +15,17 @@ import {
   type RefObject,
 } from 'react';
 import { IconButton as PlainIconButton } from 'folds';
-import { ArrowLeft, ChevronDown, ChevronUp, FileDiff, X } from 'lucide-react';
-import { usePluginTranslation, useRoomSidePanel } from '@mindroom/client-sdk/core';
+import {
+  ArrowLeft,
+  ChevronDown,
+  ChevronRight,
+  ChevronUp,
+  FileDiff,
+  Maximize2,
+  Minimize2,
+  X,
+} from 'lucide-react';
+import { usePanelFrame, usePluginTranslation, useRoomSidePanel } from '@mindroom/client-sdk/core';
 import { IconTooltip } from '@mindroom/client-sdk/ui';
 import { useHeaderActions } from './actions/HeaderActions';
 import { usePullRequestActions } from './actions/usePullRequestActions';
@@ -134,30 +144,89 @@ function TabBar({
   );
 }
 
-/** The panel's own Close (`title: 'own'`): the room draws no title row above the panel. */
-function CloseButton() {
+/**
+ * The top-right floating control pill (`title: 'own'`): optional panel-specific controls
+ * (Hide details, More actions), a subtle separator, Fill and Fold on desktop side panels, and
+ * Close.
+ */
+function PanelControlPill({ children }: { children?: ReactNode }) {
   const t = usePluginTranslation('pull-requests');
+  const frame = usePanelFrame();
   const panel = useRoomSidePanel('pull-requests', 'pull-request');
-  if (!panel) return null;
-  const label = t('closePanel');
+  const hasLeading = Children.toArray(children).length > 0;
+  const activeFrame = frame && frame.layout !== 'folded' ? frame : undefined;
+  const hasTrailing = activeFrame !== undefined || panel !== undefined;
+  if (!hasLeading && !hasTrailing) return null;
+
+  const filled = activeFrame?.layout === 'filled';
+  const fillLabel = activeFrame ? t('fillPanel', { label: activeFrame.label }) : '';
+  const foldLabel = activeFrame ? t('foldPanel', { label: activeFrame.label }) : '';
+  const closeLabel = t('closePanel');
+
   return (
-    <IconTooltip label={label} align="End">
-      {(triggerRef) => (
-        // As the menu's button beside it, without a fill.
-        <PlainIconButton
-          ref={triggerRef}
-          size="300"
-          radii="300"
-          variant="SurfaceVariant"
-          fill="None"
-          className="mrpr-header-more"
-          aria-label={label}
-          onClick={panel.close}
-        >
-          <X aria-hidden className="mrpr-button-icon" />
-        </PlainIconButton>
-      )}
-    </IconTooltip>
+    <span className="mrpr-bar-end">
+      {children}
+      {hasLeading && hasTrailing ? <span aria-hidden className="mrpr-bar-pill-sep" /> : null}
+      {activeFrame ? (
+        <>
+          <IconTooltip label={fillLabel} align="End">
+            {(triggerRef) => (
+              <PlainIconButton
+                ref={triggerRef}
+                size="300"
+                radii="300"
+                variant="SurfaceVariant"
+                fill="None"
+                className="mrpr-header-more"
+                aria-label={fillLabel}
+                aria-pressed={filled}
+                onClick={() => activeFrame.setLayout(filled ? 'beside' : 'filled')}
+              >
+                {filled ? (
+                  <Minimize2 aria-hidden className="mrpr-button-icon" />
+                ) : (
+                  <Maximize2 aria-hidden className="mrpr-button-icon" />
+                )}
+              </PlainIconButton>
+            )}
+          </IconTooltip>
+          <IconTooltip label={foldLabel} align="End">
+            {(triggerRef) => (
+              <PlainIconButton
+                ref={triggerRef}
+                size="300"
+                radii="300"
+                variant="SurfaceVariant"
+                fill="None"
+                className="mrpr-header-more"
+                aria-label={foldLabel}
+                onClick={() => activeFrame.setLayout('folded')}
+              >
+                <ChevronRight aria-hidden className="mrpr-button-icon mrpr-fold-icon" />
+              </PlainIconButton>
+            )}
+          </IconTooltip>
+        </>
+      ) : null}
+      {panel ? (
+        <IconTooltip label={closeLabel} align="End">
+          {(triggerRef) => (
+            <PlainIconButton
+              ref={triggerRef}
+              size="300"
+              radii="300"
+              variant="SurfaceVariant"
+              fill="None"
+              className="mrpr-header-more"
+              aria-label={closeLabel}
+              onClick={panel.close}
+            >
+              <X aria-hidden className="mrpr-button-icon" />
+            </PlainIconButton>
+          )}
+        </IconTooltip>
+      ) : null}
+    </span>
   );
 }
 
@@ -328,7 +397,10 @@ function Header({
   ) : null;
   return (
     <>
-      <div ref={barRef} className="mrpr-crumbs mrpr-bar">
+      <div
+        ref={barRef}
+        className={collapsed ? 'mrpr-crumbs mrpr-bar mrpr-bar-collapsed' : 'mrpr-crumbs mrpr-bar'}
+      >
         <span ref={swapRef} className="mrpr-bar-swap">
           {collapsed ? (
             <button
@@ -377,7 +449,7 @@ function Header({
             </>
           )}
         </span>
-        <span className="mrpr-bar-end">
+        <PanelControlPill>
           {!scrolls && !collapsed && !holds ? (
             <IconTooltip label={t('hideDetails')} align="End">
               {(triggerRef) => (
@@ -402,8 +474,7 @@ function Header({
             </IconTooltip>
           ) : null}
           {menu}
-          <CloseButton />
-        </span>
+        </PanelControlPill>
       </div>
       <div
         ref={headerRef}
@@ -660,12 +731,10 @@ function Panel({ roomId, request }: PanelProps) {
         <RemovedTokenNote className="mrpr-status mrpr-panel-removed" />
         {!ref || !pr || !state ? (
           <>
-            {/* The panel's name and Close until a pull request shows. */}
+            {/* The panel's name and control pill until a pull request shows. */}
             <div className="mrpr-crumbs mrpr-bar">
               <h2 className="mrpr-bar-label mrpr-truncate">{t('panelLabel')}</h2>
-              <span className="mrpr-bar-end">
-                <CloseButton />
-              </span>
+              <PanelControlPill />
             </div>
             {!ref ? (
               <p className="mrpr-status mrpr-panel-note">{t('emptyPanel')}</p>

@@ -1,3 +1,4 @@
+import { color } from 'folds';
 import { describe, expect, it } from 'vitest';
 import { pluginRootStyle } from './theme';
 
@@ -18,5 +19,15 @@ describe('pluginRootStyle', () => {
     for (const name of ['--pr-primary-container-line', '--pr-on-primary-container']) {
       expect(style[name]).toMatch(/^var\(--/);
     }
+  });
+
+  it('uses Surface.Container for the floating panel card and SurfaceVariant tokens for subtle sub-cards', () => {
+    expect(pluginRootStyle()).toMatchObject({
+      '--pr-panel': color.Surface.Container,
+      '--pr-surface': color.Surface.Container,
+      '--pr-surface-subtle': color.SurfaceVariant.Container,
+      '--pr-surface-subtle-line': color.SurfaceVariant.ContainerLine,
+      '--pr-surface-subtle-hover': color.SurfaceVariant.ContainerHover,
+    });
   });
 });

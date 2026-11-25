@@ -410,13 +410,16 @@
   gap: 0.25rem;
   padding-block: 0.1875rem;
   padding-inline: 0.5rem;
-  border: 0;
+  border: 1px solid var(--pr-surface-subtle-line);
   border-radius: 0.375rem;
-  background: var(--pr-hover);
+  background: var(--pr-surface-subtle);
   color: var(--pr-fg);
   font: inherit;
   font-size: 0.75rem;
   cursor: pointer;
+}
+.mrpr-commit-trigger:hover {
+  background: var(--pr-surface-subtle-hover);
 }
 .mrpr-commit-trigger .mrpr-icon {
   opacity: 0.7;
@@ -648,12 +651,13 @@
   direction: rtl;
 }
 .mrpr-thread-card {
+  --mrpr-comment-bg: var(--pr-surface-subtle);
   margin-block: 0.5rem;
   margin-inline: 0.75rem;
   padding: 0.75rem;
-  border: 1px solid var(--pr-border);
+  border: 1px solid var(--pr-surface-subtle-line);
   border-radius: 0.75rem;
-  background: var(--pr-surface);
+  background: var(--pr-surface-subtle);
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
   font-size: 0.8125rem;
 }
@@ -710,14 +714,15 @@
    tab's area takes the rest, so the Code tab scrolls inside itself (Summary and Timeline scroll
    with the header, below). */
 .mrpr-panel {
-  /* The heights of the top row and the tab bar, which stay at the top while the header scrolls
-     away; a section heading stays under both. */
-  --mrpr-bar-size: 2.5rem;
+  /* The heights of the top row (aligned with the room's 54 px header) and the tab bar, which stay
+     at the top while the header scrolls away; a section heading stays under both. */
+  --mrpr-bar-size: 3.375rem;
   --mrpr-tabbar-size: 2.625rem;
   display: flex;
   flex-direction: column;
   block-size: 100%;
   min-block-size: 0;
+  background: var(--pr-panel);
 }
 /* Summary and Timeline: the panel takes its content's height, so the room's box scrolls it whole,
    the header with it, under the top row and the tab bar, which stay. The Code tab scrolls in
@@ -786,7 +791,8 @@
   color: var(--pr-muted);
 }
 /* The panel's top row, in place of the room's title row: the crumbs, or the bar that stands for
-   the header once it scrolled away, then More actions and Close. It stays at the top. */
+   the header once it scrolled away, then the floating control pill. It stays at the top without a
+   bottom hairline when expanded so the panel reads as a borderless floating card. */
 .mrpr-bar {
   position: sticky;
   inset-block-start: 0;
@@ -794,8 +800,16 @@
   flex-shrink: 0;
   box-sizing: border-box;
   block-size: var(--mrpr-bar-size);
-  padding-inline: 1rem 0.5rem;
+  padding-inline: 1rem 0.625rem;
   background: var(--pr-panel);
+}
+/* A subtle divider appears only when the bar is collapsed/sticky over scrolled content, without
+   doubling the tab bar's own top border. */
+.mrpr-bar-collapsed {
+  border-block-end: 1px solid var(--pr-surface-subtle-line);
+}
+.mrpr-bar-collapsed ~ .mrpr-tabbar {
+  border-block-start-color: transparent;
 }
 .mrpr-bar-swap {
   display: contents;
@@ -826,11 +840,22 @@
   font-weight: 600;
 }
 .mrpr-bar-end {
-  display: flex;
+  display: inline-flex;
   flex-shrink: 0;
   align-items: center;
-  gap: 0.125rem;
+  gap: 2px;
   margin-inline-start: auto;
+  padding: 2px;
+  border: 1px solid var(--pr-surface-subtle-line);
+  border-radius: 0.625rem;
+  background: var(--pr-surface-subtle);
+}
+.mrpr-bar-pill-sep {
+  flex-shrink: 0;
+  inline-size: 1px;
+  block-size: 1rem;
+  margin-inline: 2px;
+  background: var(--pr-surface-subtle-line);
 }
 
 .mrpr-panel-title {
@@ -905,7 +930,8 @@
 /* An arrow that points along the line turns around in right-to-left: the one from the head branch
    to the base branch, and a folded file's chevron, which Pierre's header (laid out left to right)
    holds in a page that reads right to left. */
-.mrpr-arrow-back:dir(rtl) {
+.mrpr-arrow-back:dir(rtl),
+.mrpr-fold-icon:dir(rtl) {
   transform: scaleX(-1);
 }
 
@@ -1063,10 +1089,10 @@
     min-inline-size: max(44px, 2.75rem);
     min-block-size: max(44px, 2.75rem);
   }
-  /* The top row is a finger's height, so its controls' targets fit inside the box that scrolls
-     and the bar's button is one. */
+  /* The top row stays aligned with the room header and at least a finger's height, so its
+     controls' targets fit inside the box that scrolls and the bar's button is one. */
   .mrpr-panel {
-    --mrpr-bar-size: max(44px, 2.75rem);
+    --mrpr-bar-size: max(44px, 3.375rem);
   }
   /* In the top row and on the branches, a control keeps its pointer height and takes a finger's
      target above and below it, so the row does not grow. */
@@ -1075,7 +1101,12 @@
     position: relative;
     min-block-size: 2rem;
   }
-  .mrpr-bar .mrpr-header-more::after,
+  .mrpr-bar .mrpr-header-more::after {
+    position: absolute;
+    inset-block: calc((100% - var(--mrpr-bar-size)) / 2);
+    inset-inline: 0;
+    content: '';
+  }
   .mrpr-branches > .mrpr-button-primary::after {
     position: absolute;
     inset-block: calc((100% - max(44px, 2.75rem)) / 2);
@@ -1099,8 +1130,9 @@
   flex-shrink: 0;
   gap: 0.125rem;
   padding: 0.125rem;
+  border: 1px solid var(--pr-surface-subtle-line);
   border-radius: 0.5rem;
-  background: var(--pr-hover);
+  background: var(--pr-surface-subtle);
 }
 
 .mrpr-tab {
@@ -1114,9 +1146,14 @@
   font-weight: 500;
   cursor: pointer;
 }
+.mrpr-tab:hover:not([aria-selected='true']) {
+  background: var(--pr-surface-subtle-hover);
+  color: var(--pr-fg);
+}
 .mrpr-tab[aria-selected='true'] {
   background: var(--pr-surface);
   color: var(--pr-fg);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.06);
 }
 
 .mrpr-tabpanel {
@@ -1453,7 +1490,7 @@
   inset-block-end: 0;
   block-size: 2.5rem;
   pointer-events: none;
-  background: linear-gradient(to top, var(--pr-surface), transparent);
+  background: linear-gradient(to top, var(--mrpr-comment-bg, var(--pr-panel)), transparent);
 }
 .mrpr-comment-body .mrpr-button {
   margin-block-start: 0.5rem;
@@ -1698,10 +1735,16 @@
   border-inline-start: 2px solid var(--pr-border);
 }
 .mrpr-comment-card {
+  --mrpr-comment-bg: var(--pr-surface-subtle);
   min-inline-size: 0;
-  border: 1px solid var(--pr-border);
+  border: 1px solid var(--pr-surface-subtle-line);
   border-radius: 0.5rem;
+  background: var(--pr-surface-subtle);
   padding: 0.625rem 0.75rem;
+}
+.mrpr-comment-card .mrpr-button:hover:not([aria-disabled='true']),
+.mrpr-thread-card .mrpr-button:hover:not([aria-disabled='true']) {
+  background: var(--pr-surface-subtle-hover);
 }
 .mrpr-comment-head {
   display: flex;
@@ -1794,7 +1837,7 @@ a.mrpr-time-link:hover {
   block-size: 1.5rem;
   align-items: center;
   justify-content: center;
-  background: var(--pr-surface);
+  background: var(--pr-panel);
   color: var(--pr-muted);
 }
 .mrpr-timeline-marker .mrpr-avatar {
@@ -2399,7 +2442,7 @@ button.mrpr-thread-menu-item[aria-current='true'] {
 
 .mrpr-dist-card {
   overflow: hidden;
-  border: 1px solid var(--pr-border);
+  border: 1px solid var(--pr-surface-subtle-line);
   border-radius: 0.5rem;
   background: var(--pr-surface);
 }
