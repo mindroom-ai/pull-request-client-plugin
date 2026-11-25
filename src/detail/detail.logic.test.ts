@@ -587,11 +587,14 @@ describe('baseFreshness', () => {
 });
 
 describe('visibleBody', () => {
-  it('drops comment-only bodies and strips HTML comments outside code', () => {
+  it('drops comment-only bodies and preserves non-empty bodies including leading indentation', () => {
     expect(visibleBody('<!-- auto-generated note -->')).toBeNull();
     expect(visibleBody('  <!-- a -->\n<!-- b -->\n ')).toBeNull();
     expect(visibleBody('')).toBeNull();
-    expect(visibleBody('<!-- auto-generated note -->\nNeeds a test.')).toBe('Needs a test.');
+    expect(visibleBody('<!-- auto-generated note -->\nNeeds a test.')).toBe(
+      '<!-- auto-generated note -->\nNeeds a test.'
+    );
+    expect(visibleBody('    indentedCode()')).toBe('    indentedCode()');
   });
 
   it('omits comment-only reviews from conversation items and timeline', () => {

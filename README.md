@@ -2,7 +2,7 @@
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![CI](https://github.com/mindroom-ai/pull-request-client-plugin/actions/workflows/ci.yml/badge.svg)](https://github.com/mindroom-ai/pull-request-client-plugin/actions/workflows/ci.yml)
-[![Client SDK](https://img.shields.io/badge/MindRoom%20Chat%20SDK-70-blue)](https://github.com/mindroom-ai/mindroom-chat/blob/main/docs/client-plugins.md)
+[![Client SDK](https://img.shields.io/badge/MindRoom%20Chat%20SDK-71-blue)](https://github.com/mindroom-ai/mindroom-chat/blob/main/docs/client-plugins.md)
 
 <picture>
   <source media="(prefers-reduced-motion: no-preference)" srcset="https://raw.githubusercontent.com/mindroom-ai/mindroom/main/assets/logo/logo-mark-animated.svg" />
@@ -63,7 +63,7 @@ Pair this client plugin with MindRoom's backend plugins to populate thread cards
 
 ### Custom builds & Docker
 
-To build MindRoom Chat with a local checkout of this plugin, install dependencies here once (`.npmrc` sets `legacy-peer-deps` so `@pierre/*` shares the client's React) and pass its absolute path via `MINDROOM_CLIENT_PLUGINS` (see [`docs/client-plugins.md`](https://github.com/mindroom-ai/mindroom-chat/blob/main/docs/client-plugins.md)). Requires MindRoom Chat client SDK `70` or later:
+To build MindRoom Chat with a local checkout of this plugin, install dependencies here once (`.npmrc` sets `legacy-peer-deps` so `@pierre/*` shares the client's React) and pass its absolute path via `MINDROOM_CLIENT_PLUGINS` (see [`docs/client-plugins.md`](https://github.com/mindroom-ai/mindroom-chat/blob/main/docs/client-plugins.md)). Requires MindRoom Chat client SDK `71` or later:
 
 ```bash
 git clone https://github.com/mindroom-ai/pull-request-client-plugin.git

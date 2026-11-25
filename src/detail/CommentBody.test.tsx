@@ -13,18 +13,21 @@ const BADGE = 'https://img.example/b.svg';
 const CAMO = 'https://camo.githubusercontent.com/abc/def';
 
 type ImageSource = (src: string) => string | undefined;
+type MarkdownOptions = { imageSource?: ImageSource; stripHtmlComments?: boolean };
 const markdown = vi.hoisted(() => ({
   html: undefined as string | undefined,
   inputs: [] as string[],
   imageSources: [] as (ImageSource | undefined)[],
+  stripHtmlComments: [] as (boolean | undefined)[],
 }));
 vi.mock('@mindroom/client-sdk/ui', async (importOriginal) => {
   const ui = await importOriginal<typeof import('@mindroom/client-sdk/ui')>();
   return {
     ...ui,
-    useMarkdownHtml: (input: string, options?: { imageSource?: ImageSource }) => {
+    useMarkdownHtml: (input: string, options?: MarkdownOptions) => {
       markdown.inputs.push(input);
       markdown.imageSources.push(options?.imageSource);
+      markdown.stripHtmlComments.push(options?.stripHtmlComments);
       return markdown.html;
     },
   };
@@ -42,6 +45,7 @@ beforeEach(() => {
   markdown.html = undefined;
   markdown.inputs = [];
   markdown.imageSources = [];
+  markdown.stripHtmlComments = [];
   // jsdom has no scrollIntoView.
   Element.prototype.scrollIntoView = vi.fn();
 });
@@ -99,32 +103,30 @@ describe('CommentBody', () => {
     expect(view.container.querySelector('.mrpr-comment-body')).toBeNull();
   });
 
-  it('strips HTML comments and links verified refs from bodyMeta', async () => {
+  it('passes stripHtmlComments: true to useMarkdownHtml and links verified refs from bodyMeta', async () => {
     const bodyMeta = {
       links: { '#42': 'https://github.com/acme/widgets/issues/42' },
       commits: {},
       videos: {},
     };
-    const view = await render(
-      <CommentBody
-        body={'<!-- auto-generated note -->\nSee #42.'}
-        images={NO_IMAGES}
-        bodyMeta={bodyMeta}
-      />
-    );
-    expect(view.container.textContent).toBe('See #42.');
-    expect(markdown.inputs.at(-1)).toBe('See #42.');
+    const body = '<!-- auto-generated note -->\nSee #42.';
+    const view = await render(<CommentBody body={body} images={NO_IMAGES} bodyMeta={bodyMeta} />);
+    expect(view.container.textContent).toBe(body);
+    expect(markdown.inputs.at(-1)).toBe(body);
+    expect(markdown.stripHtmlComments.at(-1)).toBe(true);
     markdown.html = '<p>See #42.</p>';
-    view.rerender(
-      <CommentBody
-        body={'<!-- auto-generated note -->\nSee #42.'}
-        images={NO_IMAGES}
-        bodyMeta={bodyMeta}
-      />
-    );
+    view.rerender(<CommentBody body={body} images={NO_IMAGES} bodyMeta={bodyMeta} />);
     const link = view.container.querySelector('a');
     expect(link?.getAttribute('href')).toBe('https://github.com/acme/widgets/issues/42');
     expect(link?.textContent).toBe('#42');
+  });
+
+  it('renders nothing when rendered HTML is empty (e.g. an unclosed HTML comment)', async () => {
+    markdown.html = ' \n ';
+    const view = await render(<CommentBody body="<!-- unclosed" images={NO_IMAGES} />);
+    expect(markdown.stripHtmlComments.at(-1)).toBe(true);
+    expect(view.container.textContent).toBe('');
+    expect(view.container.querySelector('.mrpr-comment-body')).toBeNull();
   });
 
   it('shows a short body whole, with no button', async () => {

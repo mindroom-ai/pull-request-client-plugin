@@ -17,7 +17,7 @@ export function CommentBody({
   bodyMeta,
 }: Pick<GitHubMarkdownProps, 'body' | 'images' | 'bodyMeta'>) {
   const t = usePluginTranslation('pull-requests');
-  const { prepared, html, imagesRef } = useGitHubMarkdown(body, images, bodyMeta);
+  const { visible, html, imagesRef } = useGitHubMarkdown(body, images, bodyMeta);
   const [expanded, setExpanded] = useState(false);
   const [overflowing, setOverflowing] = useState(false);
   const clip = useRef<HTMLDivElement>(null);
@@ -33,9 +33,9 @@ export function CommentBody({
     const observer = new ResizeObserver(measure);
     for (const child of Array.from(element.children)) observer.observe(child);
     return () => observer.disconnect();
-  }, [clamp, html, prepared]);
+  }, [clamp, html, visible]);
 
-  if (prepared === null) return null;
+  if (visible === null) return null;
   return (
     <div className="mrpr-comment-body">
       <div
@@ -44,7 +44,7 @@ export function CommentBody({
         className={`mrpr-comment-clip${expanded ? '' : ' mrpr-comment-clamped'}`}
         onFocusCapture={() => setExpanded(true)}
       >
-        <GitHubMarkdownView prepared={prepared} html={html} imagesRef={imagesRef} />
+        <GitHubMarkdownView visible={visible} html={html} imagesRef={imagesRef} />
         {overflowing && !expanded ? <div aria-hidden className="mrpr-comment-fade" /> : null}
       </div>
       {overflowing ? (

@@ -15,23 +15,33 @@ vi.mock('focus-trap-react', async () => ({
 
 // The app's Markdown renderer loads on demand and cannot load here; this one renders bold text,
 // and an image where `imageSource` gives it an address, as the app's sanitizer keeps it.
-const markdownReady = vi.hoisted(() => ({ ready: true }));
+const markdownMock = vi.hoisted(() => ({
+  ready: true,
+  stripHtmlComments: [] as (boolean | undefined)[],
+}));
 vi.mock('@mindroom/client-sdk/ui', async (importOriginal) => {
   const ui = await importOriginal<typeof import('@mindroom/client-sdk/ui')>();
   return {
     ...ui,
     useMarkdownHtml: (
       markdown: string,
-      options?: { imageSource?: (src: string) => string | undefined }
-    ) =>
-      markdownReady.ready
-        ? markdown
-            .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-            .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt: string, src: string) => {
-              const mapped = options?.imageSource?.(src);
-              return mapped ? `<img alt="${alt}" src="${mapped}">` : '';
-            })
-        : undefined,
+      options?: {
+        imageSource?: (src: string) => string | undefined;
+        stripHtmlComments?: boolean;
+      }
+    ) => {
+      markdownMock.stripHtmlComments.push(options?.stripHtmlComments);
+      if (!markdownMock.ready) return undefined;
+      const source = options?.stripHtmlComments
+        ? markdown.replace(/<!--[\s\S]*?(?:-->|$)/gu, '').trim()
+        : markdown;
+      return source
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt: string, src: string) => {
+          const mapped = options?.imageSource?.(src);
+          return mapped ? `<img alt="${alt}" src="${mapped}">` : '';
+        });
+    },
   };
 });
 
@@ -162,6 +172,8 @@ beforeEach(() => {
   localStorage.clear();
   fetchMock.mockReset();
   serve();
+  markdownMock.ready = true;
+  markdownMock.stripHtmlComments = [];
   vi.stubGlobal('fetch', fetchMock);
   // jsdom has no scrollIntoView.
   Element.prototype.scrollIntoView = vi.fn();
@@ -345,40 +357,34 @@ describe('SummaryTab', () => {
     empty.unmount();
     const commentOnly = await show(pull({ body: '<!-- auto-generated note -->\n  ' }));
     expect(commentOnly.getByText('No description.')).toBeTruthy();
+    commentOnly.unmount();
+    const unclosed = await show(pull({ body: '<!-- unclosed' }));
+    expect(unclosed.getByText('No description.')).toBeTruthy();
+    expect(markdownMock.stripHtmlComments.at(-1)).toBe(true);
   });
 
-  it('shows plain description while markdown loads and links verified refs from bodyMeta', async () => {
-    markdownReady.ready = false;
+  it('shows plain description while markdown loads, strips comments via SDK, and links verified refs', async () => {
+    const body = '<!-- auto-generated note -->\nFixes #42';
+    const bodyMeta = {
+      links: { '#42': 'https://github.com/acme/widgets/issues/42' },
+      commits: {},
+      videos: {},
+    };
+    markdownMock.ready = false;
     try {
-      const view = await show(
-        pull({
-          body: '<!-- auto-generated note -->\nFixes #42',
-          bodyMeta: {
-            links: { '#42': 'https://github.com/acme/widgets/issues/42' },
-            commits: {},
-            videos: {},
-          },
-        })
-      );
+      const view = await show(pull({ body, bodyMeta }));
       const plain = view.container.querySelector('.mrpr-markdown.mrpr-comment-plain');
-      expect(plain?.textContent).toBe('Fixes #42');
-      markdownReady.ready = true;
+      expect(plain?.textContent).toBe(body);
+      expect(markdownMock.stripHtmlComments).toContain(true);
+      markdownMock.ready = true;
       view.unmount();
-      const rendered = await show(
-        pull({
-          body: '<!-- auto-generated note -->\nFixes #42',
-          bodyMeta: {
-            links: { '#42': 'https://github.com/acme/widgets/issues/42' },
-            commits: {},
-            videos: {},
-          },
-        })
-      );
+      const rendered = await show(pull({ body, bodyMeta }));
       const link = rendered.container.querySelector('.mrpr-description a');
       expect(link?.getAttribute('href')).toBe('https://github.com/acme/widgets/issues/42');
       expect(link?.textContent).toBe('#42');
+      expect(rendered.container.querySelector('.mrpr-description')?.textContent).toBe('Fixes #42');
     } finally {
-      markdownReady.ready = true;
+      markdownMock.ready = true;
     }
   });
 
