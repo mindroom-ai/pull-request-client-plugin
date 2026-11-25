@@ -1567,6 +1567,8 @@
 }
 :is(.mrpr-markdown, .mrpr-description) img {
   max-inline-size: 100%;
+}
+:is(.mrpr-markdown, .mrpr-description) img[width] {
   block-size: auto;
 }
 :is(.mrpr-markdown, .mrpr-description) a:not([class]) {

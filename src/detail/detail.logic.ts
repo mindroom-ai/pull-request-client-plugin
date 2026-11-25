@@ -401,6 +401,7 @@ export function baseFreshness(
  * inside indented code are never discarded before the Markdown renderer runs.
  */
 export function visibleBody(body: string): string | null {
-  if (/(?:^|\n)(?: {4}| {0,3}\t)[ \t]*\S/u.test(body)) return body;
+  const outsideBlockComments = body.replace(/(^|\n) {0,3}<!--[\s\S]*?-->/gu, '$1');
+  if (/(?:^|\n)(?: {4}| {0,3}\t)[ \t]*\S/u.test(outsideBlockComments)) return body;
   return body.replace(/<!--[\s\S]*?-->/gu, '').trim().length === 0 ? null : body;
 }

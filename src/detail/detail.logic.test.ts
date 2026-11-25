@@ -634,4 +634,11 @@ describe('visibleBody', () => {
       )
     ).toHaveLength(2);
   });
+
+  it('drops multiline top-level HTML comments with indented placeholder lines', () => {
+    expect(visibleBody('<!--\n    Describe your change\n-->')).toBeNull();
+    expect(visibleBody('<!--\n\tDescribe your change\n-->')).toBeNull();
+    expect(visibleBody('   <!--\n    Describe your change\n-->')).toBeNull();
+    expect(visibleBody('<!--\n    a\n-->\n    code')).toBe('<!--\n    a\n-->\n    code');
+  });
 });
