@@ -2716,8 +2716,8 @@ describe('floating control pill', () => {
     });
     await view.findByText('Add pull request cards');
     expect(
-      view.container.querySelector('.mrpr-bar')?.classList.contains('mrpr-bar-collapsed')
-    ).toBe(false);
+      view.container.querySelector('.mrpr-panel')?.classList.contains('mrpr-panel-framed')
+    ).toBe(true);
     expect(view.container.querySelectorAll('.mrpr-bar-end .mrpr-bar-pill-sep')).toHaveLength(1);
     expect(pillLabels(view.container)).toEqual([
       'More actions',
@@ -2738,7 +2738,7 @@ describe('floating control pill', () => {
     await click(view.getByRole('button', { name: 'Close pull request panel' }));
     expect(close).toHaveBeenCalledTimes(1);
 
-    // On the Code tab, Hide details joins More actions before the separator, and collapsing marks the bar.
+    // On the Code tab, Hide details joins More actions before the separator.
     await click(view.getByRole('tab', { name: 'Code' }));
     expect(pillLabels(view.container)).toEqual([
       'Hide pull request details',
@@ -2749,7 +2749,7 @@ describe('floating control pill', () => {
     ]);
     await click(view.getByRole('button', { name: 'Hide pull request details' }));
     expect(
-      view.container.querySelector('.mrpr-bar')?.classList.contains('mrpr-bar-collapsed')
+      view.container.querySelector('.mrpr-header')?.classList.contains('mrpr-header-collapsed')
     ).toBe(true);
   });
 
@@ -2772,6 +2772,9 @@ describe('floating control pill', () => {
     panelControl.close = vi.fn();
     const phoneView = await showWithFrame(REQUEST, undefined);
     await phoneView.findByText('Add pull request cards');
+    expect(
+      phoneView.container.querySelector('.mrpr-panel')?.classList.contains('mrpr-panel-framed')
+    ).toBe(false);
     expect(phoneView.queryByRole('button', { name: /Fill the room/ })).toBeNull();
     expect(phoneView.queryByRole('button', { name: /Fold .* to the edge/ })).toBeNull();
     expect(pillLabels(phoneView.container)).toEqual(['More actions', 'Close pull request panel']);

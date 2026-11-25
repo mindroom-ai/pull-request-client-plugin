@@ -6,7 +6,7 @@
   "license": "MIT",
   "mindroomClientPlugin": {
     "id": "pull-requests",
-    "apiVersion": 69,
+    "apiVersion": 70,
     "entry": "./src/index.tsx"
   },
   "scripts": {

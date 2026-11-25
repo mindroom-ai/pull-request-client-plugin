@@ -32,8 +32,10 @@ const plugin: ClientPlugin = {
       placement: 'none',
       remember: true,
       Component: PullRequestPanel,
-      // Its top row shows the pull request and its own Close, in place of the room's title row.
+      // Its top row shows the pull request and its own floating control pill (Fill, Fold, Close),
+      // replacing both the room's title row and its open frame strip.
       title: 'own',
+      frameControls: 'own',
     },
   ],
   // Each chip opens its own hover card, so the card's details card stays closed over the chips.

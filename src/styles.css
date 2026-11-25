@@ -723,6 +723,7 @@
   block-size: 100%;
   min-block-size: 0;
   background: var(--pr-panel);
+  container: mrpr-panel / inline-size;
 }
 /* Summary and Timeline: the panel takes its content's height, so the room's box scrolls it whole,
    the header with it, under the top row and the tab bar, which stay. The Code tab scrolls in
@@ -791,8 +792,7 @@
   color: var(--pr-muted);
 }
 /* The panel's top row, in place of the room's title row: the crumbs, or the bar that stands for
-   the header once it scrolled away, then the floating control pill. It stays at the top without a
-   bottom hairline when expanded so the panel reads as a borderless floating card. */
+   the header once it scrolled away, then the floating control pill. */
 .mrpr-bar {
   position: sticky;
   inset-block-start: 0;
@@ -802,14 +802,6 @@
   block-size: var(--mrpr-bar-size);
   padding-inline: 1rem 0.625rem;
   background: var(--pr-panel);
-}
-/* A subtle divider appears only when the bar is collapsed/sticky over scrolled content, without
-   doubling the tab bar's own top border. */
-.mrpr-bar-collapsed {
-  border-block-end: 1px solid var(--pr-surface-subtle-line);
-}
-.mrpr-bar-collapsed ~ .mrpr-tabbar {
-  border-block-start-color: transparent;
 }
 .mrpr-bar-swap {
   display: contents;
@@ -1103,7 +1095,7 @@
   }
   .mrpr-bar .mrpr-header-more::after {
     position: absolute;
-    inset-block: calc((100% - var(--mrpr-bar-size)) / 2);
+    inset-block: calc((100% - max(44px, 2.75rem)) / 2);
     inset-inline: 0;
     content: '';
   }
@@ -1112,6 +1104,90 @@
     inset-block: calc((100% - max(44px, 2.75rem)) / 2);
     inset-inline: 0;
     content: '';
+  }
+}
+
+/* Narrow desktop side panels (down to the 200 px host minimum) wrap the breadcrumbs above the
+   floating control pill so Fill, Fold, and Close stay visible and clickable without shrinking
+   touch targets. Phones omit Fill and Fold (`.mrpr-panel-framed` is unset) and keep a single row. */
+@container mrpr-panel (max-width: 19rem) {
+  .mrpr-panel-framed > .mrpr-bar,
+  .mrpr-panel-framed.mrpr-panel-scrolls > .mrpr-tabbar,
+  .mrpr-panel-framed.mrpr-panel-scrolls > .mrpr-tabpanel,
+  .mrpr-panel-framed.mrpr-panel-scrolls .mrpr-section-heading {
+    --mrpr-bar-size: 5rem;
+  }
+  .mrpr-panel-framed > .mrpr-bar {
+    flex-wrap: wrap;
+    align-content: center;
+    row-gap: 0.25rem;
+    padding-inline: 0.75rem 0.625rem;
+  }
+  .mrpr-panel-framed > .mrpr-bar > .mrpr-bar-swap,
+  .mrpr-panel-framed > .mrpr-bar > .mrpr-bar-label {
+    display: flex;
+    flex: 1 1 100%;
+    min-inline-size: 0;
+    align-items: center;
+    gap: 0.25rem;
+  }
+  .mrpr-panel-framed > .mrpr-bar > .mrpr-bar-end {
+    max-inline-size: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+}
+
+@media (any-pointer: coarse) {
+  @container mrpr-panel (max-width: 24rem) {
+    .mrpr-panel-framed > .mrpr-bar,
+    .mrpr-panel-framed.mrpr-panel-scrolls > .mrpr-tabbar,
+    .mrpr-panel-framed.mrpr-panel-scrolls > .mrpr-tabpanel,
+    .mrpr-panel-framed.mrpr-panel-scrolls .mrpr-section-heading {
+      --mrpr-bar-size: 5.75rem;
+    }
+    .mrpr-panel-framed > .mrpr-bar {
+      flex-wrap: wrap;
+      align-content: center;
+      row-gap: 0.25rem;
+      padding-inline: 0.75rem 0.625rem;
+    }
+    .mrpr-panel-framed > .mrpr-bar > .mrpr-bar-swap,
+    .mrpr-panel-framed > .mrpr-bar > .mrpr-bar-label {
+      display: flex;
+      flex: 1 1 100%;
+      min-inline-size: 0;
+      align-items: center;
+      gap: 0.25rem;
+    }
+    .mrpr-panel-framed > .mrpr-bar .mrpr-header-more {
+      min-block-size: max(44px, 2.75rem);
+    }
+    .mrpr-panel-framed > .mrpr-bar .mrpr-header-more::after {
+      content: none;
+    }
+    .mrpr-panel-framed > .mrpr-bar > .mrpr-bar-end {
+      max-inline-size: 100%;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+  }
+  @container mrpr-panel (max-width: 18rem) {
+    .mrpr-panel-framed > .mrpr-bar,
+    .mrpr-panel-framed.mrpr-panel-scrolls > .mrpr-tabbar,
+    .mrpr-panel-framed.mrpr-panel-scrolls > .mrpr-tabpanel,
+    .mrpr-panel-framed.mrpr-panel-scrolls .mrpr-section-heading {
+      --mrpr-bar-size: 8.75rem;
+    }
+    .mrpr-panel-framed > .mrpr-bar {
+      padding-inline: 0.5rem;
+    }
+    .mrpr-panel-framed > .mrpr-bar > .mrpr-bar-end > .mrpr-bar-pill-sep {
+      flex-basis: 100%;
+      inline-size: 100%;
+      block-size: 0;
+      margin: 0;
+    }
   }
 }
 
@@ -1130,9 +1206,9 @@
   flex-shrink: 0;
   gap: 0.125rem;
   padding: 0.125rem;
-  border: 1px solid var(--pr-surface-subtle-line);
   border-radius: 0.5rem;
   background: var(--pr-surface-subtle);
+  box-shadow: inset 0 0 0 1px var(--pr-surface-subtle-line);
 }
 
 .mrpr-tab {

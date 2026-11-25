@@ -1,8 +1,8 @@
 // Ported from T3 Code (https://github.com/pingdotgg/t3code, apps/web/src/components/pullRequest/PullRequestDetailLayout.tsx and PullRequestDetailCrumbs.tsx at 8ab427c6), MIT, Copyright (c) 2026 T3 Tools Inc. See NOTICE.
 // The side panel: the header of the pull request a link opened, then its Summary and its Code.
-// It shows its own name and Close (`title: 'own'`), so the room draws no title row above it.
+// It shows its own name and control pill (`title: 'own'`, `frameControls: 'own'`), so the room
+// draws no title row or open frame strip around it.
 import {
-  Children,
   useContext,
   useEffect,
   useId,
@@ -15,17 +15,8 @@ import {
   type RefObject,
 } from 'react';
 import { IconButton as PlainIconButton } from 'folds';
-import {
-  ArrowLeft,
-  ChevronDown,
-  ChevronRight,
-  ChevronUp,
-  FileDiff,
-  Maximize2,
-  Minimize2,
-  X,
-} from 'lucide-react';
-import { usePanelFrame, usePluginTranslation, useRoomSidePanel } from '@mindroom/client-sdk/core';
+import { ArrowLeft, ChevronDown, ChevronUp, FileDiff } from 'lucide-react';
+import { usePanelFrame, usePluginTranslation } from '@mindroom/client-sdk/core';
 import { IconTooltip } from '@mindroom/client-sdk/ui';
 import { useHeaderActions } from './actions/HeaderActions';
 import { usePullRequestActions } from './actions/usePullRequestActions';
@@ -43,6 +34,7 @@ import {
   type PullRequestRef,
 } from './github';
 import { GitHubErrorState, useErrorTokenReason } from './GitHubErrorState';
+import { PanelControlPill } from './PanelControlPill';
 import {
   PullRequestActorLabel,
   PullRequestMetaLine,
@@ -141,92 +133,6 @@ function TabBar({
       </div>
       <div className="mrpr-tabbar-end">{end}</div>
     </div>
-  );
-}
-
-/**
- * The top-right floating control pill (`title: 'own'`): optional panel-specific controls
- * (Hide details, More actions), a subtle separator, Fill and Fold on desktop side panels, and
- * Close.
- */
-function PanelControlPill({ children }: { children?: ReactNode }) {
-  const t = usePluginTranslation('pull-requests');
-  const frame = usePanelFrame();
-  const panel = useRoomSidePanel('pull-requests', 'pull-request');
-  const hasLeading = Children.toArray(children).length > 0;
-  const activeFrame = frame && frame.layout !== 'folded' ? frame : undefined;
-  const hasTrailing = activeFrame !== undefined || panel !== undefined;
-  if (!hasLeading && !hasTrailing) return null;
-
-  const filled = activeFrame?.layout === 'filled';
-  const fillLabel = activeFrame ? t('fillPanel', { label: activeFrame.label }) : '';
-  const foldLabel = activeFrame ? t('foldPanel', { label: activeFrame.label }) : '';
-  const closeLabel = t('closePanel');
-
-  return (
-    <span className="mrpr-bar-end">
-      {children}
-      {hasLeading && hasTrailing ? <span aria-hidden className="mrpr-bar-pill-sep" /> : null}
-      {activeFrame ? (
-        <>
-          <IconTooltip label={fillLabel} align="End">
-            {(triggerRef) => (
-              <PlainIconButton
-                ref={triggerRef}
-                size="300"
-                radii="300"
-                variant="SurfaceVariant"
-                fill="None"
-                className="mrpr-header-more"
-                aria-label={fillLabel}
-                aria-pressed={filled}
-                onClick={() => activeFrame.setLayout(filled ? 'beside' : 'filled')}
-              >
-                {filled ? (
-                  <Minimize2 aria-hidden className="mrpr-button-icon" />
-                ) : (
-                  <Maximize2 aria-hidden className="mrpr-button-icon" />
-                )}
-              </PlainIconButton>
-            )}
-          </IconTooltip>
-          <IconTooltip label={foldLabel} align="End">
-            {(triggerRef) => (
-              <PlainIconButton
-                ref={triggerRef}
-                size="300"
-                radii="300"
-                variant="SurfaceVariant"
-                fill="None"
-                className="mrpr-header-more"
-                aria-label={foldLabel}
-                onClick={() => activeFrame.setLayout('folded')}
-              >
-                <ChevronRight aria-hidden className="mrpr-button-icon mrpr-fold-icon" />
-              </PlainIconButton>
-            )}
-          </IconTooltip>
-        </>
-      ) : null}
-      {panel ? (
-        <IconTooltip label={closeLabel} align="End">
-          {(triggerRef) => (
-            <PlainIconButton
-              ref={triggerRef}
-              size="300"
-              radii="300"
-              variant="SurfaceVariant"
-              fill="None"
-              className="mrpr-header-more"
-              aria-label={closeLabel}
-              onClick={panel.close}
-            >
-              <X aria-hidden className="mrpr-button-icon" />
-            </PlainIconButton>
-          )}
-        </IconTooltip>
-      ) : null}
-    </span>
   );
 }
 
@@ -397,10 +303,7 @@ function Header({
   ) : null;
   return (
     <>
-      <div
-        ref={barRef}
-        className={collapsed ? 'mrpr-crumbs mrpr-bar mrpr-bar-collapsed' : 'mrpr-crumbs mrpr-bar'}
-      >
+      <div ref={barRef} className="mrpr-crumbs mrpr-bar">
         <span ref={swapRef} className="mrpr-bar-swap">
           {collapsed ? (
             <button
@@ -714,11 +617,20 @@ function Panel({ roomId, request }: PanelProps) {
   // Summary and Timeline scroll with the header, in the room's box; the Code tab scrolls in
   // itself, under a header that starts expanded and can collapse into the top row.
   const scrolls = tab !== 'code';
+  const frame = usePanelFrame();
+  const framed = frame !== undefined && frame.layout !== 'folded';
+  const panelClassName = [
+    'mrpr-root mrpr-panel',
+    scrolls ? 'mrpr-panel-scrolls' : undefined,
+    framed ? 'mrpr-panel-framed' : undefined,
+  ]
+    .filter(Boolean)
+    .join(' ');
 
   return (
     <div
       ref={root}
-      className={scrolls ? 'mrpr-root mrpr-panel mrpr-panel-scrolls' : 'mrpr-root mrpr-panel'}
+      className={panelClassName}
       style={pluginRootStyle()}
       onFocus={() => {
         focused.current = true;
