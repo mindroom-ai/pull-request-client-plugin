@@ -2361,6 +2361,18 @@ describe('the dense header', () => {
     expect(view.getByText('mindroom-ai/mindroom-chat')).toBeTruthy();
   });
 
+  it('places the auto-merge badge beside the number before the title in the collapsed bar', async () => {
+    asWriter({ auto_merge: { merge_method: 'squash' } });
+    const view = await showScrolling();
+    await view.findByText('Add pull request cards');
+    await report(false);
+    const details = view.getByRole('button', { name: bar });
+    const badge = view.getByText('Auto-merge (squash)');
+    const title = details.querySelector('.mrpr-bar-title') as HTMLElement;
+    expect(details.textContent).toBe('#200Auto-merge (squash)Add pull request cards');
+    expect(badge.compareDocumentPosition(title)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
   it('keeps the focus on the number as the top row turns into the bar and back', async () => {
     const view = await showScrolling();
     await view.findByText('Add pull request cards');
@@ -2506,7 +2518,9 @@ describe('the dense header', () => {
     await click((await view.findByText('Confirm auto-merge?')).closest('button')!);
     await waitUntil(() => {
       expect(header.classList.contains('mrpr-header-collapsed')).toBe(true);
-      expect(view.getByRole('button', { name: bar }).textContent).toContain('Auto-merge (merge)');
+      expect(view.getByRole('button', { name: bar }).textContent).toBe(
+        '#200Auto-merge (merge)Add pull request cards'
+      );
     });
 
     await click(view.getByRole('button', { name: 'More actions' }));
@@ -2648,7 +2662,7 @@ describe('the dense header', () => {
   });
 });
 
-describe('floating control pill', () => {
+describe('flat header controls', () => {
   afterEach(() => {
     panelControl.close = undefined;
   });
@@ -2668,7 +2682,7 @@ describe('floating control pill', () => {
       button.getAttribute('aria-label')
     );
 
-  it('renders Fill, Fold, and Close in the pill on desktop and toggles layout on click', async () => {
+  it('renders Fill, Fold, and Close in the header controls on desktop and toggles layout on click', async () => {
     const close = vi.fn();
     const setLayout = vi.fn();
     panelControl.close = close;

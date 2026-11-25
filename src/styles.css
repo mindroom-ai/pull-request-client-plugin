@@ -730,13 +730,12 @@
   flex-direction: column;
   min-inline-size: 0;
   min-block-size: 0;
-  overflow: hidden;
+  overflow: auto;
 }
 /* Summary, Timeline, and empty/loading/error views scroll inside `.mrpr-panel-body` below
    `.mrpr-bar`, with the tab bar sticking to the top of `.mrpr-panel-body`. */
 .mrpr-panel-scrolls > .mrpr-panel-body {
   display: block;
-  overflow-y: auto;
 }
 .mrpr-panel-scrolls > .mrpr-panel-body > .mrpr-tabbar {
   position: sticky;
@@ -1089,7 +1088,7 @@
     min-block-size: max(44px, 2.75rem);
   }
   /* The top row stays aligned with the room header and at least a finger's height, so its
-     controls' targets fit inside the box that scrolls and the bar's button is one. */
+     controls' targets fit inside the top row and the bar's button is one. */
   .mrpr-panel {
     --mrpr-bar-size: max(44px, 3.375rem);
   }
@@ -1121,8 +1120,8 @@
   .mrpr-panel-framed > .mrpr-bar .mrpr-header-more::after {
     content: none;
   }
-  /* At ultra-narrow coarse widths (down to 200 px at any Page Zoom), break the pill cleanly between
-     panel actions and Fill/Fold/Close. */
+  /* At ultra-narrow coarse widths (down to 200 px at any Page Zoom), break the header controls
+     cleanly between panel actions and Fill/Fold/Close. */
   @container mrpr-panel (max-width: 260px) {
     .mrpr-panel-framed > .mrpr-bar {
       padding-inline: 0.5rem;
@@ -1136,8 +1135,8 @@
   }
 }
 
-/* Desktop framed side panels wrap the bar naturally whenever breadcrumbs, badges, and the floating
-   control pill do not fit on one row (e.g. 200 px minimum width, 400 px touch desktops with
+/* Desktop framed side panels wrap the bar naturally whenever breadcrumbs, badges, and the header
+   controls do not fit on one row (e.g. 200 px minimum width, 400 px touch desktops with
    Auto-merge badges, or 50% Page Zoom). Phones omit `.mrpr-panel-framed` and stay a single row. */
 .mrpr-panel-framed > .mrpr-bar {
   block-size: auto;
@@ -1160,7 +1159,7 @@
 }
 /* Zero inline-size keeps truncated repo names and collapsed titles out of the bar's min-content
    wrap threshold so non-shrinking PR numbers and badges trigger wrapping instead of overlapping
-   the control pill, while max-inline-size: max-content hugs short text. */
+   the header controls, while max-inline-size: max-content hugs short text. */
 .mrpr-panel-framed > .mrpr-bar > .mrpr-bar-swap .mrpr-truncate {
   inline-size: 0;
   flex: 1 1 0;

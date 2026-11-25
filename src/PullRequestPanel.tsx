@@ -1,6 +1,6 @@
 // Ported from T3 Code (https://github.com/pingdotgg/t3code, apps/web/src/components/pullRequest/PullRequestDetailLayout.tsx and PullRequestDetailCrumbs.tsx at 8ab427c6), MIT, Copyright (c) 2026 T3 Tools Inc. See NOTICE.
 // The side panel: the header of the pull request a link opened, then its Summary and its Code.
-// It shows its own name and control pill (`title: 'own'`, `frameControls: 'own'`), so the room
+// It shows its own name and header controls (`title: 'own'`, `frameControls: 'own'`), so the room
 // draws no title row or open frame strip around it.
 import {
   useContext,
@@ -299,8 +299,8 @@ function Header({
           >
             {stateIcon}
             <span className={`mrpr-shrink-0 ${state.toneClassName}`}>#{ref.number}</span>
-            <span className="mrpr-truncate mrpr-bar-title">{pr.title}</span>
             {autoMergeBadge}
+            <span className="mrpr-truncate mrpr-bar-title">{pr.title}</span>
             {scrolls ? null : <ChevronDown aria-hidden className="mrpr-icon mrpr-shrink-0" />}
           </button>
         ) : (
