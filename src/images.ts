@@ -12,7 +12,7 @@
  */
 export type ImageSources = { byUrl: Record<string, string>; byAttachment: Record<string, string> };
 
-const own = (map: Record<string, string>, key: string): string | undefined =>
+export const own = <T>(map: Record<string, T>, key: string): T | undefined =>
   Object.hasOwn(map, key) ? map[key] : undefined;
 
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/giu;
@@ -21,7 +21,7 @@ const IMG_TAG = /<img\b((?:[^>"']|"[^"]*"|'[^']*')*)>/giu;
 const ATTRIBUTE = /([^\s"'=<>/`]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/gu;
 const NAMED: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
 
-function decodeEntities(value: string): string {
+export function decodeEntities(value: string): string {
   return value.replace(/&(#x[0-9a-f]+|#[0-9]+|[a-z]+);/giu, (entity, name: string) => {
     if (name[0] !== '#') return NAMED[name.toLowerCase()] ?? entity;
     const code =
@@ -30,7 +30,7 @@ function decodeEntities(value: string): string {
   });
 }
 
-function attributes(tag: string): Map<string, string> {
+export function attributes(tag: string): Map<string, string> {
   const found = new Map<string, string>();
   for (const [, name, double, single, bare] of tag.matchAll(ATTRIBUTE)) {
     const key = name!.toLowerCase();
@@ -40,7 +40,7 @@ function attributes(tag: string): Map<string, string> {
   return found;
 }
 
-function httpsUrl(value: string): URL | null {
+export function httpsUrl(value: string): URL | null {
   try {
     const url = new URL(value);
     return url.protocol === 'https:' && !url.username && !url.password ? url : null;
@@ -50,12 +50,12 @@ function httpsUrl(value: string): URL | null {
 }
 
 /** An https URL on GitHub itself or one of its content hosts, the only images the panel loads. */
-function onGitHub(url: URL): boolean {
+export function onGitHub(url: URL): boolean {
   return url.hostname === 'github.com' || url.hostname.endsWith('.githubusercontent.com');
 }
 
 /** The last UUID in a URL's path: an attachment's, in each of GitHub's forms of its address. */
-function lastUuid(path: string): string | undefined {
+export function lastUuid(path: string): string | undefined {
   return path.match(UUID)?.at(-1)?.toLowerCase();
 }
 
@@ -79,7 +79,7 @@ export function imageSources(html: unknown): ImageSources {
 
 // `https://github.com/user-attachments/assets/<uuid>` and the older
 // `https://github.com/<owner>/<repo>/assets/<n>/<uuid>`.
-const ATTACHMENT_PATH =
+export const ATTACHMENT_PATH =
   /^\/(?:user-attachments\/assets|[^/]+\/[^/]+\/assets\/[0-9]+)\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/?$/iu;
 
 /**

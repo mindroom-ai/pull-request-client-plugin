@@ -3,25 +3,21 @@
 // its own box), clamped at 15rem with a button that shows it whole. A body of only HTML comments
 // (a bot's markers) draws nothing. Its images load only from GitHub: an attachment from its stable
 // address (signed when that fails), another image via camo.
-import { useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useId, useLayoutEffect, useRef, useState } from 'react';
 import { usePluginTranslation } from '@mindroom/client-sdk/core';
-import { MarkdownContent, useMarkdownHtml } from '@mindroom/client-sdk/ui';
-import { imageResolver, type ImageSources } from '../images';
 import { useRootFontSize } from '../rootFontSize';
-import { visibleBody } from './detail.logic';
-import { useSignedImageFallback } from './imageFallback';
+import { GitHubMarkdownView, useGitHubMarkdown, type GitHubMarkdownProps } from './GitHubMarkdown';
 
 /** The clamp's height in rem, as styles.css has it. */
 const CLAMP_REM = 15;
 
-export function CommentBody({ body, images }: { body: string; images: ImageSources }) {
+export function CommentBody({
+  body,
+  images,
+  bodyMeta,
+}: Pick<GitHubMarkdownProps, 'body' | 'images' | 'bodyMeta'>) {
   const t = usePluginTranslation('pull-requests');
-  const visible = visibleBody(body);
-  // One function per answer of GitHub's: a new one would sanitize the body again on each render.
-  const imageSource = useMemo(() => imageResolver(images), [images]);
-  // The plain text shows until the app's Markdown renderer has loaded.
-  const html = useMarkdownHtml(visible ?? '', { imageSource });
-  const imagesRef = useSignedImageFallback(images);
+  const { prepared, html, imagesRef } = useGitHubMarkdown(body, images, bodyMeta);
   const [expanded, setExpanded] = useState(false);
   const [overflowing, setOverflowing] = useState(false);
   const clip = useRef<HTMLDivElement>(null);
@@ -37,9 +33,9 @@ export function CommentBody({ body, images }: { body: string; images: ImageSourc
     const observer = new ResizeObserver(measure);
     for (const child of Array.from(element.children)) observer.observe(child);
     return () => observer.disconnect();
-  }, [clamp, html, visible]);
+  }, [clamp, html, prepared]);
 
-  if (visible === null) return null;
+  if (prepared === null) return null;
   return (
     <div className="mrpr-comment-body">
       <div
@@ -48,12 +44,7 @@ export function CommentBody({ body, images }: { body: string; images: ImageSourc
         className={`mrpr-comment-clip${expanded ? '' : ' mrpr-comment-clamped'}`}
         onFocusCapture={() => setExpanded(true)}
       >
-        {html === undefined ? (
-          <div className="mrpr-markdown mrpr-comment-plain">{visible}</div>
-        ) : (
-          // The app's renderer sanitizes this HTML under its own policy and draws it as a thread's.
-          <MarkdownContent ref={imagesRef} className="mrpr-markdown" html={html} />
-        )}
+        <GitHubMarkdownView prepared={prepared} html={html} imagesRef={imagesRef} />
         {overflowing && !expanded ? <div aria-hidden className="mrpr-comment-fade" /> : null}
       </div>
       {overflowing ? (

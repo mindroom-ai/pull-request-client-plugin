@@ -13,6 +13,7 @@ import type {
   ReviewState,
 } from '../github';
 import type { ReviewThread } from '../reviewThreads';
+import { prepareGitHubMarkdown } from './githubMarkdown';
 
 // Host UTC offsets make lexical timestamp sorting unsafe.
 function instant(iso: string): number {
@@ -239,7 +240,7 @@ const byTime = (left: ConversationItem, right: ConversationItem) =>
 
 // A review without a body only holds line comments, which come as threads, or a verdict, which
 // the reviewers row and the timeline's verdicts show.
-const hasBody = (review: Review) => review.body.trim().length > 0;
+const hasBody = (review: Review) => visibleBody(review.body) !== null;
 
 /**
  * The Summary tab's conversations: the comments, the reviews written with a body, and the review
@@ -395,7 +396,7 @@ export function baseFreshness(
   return behind > 0 || conflicts ? { behind, conflicts } : undefined;
 }
 
-/** A body that is only HTML comments (a bot's markers) and whitespace is empty; any other is kept. */
+/** Strips HTML comments outside code; returns `null` when nothing visible remains. */
 export function visibleBody(body: string): string | null {
-  return body.replace(/<!--[\s\S]*?-->/gu, '').trim().length === 0 ? null : body.trim();
+  return prepareGitHubMarkdown(body);
 }

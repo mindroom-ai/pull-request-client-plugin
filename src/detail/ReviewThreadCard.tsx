@@ -51,7 +51,11 @@ export function ReviewThreadCard({ thread }: { thread: ReviewThread }) {
                   )}
                   <PullRequestReactions reactions={comment.reactions} />
                 </div>
-                <CommentBody body={comment.body} images={comment.images} />
+                <CommentBody
+                  body={comment.body}
+                  images={comment.images}
+                  bodyMeta={comment.bodyMeta}
+                />
               </article>
             );
           })}

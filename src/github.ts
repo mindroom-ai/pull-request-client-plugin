@@ -3,6 +3,7 @@
 // It must stay free of the diff libraries: this module loads with the plugin's entry, and
 // those load only with the side panel.
 import { MindroomServerError, type MindroomServer } from '@mindroom/client-sdk/server';
+import { extractGitHubBodyMeta, type GitHubBodyMeta } from './githubBody';
 import { imageSources, type ImageSources } from './images';
 import { GIT_LFS_POINTER_HEADER, MAX_DIFF_BLOB_BYTES, type DiffSource } from './diff/diffSource';
 
@@ -23,6 +24,8 @@ export type PullRequest = {
   body: string;
   /** Where the description's images load from, out of GitHub's HTML of it. */
   images: ImageSources;
+  /** Verified autolinks and video labels out of GitHub's HTML of the description. */
+  bodyMeta?: GitHubBodyMeta;
   author: Actor | null;
   labels: { name: string; color: string }[];
   requestedReviewers: Actor[];
@@ -466,6 +469,7 @@ export async function fetchPullRequest(
     draft: raw.draft === true,
     body: text(raw.body),
     images: imageSources(raw.body_html),
+    bodyMeta: extractGitHubBodyMeta(raw.body_html),
     author: actor(user),
     labels: list(raw.labels).flatMap((label) =>
       typeof label.name === 'string' ? [{ name: label.name, color: text(label.color) }] : []
@@ -817,6 +821,8 @@ export type Review = {
   body: string;
   /** Where the body's images load from, out of GitHub's HTML of it. */
   images: ImageSources;
+  /** Verified autolinks and video labels out of GitHub's HTML of the body. */
+  bodyMeta?: GitHubBodyMeta;
   commitId: string;
   submittedAt: string;
   url: string;
@@ -848,6 +854,7 @@ export function fetchReviews(
         author: actor(record(item.user)),
         body: text(item.body),
         images: imageSources(item.body_html),
+        bodyMeta: extractGitHubBodyMeta(item.body_html),
         commitId: text(item.commit_id),
         submittedAt: text(item.submitted_at),
         url: text(item.html_url),
@@ -879,6 +886,8 @@ export type Comment = {
   body: string;
   /** Where the body's images load from, out of GitHub's HTML of it. */
   images: ImageSources;
+  /** Verified autolinks and video labels out of GitHub's HTML of the body. */
+  bodyMeta?: GitHubBodyMeta;
   createdAt: string;
   url: string;
   reactions: Reaction[];
@@ -891,6 +900,7 @@ function comment(item: Json): Comment {
     author: actor(record(item.user)),
     body: text(item.body),
     images: imageSources(item.body_html),
+    bodyMeta: extractGitHubBodyMeta(item.body_html),
     createdAt: text(item.created_at),
     url: text(item.html_url),
     reactions: REACTIONS.map((content) => ({ content, count: count(summary?.[content]) })).filter(

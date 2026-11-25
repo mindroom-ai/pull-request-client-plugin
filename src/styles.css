@@ -702,13 +702,6 @@
 .mrpr-thread-comment .mrpr-comment-body {
   margin-block-start: 0.25rem;
 }
-/* The body's first and last paragraphs keep no margin outside it, so the card's padding is all. */
-.mrpr-thread-comment .mrpr-markdown > :first-child {
-  margin-block-start: 0;
-}
-.mrpr-thread-comment .mrpr-markdown > :last-child {
-  margin-block-end: 0;
-}
 
 /* The side panel: a column as tall as the panel. The header and tab bar keep their height; the
    tab's area takes the rest, so the Code tab scrolls inside itself (Summary and Timeline scroll
@@ -1253,15 +1246,6 @@
 .mrpr-description {
   overflow-wrap: anywhere;
 }
-.mrpr-description > :first-child {
-  margin-block-start: 0;
-}
-.mrpr-description img {
-  max-inline-size: 100%;
-}
-.mrpr-description a {
-  color: var(--pr-primary);
-}
 
 .mrpr-tone-success {
   color: var(--pr-added);
@@ -1574,8 +1558,19 @@
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
-.mrpr-markdown img {
+/* The body's first and last blocks keep no margin outside it, so the card's padding is all. */
+:is(.mrpr-markdown, .mrpr-description) > :first-child {
+  margin-block-start: 0;
+}
+:is(.mrpr-markdown, .mrpr-description) > :last-child {
+  margin-block-end: 0;
+}
+:is(.mrpr-markdown, .mrpr-description) img {
   max-inline-size: 100%;
+  block-size: auto;
+}
+:is(.mrpr-markdown, .mrpr-description) a:not([class]) {
+  color: var(--pr-primary);
 }
 /* The app draws tables and code blocks as a thread does; a SHA or name in a table cell stays whole. */
 :is(.mrpr-markdown, .mrpr-description) table code {

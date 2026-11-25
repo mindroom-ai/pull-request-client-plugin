@@ -152,6 +152,7 @@ describe('fetchPullRequest', () => {
       draft: false,
       body: '',
       images: { byUrl: {}, byAttachment: {} },
+      bodyMeta: { links: {}, commits: {}, videos: {} },
       author: {
         login: 'u',
         name: null,
@@ -749,7 +750,7 @@ describe('commit paths', () => {
 describe('the lists', () => {
   const UUID = '11111111-2222-3333-4444-555555555555';
   const SIGNED = `https://private-user-images.githubusercontent.com/1/2-${UUID}.png?jwt=x&v=1`;
-  const HTML = `<p><img src="${SIGNED.replace('&', '&amp;')}" alt="a"></p>`;
+  const HTML = `<p><img src="${SIGNED.replace('&', '&amp;')}" alt="a"> <a class="issue-link" href="https://github.com/acme/widgets/issues/42">#42</a></p><details><summary>demo-before.mp4</summary><video src="https://github.com/user-attachments/assets/${UUID}"></video></details>`;
   const accepts = (fetchMock: ReturnType<typeof stubRoutes>) =>
     (fetchMock.mock.calls as unknown as [string, RequestInit][]).map(([url, init]) => [
       new URL(url).pathname,
@@ -774,6 +775,11 @@ describe('the lists', () => {
     await fetchCommits(ref, undefined);
     for (const answer of lists) {
       expect(answer.images).toEqual({ byUrl: {}, byAttachment: { [UUID]: SIGNED } });
+      expect(answer.bodyMeta).toEqual({
+        links: { '#42': 'https://github.com/acme/widgets/issues/42' },
+        commits: {},
+        videos: { [UUID]: { label: 'demo-before.mp4' } },
+      });
     }
     expect(accepts(fetchMock)).toEqual([
       ['/repos/a/b/pulls/1/reviews', 'application/vnd.github.full+json'],

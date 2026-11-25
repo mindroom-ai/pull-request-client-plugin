@@ -15,10 +15,9 @@ import FocusTrap from 'focus-trap-react';
 import type { RectCords } from 'folds';
 import { ArrowDownUp, ChevronRight, ListFilter, Tag, Users } from 'lucide-react';
 import { usePluginStorage, usePluginTranslation } from '@mindroom/client-sdk/core';
-import { MarkdownContent, Menu, PopOut, useMarkdownHtml } from '@mindroom/client-sdk/ui';
+import { Menu, PopOut } from '@mindroom/client-sdk/ui';
 import type { Paged, PullRequest, PullRequestRef, Review } from '../github';
 import { GitHubErrorState } from '../GitHubErrorState';
-import { imageResolver, type ImageSources } from '../images';
 import {
   PullRequestCheckStatusIcon,
   PullRequestCheckStatusLabel,
@@ -31,7 +30,7 @@ import { buildReviewThreads } from '../reviewThreads';
 import { pluginRootStyle } from '../theme';
 import { MenuOption } from './CommitSelector';
 import { ConversationCard } from './ConversationCards';
-import { useSignedImageFallback } from './imageFallback';
+import { GitHubMarkdown } from './GitHubMarkdown';
 import { TruncatedNote } from './TruncatedNote';
 import {
   conversationItems,
@@ -171,17 +170,6 @@ function ReviewersRow({
       ) : null}
     </MetaRow>
   );
-}
-
-function Description({ body, images }: { body: string; images: ImageSources }) {
-  const t = usePluginTranslation('pull-requests');
-  // One function per answer of GitHub's: a new one would sanitize the body again on each render.
-  const imageSource = useMemo(() => imageResolver(images), [images]);
-  const html = useMarkdownHtml(body, { imageSource });
-  const imagesRef = useSignedImageFallback(images);
-  if (body.trim() === '') return <p className="mrpr-status">{t('noDescription')}</p>;
-  if (html === undefined) return null;
-  return <MarkdownContent ref={imagesRef} className="mrpr-description" html={html} />;
 }
 
 /** The checks of the head commit, one row each; loaded once the section is open. */
@@ -389,7 +377,13 @@ export function SummaryTab({
       </section>
 
       <Section title={t('summary.description')} keepMounted>
-        <Description body={pullRequest.body} images={pullRequest.images} />
+        <GitHubMarkdown
+          body={pullRequest.body}
+          images={pullRequest.images}
+          bodyMeta={pullRequest.bodyMeta}
+          className="mrpr-description"
+          empty={<p className="mrpr-status">{t('noDescription')}</p>}
+        />
       </Section>
 
       <Section title={t('summary.checks')} defaultOpen={false}>

@@ -199,6 +199,20 @@ describe('TimelineTab', () => {
     expect(events[1]).toContain('src/a.ts:12');
   });
 
+  it('omits CommentBody on a verdict review whose body is only HTML comments', async () => {
+    serve({
+      reviews: [
+        review(1, 'alice', 'APPROVED', {
+          submitted_at: at(10),
+          body: '<!-- auto-generated note -->',
+        }),
+      ],
+    });
+    const view = await show({ pullRequest: pull({ createdAt: at(0) }) });
+    await view.findByText('Approved');
+    expect(view.container.querySelector('.mrpr-comment-body')).toBeNull();
+  });
+
   it('oldest first reverses', async () => {
     full();
     const view = await show({ order: 'oldest', pullRequest: pull({ createdAt: at(0) }) });

@@ -587,13 +587,21 @@ describe('baseFreshness', () => {
 });
 
 describe('visibleBody', () => {
-  it('drops a body that is nothing but a bot marker, and keeps one that says more', () => {
-    expect(visibleBody('<!-- MURMUR_IGNORE -->')).toBeNull();
+  it('drops comment-only bodies and strips HTML comments outside code', () => {
+    expect(visibleBody('<!-- auto-generated note -->')).toBeNull();
     expect(visibleBody('  <!-- a -->\n<!-- b -->\n ')).toBeNull();
     expect(visibleBody('')).toBeNull();
-    expect(visibleBody('<!-- summarize by coderabbit.ai -->\nNeeds a test.')).toBe(
-      '<!-- summarize by coderabbit.ai -->\nNeeds a test.'
-    );
+    expect(visibleBody('<!-- auto-generated note -->\nNeeds a test.')).toBe('Needs a test.');
+  });
+
+  it('omits comment-only reviews from conversation items and timeline', () => {
+    const hidden = review(9, 'alice', 'COMMENTED', '2026-11-01T00:05:00Z', {
+      body: '<!-- auto-generated note -->',
+    });
+    expect(conversationItems([], [hidden], [], 'oldest')).toEqual([]);
+    expect(
+      buildTimeline({ ...TIMELINE_SOURCE, commits: [], comments: [], reviews: [hidden] }, 'oldest')
+    ).toHaveLength(1);
   });
 
   it('keeps a fenced HTML comment, which is text', () => {

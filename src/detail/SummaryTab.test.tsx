@@ -15,6 +15,7 @@ vi.mock('focus-trap-react', async () => ({
 
 // The app's Markdown renderer loads on demand and cannot load here; this one renders bold text,
 // and an image where `imageSource` gives it an address, as the app's sanitizer keeps it.
+const markdownReady = vi.hoisted(() => ({ ready: true }));
 vi.mock('@mindroom/client-sdk/ui', async (importOriginal) => {
   const ui = await importOriginal<typeof import('@mindroom/client-sdk/ui')>();
   return {
@@ -23,12 +24,15 @@ vi.mock('@mindroom/client-sdk/ui', async (importOriginal) => {
       markdown: string,
       options?: { imageSource?: (src: string) => string | undefined }
     ) =>
-      markdown
-        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-        .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt: string, src: string) => {
-          const mapped = options?.imageSource?.(src);
-          return mapped ? `<img alt="${alt}" src="${mapped}">` : '';
-        }),
+      markdownReady.ready
+        ? markdown
+            .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+            .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt: string, src: string) => {
+              const mapped = options?.imageSource?.(src);
+              return mapped ? `<img alt="${alt}" src="${mapped}">` : '';
+            })
+            .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
+        : undefined,
   };
 });
 
@@ -336,9 +340,47 @@ describe('SummaryTab', () => {
     expect(fetchMock.mock.calls.length).toBe(fetches);
   });
 
-  it('says so when there is no description', async () => {
-    const view = await show(pull({ body: '' }));
-    expect(view.getByText('No description.')).toBeTruthy();
+  it('says so when there is no description or only HTML comments', async () => {
+    const empty = await show(pull({ body: '' }));
+    expect(empty.getByText('No description.')).toBeTruthy();
+    empty.unmount();
+    const commentOnly = await show(pull({ body: '<!-- auto-generated note -->\n  ' }));
+    expect(commentOnly.getByText('No description.')).toBeTruthy();
+  });
+
+  it('shows plain description while markdown loads and links verified refs from bodyMeta', async () => {
+    markdownReady.ready = false;
+    try {
+      const view = await show(
+        pull({
+          body: '<!-- auto-generated note -->\nFixes #42',
+          bodyMeta: {
+            links: { '#42': 'https://github.com/acme/widgets/issues/42' },
+            commits: {},
+            videos: {},
+          },
+        })
+      );
+      const plain = view.container.querySelector('.mrpr-markdown.mrpr-comment-plain');
+      expect(plain?.textContent).toBe('Fixes [#42](https://github.com/acme/widgets/issues/42)');
+      markdownReady.ready = true;
+      view.unmount();
+      const rendered = await show(
+        pull({
+          body: '<!-- auto-generated note -->\nFixes #42',
+          bodyMeta: {
+            links: { '#42': 'https://github.com/acme/widgets/issues/42' },
+            commits: {},
+            videos: {},
+          },
+        })
+      );
+      const link = rendered.container.querySelector('.mrpr-description a');
+      expect(link?.getAttribute('href')).toBe('https://github.com/acme/widgets/issues/42');
+      expect(link?.textContent).toBe('#42');
+    } finally {
+      markdownReady.ready = true;
+    }
   });
 
   it('checks section lists checks collapsed by default', async () => {

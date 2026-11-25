@@ -15,13 +15,15 @@ const CAMO = 'https://camo.githubusercontent.com/abc/def';
 type ImageSource = (src: string) => string | undefined;
 const markdown = vi.hoisted(() => ({
   html: undefined as string | undefined,
+  inputs: [] as string[],
   imageSources: [] as (ImageSource | undefined)[],
 }));
 vi.mock('@mindroom/client-sdk/ui', async (importOriginal) => {
   const ui = await importOriginal<typeof import('@mindroom/client-sdk/ui')>();
   return {
     ...ui,
-    useMarkdownHtml: (_markdown: string, options?: { imageSource?: ImageSource }) => {
+    useMarkdownHtml: (input: string, options?: { imageSource?: ImageSource }) => {
+      markdown.inputs.push(input);
       markdown.imageSources.push(options?.imageSource);
       return markdown.html;
     },
@@ -38,6 +40,7 @@ beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   vi.restoreAllMocks();
   markdown.html = undefined;
+  markdown.inputs = [];
   markdown.imageSources = [];
   // jsdom has no scrollIntoView.
   Element.prototype.scrollIntoView = vi.fn();
@@ -96,11 +99,23 @@ describe('CommentBody', () => {
     expect(view.container.querySelector('.mrpr-comment-body')).toBeNull();
   });
 
-  it('keeps a body that says more than its HTML comment', async () => {
+  it('strips HTML comments and links verified refs from bodyMeta', async () => {
+    const bodyMeta = {
+      links: { '#42': 'https://github.com/acme/widgets/issues/42' },
+      commits: {},
+      videos: {},
+    };
     const view = await render(
-      <CommentBody body={'<!-- bot -->\nNeeds a test.'} images={NO_IMAGES} />
+      <CommentBody
+        body={'<!-- auto-generated note -->\nSee #42.'}
+        images={NO_IMAGES}
+        bodyMeta={bodyMeta}
+      />
     );
-    expect(view.container.textContent).toContain('Needs a test.');
+    expect(view.container.textContent).toBe(
+      'See [#42](https://github.com/acme/widgets/issues/42).'
+    );
+    expect(markdown.inputs.at(-1)).toBe('See [#42](https://github.com/acme/widgets/issues/42).');
   });
 
   it('shows a short body whole, with no button', async () => {
