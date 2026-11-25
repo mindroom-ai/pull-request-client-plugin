@@ -22,7 +22,13 @@ vi.mock('./detail.logic', async (importOriginal) => {
 
 vi.mock('@mindroom/client-sdk/ui', async (importOriginal) => {
   const ui = await importOriginal<typeof import('@mindroom/client-sdk/ui')>();
-  return { ...ui, useMarkdownHtml: (markdown: string) => markdown };
+  return {
+    ...ui,
+    useMarkdownHtml: (markdown: string, options?: { stripHtmlComments?: boolean }) =>
+      options?.stripHtmlComments
+        ? markdown.replace(/<!--[\s\S]*?(?:-->|$)/gu, '').trim()
+        : markdown,
+  };
 });
 
 const REF: PullRequestRef = { owner: 'mindroom-ai', repo: 'mindroom-chat', number: 200 };

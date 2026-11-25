@@ -610,4 +610,28 @@ describe('visibleBody', () => {
   it('keeps a fenced HTML comment, which is text', () => {
     expect(visibleBody('```html\n<!-- kept -->\n```')).toBe('```html\n<!-- kept -->\n```');
   });
+
+  it('keeps 4-space and tab-indented HTML comments (CommonMark indented code blocks)', () => {
+    expect(visibleBody('    <!-- template marker -->')).toBe('    <!-- template marker -->');
+    expect(visibleBody('\t<!-- template marker -->')).toBe('\t<!-- template marker -->');
+    expect(visibleBody('  \t<!-- template marker -->')).toBe('  \t<!-- template marker -->');
+    expect(visibleBody('<!-- header -->\n    <!-- template marker -->')).toBe(
+      '<!-- header -->\n    <!-- template marker -->'
+    );
+    expect(visibleBody('   <!-- not indented enough -->')).toBeNull();
+    expect(visibleBody('    ')).toBeNull();
+    expect(visibleBody('\t')).toBeNull();
+    expect(visibleBody('    \n<!-- template marker -->')).toBeNull();
+
+    const codeReview = review(10, 'alice', 'COMMENTED', '2026-11-01T00:06:00Z', {
+      body: '    <!-- template marker -->',
+    });
+    expect(conversationItems([], [codeReview], [], 'oldest')).toHaveLength(1);
+    expect(
+      buildTimeline(
+        { ...TIMELINE_SOURCE, commits: [], comments: [], reviews: [codeReview] },
+        'oldest'
+      )
+    ).toHaveLength(2);
+  });
 });

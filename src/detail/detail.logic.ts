@@ -395,7 +395,12 @@ export function baseFreshness(
   return behind > 0 || conflicts ? { behind, conflicts } : undefined;
 }
 
-/** A body that is only HTML comments (a bot's markers) and whitespace is empty; any other is kept. */
+/**
+ * A body that is only HTML comments (a bot's markers) and whitespace is empty; any other is kept.
+ * Non-blank lines indented as a CommonMark code block (4 spaces or a tab) stay kept so comments
+ * inside indented code are never discarded before the Markdown renderer runs.
+ */
 export function visibleBody(body: string): string | null {
+  if (/(?:^|\n)(?: {4}| {0,3}\t)[ \t]*\S/u.test(body)) return body;
   return body.replace(/<!--[\s\S]*?-->/gu, '').trim().length === 0 ? null : body;
 }

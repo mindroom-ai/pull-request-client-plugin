@@ -129,6 +129,17 @@ describe('CommentBody', () => {
     expect(view.container.querySelector('.mrpr-comment-body')).toBeNull();
   });
 
+  it('passes an indented HTML comment straight to useMarkdownHtml and renders its code block', async () => {
+    const body = '    <!-- template marker -->';
+    const view = await render(<CommentBody body={body} images={NO_IMAGES} />);
+    expect(markdown.inputs.at(-1)).toBe(body);
+    expect(markdown.stripHtmlComments.at(-1)).toBe(true);
+    expect(view.container.textContent).toBe(body);
+    markdown.html = '<pre><code>&lt;!-- template marker --&gt;</code></pre>';
+    view.rerender(<CommentBody body={body} images={NO_IMAGES} />);
+    expect(view.container.querySelector('pre code')?.textContent).toBe('<!-- template marker -->');
+  });
+
   it('shows a short body whole, with no button', async () => {
     heights(100);
     const view = await render(<CommentBody body="Short" images={NO_IMAGES} />);

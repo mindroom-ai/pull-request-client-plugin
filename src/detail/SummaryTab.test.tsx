@@ -17,6 +17,7 @@ vi.mock('focus-trap-react', async () => ({
 // and an image where `imageSource` gives it an address, as the app's sanitizer keeps it.
 const markdownMock = vi.hoisted(() => ({
   ready: true,
+  inputs: [] as string[],
   stripHtmlComments: [] as (boolean | undefined)[],
 }));
 vi.mock('@mindroom/client-sdk/ui', async (importOriginal) => {
@@ -30,8 +31,17 @@ vi.mock('@mindroom/client-sdk/ui', async (importOriginal) => {
         stripHtmlComments?: boolean;
       }
     ) => {
+      markdownMock.inputs.push(markdown);
       markdownMock.stripHtmlComments.push(options?.stripHtmlComments);
       if (!markdownMock.ready) return undefined;
+      if (/^(?: {4}| {0,3}\t)[ \t]*\S/u.test(markdown)) {
+        const code = markdown
+          .replace(/^(?: {4}| {0,3}\t)/gmu, '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;');
+        return `<pre><code>${code}</code></pre>`;
+      }
       const source = options?.stripHtmlComments
         ? markdown.replace(/<!--[\s\S]*?(?:-->|$)/gu, '').trim()
         : markdown;
@@ -173,6 +183,7 @@ beforeEach(() => {
   fetchMock.mockReset();
   serve();
   markdownMock.ready = true;
+  markdownMock.inputs = [];
   markdownMock.stripHtmlComments = [];
   vi.stubGlobal('fetch', fetchMock);
   // jsdom has no scrollIntoView.
@@ -361,6 +372,22 @@ describe('SummaryTab', () => {
     const unclosed = await show(pull({ body: '<!-- unclosed' }));
     expect(unclosed.getByText('No description.')).toBeTruthy();
     expect(markdownMock.stripHtmlComments.at(-1)).toBe(true);
+  });
+
+  it('distinguishes an unindented HTML comment from a 4-space indented code block', async () => {
+    const unindented = await show(pull({ body: '<!-- template marker -->' }));
+    expect(unindented.getByText('No description.')).toBeTruthy();
+    expect(unindented.container.querySelector('.mrpr-description pre code')).toBeNull();
+    unindented.unmount();
+
+    const indentedBody = '    <!-- template marker -->';
+    const indented = await show(pull({ body: indentedBody }));
+    expect(indented.queryByText('No description.')).toBeNull();
+    expect(markdownMock.inputs.at(-1)).toBe(indentedBody);
+    expect(markdownMock.stripHtmlComments.at(-1)).toBe(true);
+    expect(indented.container.querySelector('.mrpr-description pre code')?.textContent).toBe(
+      '<!-- template marker -->'
+    );
   });
 
   it('shows plain description while markdown loads, strips comments via SDK, and links verified refs', async () => {
