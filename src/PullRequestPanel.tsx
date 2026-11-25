@@ -632,6 +632,7 @@ function Panel({ roomId, request }: PanelProps) {
       }}
     >
       <PanelTokenFormContext.Provider value={tokenForm.context}>
+        {/* Fallback label/controls (!loaded) and Header's portal (ref && pr && state) are mutually exclusive. */}
         <div ref={setBarElement} className="mrpr-crumbs mrpr-bar">
           {!loaded ? (
             <>

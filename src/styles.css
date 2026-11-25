@@ -799,18 +799,30 @@
   color: var(--pr-muted);
 }
 /* The panel's top row, in place of the room's title row: the crumbs, or the bar that stands for
-   the header once it scrolled away, then the flat header controls. */
+   the header once it scrolled away, then the flat header controls. Wraps naturally whenever
+   breadcrumbs, badges, and controls do not fit on one row (e.g. 200 px desktop panels or zoomed
+   phones with Auto-merge badges). */
 .mrpr-bar {
   flex-shrink: 0;
   box-sizing: border-box;
-  block-size: var(--mrpr-bar-size);
+  block-size: auto;
+  min-block-size: var(--mrpr-bar-size);
+  flex-wrap: wrap;
+  row-gap: 0.25rem;
+  padding-block: 0.25rem;
   padding-inline: 1rem 0.625rem;
   background: var(--pr-panel);
 }
 .mrpr-bar-swap {
-  display: contents;
+  display: flex;
+  flex: 1 1 min(9rem, 144px);
+  max-inline-size: 100%;
+  align-self: stretch;
+  align-items: center;
+  gap: 0.25rem;
 }
 .mrpr-bar-label {
+  flex: 1 1 5rem;
   margin: 0;
   color: var(--pr-fg);
   font-size: 0.875rem;
@@ -818,7 +830,8 @@
 }
 .mrpr-bar-details {
   display: flex;
-  min-inline-size: 0;
+  min-inline-size: auto;
+  max-inline-size: 100%;
   flex: 1;
   align-items: center;
   gap: 0.25rem;
@@ -831,6 +844,14 @@
   text-align: start;
   cursor: pointer;
 }
+/* Zero inline-size keeps truncated repo names and collapsed titles out of the bar's min-content
+   wrap threshold so non-shrinking PR numbers and badges trigger wrapping instead of overlapping
+   the header controls, while max-inline-size: max-content hugs short text. */
+.mrpr-bar-swap .mrpr-truncate {
+  inline-size: 0;
+  flex: 1 1 0;
+  max-inline-size: max-content;
+}
 .mrpr-bar-title {
   color: var(--pr-fg);
   font-weight: 600;
@@ -838,7 +859,10 @@
 .mrpr-bar-end {
   display: inline-flex;
   flex-shrink: 0;
+  max-inline-size: 100%;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   gap: 2px;
   margin-inline-start: auto;
 }
@@ -1093,7 +1117,15 @@
     --mrpr-bar-size: max(44px, 3.375rem);
   }
   /* In the top row and on the branches, a control keeps its pointer height and takes a finger's
-     target above and below it, so the row does not grow. */
+     target above and below it, so the row does not grow. When `.mrpr-bar` wraps on a phone,
+     giving `.mrpr-bar-end` the inner bar height keeps `::after` flush with its row without
+     overlapping the row above. */
+  .mrpr-bar > .mrpr-bar-swap {
+    min-block-size: max(44px, 2.75rem);
+  }
+  .mrpr-bar > .mrpr-bar-end {
+    min-block-size: calc(var(--mrpr-bar-size) - 0.5rem);
+  }
   .mrpr-bar .mrpr-header-more,
   .mrpr-branches > .mrpr-button-primary {
     position: relative;
@@ -1111,8 +1143,11 @@
     inset-inline: 0;
     content: '';
   }
-  /* Desktop framed bars can wrap onto two rows; give their buttons real 44 px heights and disable
-     the single-row pseudo-element expansion so wrapped rows never overlap hit targets. */
+  /* Desktop framed bars can wrap inside `.mrpr-bar-end`; give their buttons real 44 px heights and
+     disable the pseudo-element expansion so wrapped control rows never overlap hit targets. */
+  .mrpr-panel-framed > .mrpr-bar > .mrpr-bar-end {
+    min-block-size: 0;
+  }
   .mrpr-panel-framed > .mrpr-bar .mrpr-header-more,
   .mrpr-panel-framed > .mrpr-bar .mrpr-bar-details {
     min-block-size: max(44px, 2.75rem);
@@ -1121,12 +1156,22 @@
     content: none;
   }
   /* At ultra-narrow coarse widths (down to 200 px at any Page Zoom), break the header controls
-     cleanly between panel actions and Fill/Fold/Close. */
+     cleanly between panel actions and trailing controls and use real button heights so wrapped
+     control rows never overlap hit targets. */
   @container mrpr-panel (max-width: 260px) {
-    .mrpr-panel-framed > .mrpr-bar {
+    .mrpr-bar {
       padding-inline: 0.5rem;
     }
-    .mrpr-panel-framed > .mrpr-bar > .mrpr-bar-end > .mrpr-bar-pill-sep {
+    .mrpr-bar > .mrpr-bar-end {
+      min-block-size: 0;
+    }
+    .mrpr-bar .mrpr-header-more {
+      min-block-size: max(44px, 2.75rem);
+    }
+    .mrpr-bar .mrpr-header-more::after {
+      content: none;
+    }
+    .mrpr-bar > .mrpr-bar-end > .mrpr-bar-pill-sep {
       flex-basis: 100%;
       inline-size: 100%;
       block-size: 0;
@@ -1135,49 +1180,11 @@
   }
 }
 
-/* Desktop framed side panels wrap the bar naturally whenever breadcrumbs, badges, and the header
-   controls do not fit on one row (e.g. 200 px minimum width, 400 px touch desktops with
-   Auto-merge badges, or 50% Page Zoom). Phones omit `.mrpr-panel-framed` and stay a single row. */
-.mrpr-panel-framed > .mrpr-bar {
-  block-size: auto;
-  min-block-size: var(--mrpr-bar-size);
-  flex-wrap: wrap;
-  row-gap: 0.25rem;
-  padding-block: 0.25rem;
-}
-.mrpr-panel-framed > .mrpr-bar > .mrpr-bar-swap {
-  display: flex;
-  flex: 1 1 min(9rem, 144px);
-  max-inline-size: 100%;
-  align-self: stretch;
-  align-items: center;
-  gap: 0.25rem;
-}
-.mrpr-panel-framed > .mrpr-bar > .mrpr-bar-swap > .mrpr-bar-details {
-  min-inline-size: auto;
-  max-inline-size: 100%;
-}
-/* Zero inline-size keeps truncated repo names and collapsed titles out of the bar's min-content
-   wrap threshold so non-shrinking PR numbers and badges trigger wrapping instead of overlapping
-   the header controls, while max-inline-size: max-content hugs short text. */
-.mrpr-panel-framed > .mrpr-bar > .mrpr-bar-swap .mrpr-truncate {
-  inline-size: 0;
-  flex: 1 1 0;
-  max-inline-size: max-content;
-}
-.mrpr-panel-framed > .mrpr-bar > .mrpr-bar-label {
-  flex: 1 1 5rem;
-}
-.mrpr-panel-framed > .mrpr-bar > .mrpr-bar-end {
-  max-inline-size: 100%;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
 @container mrpr-panel (max-width: 220px) {
-  .mrpr-panel-framed > .mrpr-bar {
+  .mrpr-bar {
     padding-inline: 0.5rem;
   }
-  .mrpr-panel-framed > .mrpr-bar > .mrpr-bar-end > .mrpr-bar-pill-sep {
+  .mrpr-bar > .mrpr-bar-end > .mrpr-bar-pill-sep {
     flex-basis: 100%;
     inline-size: 100%;
     block-size: 0;
