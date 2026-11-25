@@ -168,17 +168,14 @@ afterEach(() => {
   roomServer.current = undefined;
 });
 
-// The observers the panel made, so a test can report the header in or out of view and the top
-// row's new height.
+// The observers the panel made, so a test can report the header in or out of view.
 let observers: {
   callback: IntersectionObserverCallback;
   options?: IntersectionObserverInit;
   targets: Element[];
 }[] = [];
-let resized: ResizeObserverCallback[] = [];
 const stubObservers = () => {
   observers = [];
-  resized = [];
   vi.stubGlobal(
     'IntersectionObserver',
     class {
@@ -192,16 +189,6 @@ const stubObservers = () => {
       disconnect() {
         this.targets.splice(0);
       }
-    }
-  );
-  vi.stubGlobal(
-    'ResizeObserver',
-    class {
-      constructor(callback: ResizeObserverCallback) {
-        resized.push(callback);
-      }
-      observe() {}
-      disconnect() {}
     }
   );
 };
@@ -2279,18 +2266,9 @@ describe('the dense header', () => {
   beforeEach(() => {
     panelControl.close = vi.fn();
   });
-  // The panel in a box that scrolls, as the room's panel box does.
-  const showScrolling = async () => {
-    client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    return renderPluginComponent(
-      <div data-testid="scroller" style={{ overflowY: 'auto' }}>
-        <QueryClientProvider client={client}>
-          <PullRequestPanel roomId="!room:example.org" request={REQUEST} />
-        </QueryClientProvider>
-      </div>,
-      { id: 'pull-requests', plugin }
-    );
-  };
+  const showScrolling = () => show();
+  const bodyOf = (container: HTMLElement) =>
+    container.querySelector('.mrpr-panel-body') as HTMLElement;
   // Its name says what it does and which pull request it shows.
   const bar = 'Show details of pull request #200: Add pull request cards';
 
@@ -2366,12 +2344,13 @@ describe('the dense header', () => {
   it('shows a bar that scrolls back to the top once the header is out of view', async () => {
     const view = await showScrolling();
     await view.findByText('Add pull request cards');
-    const scroller = view.getByTestId('scroller');
+    const scroller = bodyOf(view.container);
     const scrollTo = vi.fn();
     scroller.scrollTo = scrollTo as typeof scroller.scrollTo;
     expect(view.queryByRole('button', { name: bar })).toBeNull();
-    // The observer watches the header against the box that scrolls.
+    // The observer watches the header against `.mrpr-panel-body` with 0px rootMargin.
     expect(observers.at(-1)?.targets).toEqual([view.container.querySelector('.mrpr-header')]);
+    expect(observers.at(-1)?.options).toEqual({ root: scroller, rootMargin: '0px' });
     await report(false);
     const button = view.getByRole('button', { name: bar });
     expect(button.textContent).toBe('#200Add pull request cards');
@@ -2400,46 +2379,32 @@ describe('the dense header', () => {
     expect(document.activeElement).toBe(view.getByRole('tab', { name: 'Summary' }));
   });
 
-  it("watches the header again under the top row's new height", async () => {
+  it('keeps the top bar outside the scrolling body and resets scrollTop on the Code tab', async () => {
     const view = await showScrolling();
     await view.findByText('Add pull request cards');
-    const bar = view.container.querySelector('.mrpr-bar') as Element;
-    await act(async () => {
-      for (const callback of resized) {
-        callback(
-          [{ target: bar, contentRect: { height: 60 } } as unknown as ResizeObserverEntry],
-          {} as ResizeObserver
-        );
-      }
-    });
-    const watching = observers.filter(({ targets }) => targets.length > 0);
-    expect(watching.map(({ options }) => options?.rootMargin)).toEqual(['-60px 0px 0px 0px']);
-  });
+    const panel = view.container.querySelector('.mrpr-panel') as HTMLElement;
+    const topBar = view.container.querySelector('.mrpr-bar') as HTMLElement;
+    const body = bodyOf(view.container);
+    expect(topBar.parentElement).toBe(panel);
+    expect(body.parentElement).toBe(panel);
+    expect(topBar.compareDocumentPosition(body)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(body.contains(topBar)).toBe(false);
+    expect(body.contains(view.container.querySelector('.mrpr-panel-removed'))).toBe(true);
+    expect(body.contains(view.container.querySelector('.mrpr-header'))).toBe(true);
+    expect(body.contains(view.container.querySelector('.mrpr-tabbar'))).toBe(true);
+    expect(body.contains(view.container.querySelector('.mrpr-tabpanel'))).toBe(true);
 
-  it("stays collapsed, the focus where it was, as the top row's height changes", async () => {
-    const view = await showScrolling();
-    await view.findByText('Add pull request cards');
-    await report(false);
-    const details = view.getByRole('button', { name: bar });
-    act(() => details.focus());
-    const row = view.container.querySelector('.mrpr-bar') as Element;
-    await act(async () => {
-      for (const callback of resized) {
-        callback(
-          [{ target: row, contentRect: { height: 60 } } as unknown as ResizeObserverEntry],
-          {} as ResizeObserver
-        );
-      }
-    });
-    expect(view.getByRole('button', { name: bar })).toBe(details);
-    expect(document.activeElement).toBe(details);
+    body.scrollTop = 240;
+    await click(view.getByRole('tab', { name: 'Code' }));
+    expect(panel.classList.contains('mrpr-panel-scrolls')).toBe(false);
+    expect(body.scrollTop).toBe(0);
   });
 
   it('starts expanded on the Code tab, toggles details in place, and moves focus', async () => {
     asWriter();
     const view = await showScrolling();
     await view.findByText('Add pull request cards');
-    const scroller = view.getByTestId('scroller');
+    const scroller = bodyOf(view.container);
     const scrollTo = vi.fn();
     scroller.scrollTo = scrollTo as typeof scroller.scrollTo;
 
@@ -2576,11 +2541,9 @@ describe('the dense header', () => {
     const renderRequest = (req: typeof REQUEST) =>
       act(async () => {
         view.rerender(
-          <div data-testid="scroller" style={{ overflowY: 'auto' }}>
-            <QueryClientProvider client={client}>
-              <PullRequestPanel roomId="!room:example.org" request={req} />
-            </QueryClientProvider>
-          </div>
+          <QueryClientProvider client={client}>
+            <PullRequestPanel roomId="!room:example.org" request={req} />
+          </QueryClientProvider>
         );
       });
     await click(view.getByRole('button', { name: 'Hide pull request details' }));
@@ -2624,7 +2587,7 @@ describe('the dense header', () => {
   it('does not collapse while the result of an action shows', async () => {
     asWriter();
     const view = await showScrolling();
-    const scroller = view.getByTestId('scroller');
+    const scroller = bodyOf(view.container);
     const scrollTo = vi.fn();
     scroller.scrollTo = scrollTo as typeof scroller.scrollTo;
     await view.findByRole('button', { name: 'Merge' });
@@ -2659,7 +2622,7 @@ describe('the dense header', () => {
         return writer(url, init);
       });
       const view = await showScrolling();
-      const scroller = view.getByTestId('scroller');
+      const scroller = bodyOf(view.container);
       const scrollTo = vi.fn();
       scroller.scrollTo = scrollTo as typeof scroller.scrollTo;
       // Started at the top, then scrolled while the merge runs.
@@ -2861,6 +2824,15 @@ describe('floating control pill', () => {
       setLayout,
     });
     await ready(view);
+    const panel = view.container.querySelector('.mrpr-panel') as HTMLElement;
+    const topBar = view.container.querySelector('.mrpr-bar') as HTMLElement;
+    const body = view.container.querySelector('.mrpr-panel-body') as HTMLElement;
+    expect(panel.classList.contains('mrpr-panel-scrolls')).toBe(true);
+    expect(topBar.parentElement).toBe(panel);
+    expect(body.parentElement).toBe(panel);
+    expect(topBar.compareDocumentPosition(body)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(body.contains(topBar)).toBe(false);
+    expect(body.contains(view.container.querySelector('.mrpr-panel-removed'))).toBe(true);
     expect(view.container.querySelector('.mrpr-bar-pill-sep')).toBeNull();
     expect(pillLabels(view.container)).toEqual([
       'Fill the room with Pull request',

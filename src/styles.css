@@ -710,61 +710,65 @@
   margin-block-end: 0;
 }
 
-/* The side panel: a column as tall as the panel. The header and tab bar keep their height; the
-   tab's area takes the rest, so the Code tab scrolls inside itself (Summary and Timeline scroll
-   with the header, below). */
+/* The side panel: a full-height column with `.mrpr-bar` fixed at the top and `.mrpr-panel-body`
+   below it so scrollbars always start below the top bar. */
 .mrpr-panel {
-  /* The heights of the top row (aligned with the room's 54 px header) and the tab bar, which stay
-     at the top while the header scrolls away; a section heading stays under both. */
+  /* The heights of the top row (aligned with the room's 54 px header) and the sticky tab bar. */
   --mrpr-bar-size: 3.375rem;
   --mrpr-tabbar-size: 2.625rem;
   display: flex;
   flex-direction: column;
   block-size: 100%;
   min-block-size: 0;
+  overflow: hidden;
   background: var(--pr-panel);
   container: mrpr-panel / inline-size;
 }
-/* Summary and Timeline: the panel takes its content's height, so the room's box scrolls it whole,
-   the header with it, under the top row and the tab bar, which stay. The Code tab scrolls in
-   itself, under a header that starts expanded and can collapse into the top row. */
-.mrpr-panel-scrolls {
-  flex-shrink: 0;
-  block-size: auto;
+.mrpr-panel-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-inline-size: 0;
+  min-block-size: 0;
+  overflow: hidden;
 }
-.mrpr-panel-scrolls > .mrpr-tabbar {
+/* Summary, Timeline, and empty/loading/error views scroll inside `.mrpr-panel-body` below
+   `.mrpr-bar`, with the tab bar sticking to the top of `.mrpr-panel-body`. */
+.mrpr-panel-scrolls > .mrpr-panel-body {
+  display: block;
+  overflow-y: auto;
+}
+.mrpr-panel-scrolls > .mrpr-panel-body > .mrpr-tabbar {
   position: sticky;
-  inset-block-start: var(--mrpr-bar-actual-size, var(--mrpr-bar-size));
+  inset-block-start: 0;
   z-index: 3;
   background: var(--pr-panel);
 }
-.mrpr-panel-scrolls > .mrpr-tabpanel {
+.mrpr-panel-scrolls > .mrpr-panel-body > .mrpr-tabpanel {
   flex: none;
   overflow: visible;
 }
-/* What the focus or a collapsing comment brings into view comes below the rows that stay. */
+/* What the focus or a collapsing comment brings into view comes below the sticky tab bar. */
 .mrpr-panel-scrolls
+  > .mrpr-panel-body
   > .mrpr-tabpanel
   :is(a, button, input, select, textarea, [tabindex], .mrpr-comment-clip) {
-  scroll-margin-block-start: calc(
-    var(--mrpr-bar-actual-size, var(--mrpr-bar-size)) + var(--mrpr-tabbar-size)
-  );
+  scroll-margin-block-start: var(--mrpr-tabbar-size);
 }
 /* A section's heading stays under the tab bar, with the part of its padding the tab bar covers. */
 .mrpr-panel-scrolls .mrpr-section-heading {
-  inset-block-start: calc(
-    var(--mrpr-bar-actual-size, var(--mrpr-bar-size)) + var(--mrpr-tabbar-size) - 0.75rem
-  );
+  inset-block-start: calc(var(--mrpr-tabbar-size) - 0.75rem);
 }
 
 .mrpr-panel-note {
   padding: 0.75rem 1rem;
 }
 
-/* That the token was removed from MindRoom, above whatever the panel shows next. */
+/* That the token was removed from MindRoom, at the top of `.mrpr-panel-body`. */
 .mrpr-panel-removed {
+  flex-shrink: 0;
   margin: 0;
-  padding: 0.75rem 1rem 0;
+  padding: 0 1rem 0.5rem;
 }
 /* Drawn while it says nothing too, a live region, but taking no room. */
 .mrpr-panel-removed:empty {
@@ -796,11 +800,8 @@
   color: var(--pr-muted);
 }
 /* The panel's top row, in place of the room's title row: the crumbs, or the bar that stands for
-   the header once it scrolled away, then the floating control pill. */
+   the header once it scrolled away, then the flat header controls. */
 .mrpr-bar {
-  position: sticky;
-  inset-block-start: 0;
-  z-index: 4;
   flex-shrink: 0;
   box-sizing: border-box;
   block-size: var(--mrpr-bar-size);
@@ -841,10 +842,6 @@
   align-items: center;
   gap: 2px;
   margin-inline-start: auto;
-  padding: 2px;
-  border: 1px solid var(--pr-surface-subtle-line);
-  border-radius: 0.625rem;
-  background: var(--pr-surface-subtle);
 }
 .mrpr-bar-pill-core {
   display: inline-flex;
@@ -855,9 +852,9 @@
 .mrpr-bar-pill-sep {
   flex-shrink: 0;
   inline-size: 1px;
-  block-size: 1rem;
-  margin-inline: 2px;
-  background: var(--pr-surface-subtle-line);
+  block-size: 0.875rem;
+  margin-inline: 0.25rem;
+  background: var(--pr-border);
 }
 
 .mrpr-panel-title {
@@ -1599,7 +1596,10 @@
   flex-shrink: 0;
   align-items: center;
   gap: 0.375rem;
-  margin-inline-start: auto;
+  margin-inline-start: 0.25rem;
+}
+.mrpr-badges:empty {
+  display: none;
 }
 .mrpr-badge-state {
   border-color: currentColor;

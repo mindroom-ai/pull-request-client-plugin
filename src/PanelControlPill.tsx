@@ -22,7 +22,7 @@ function PillButton({
           ref={triggerRef}
           size="300"
           radii="300"
-          variant="SurfaceVariant"
+          variant="Surface"
           fill="None"
           className="mrpr-header-more"
           aria-label={label}
@@ -37,7 +37,7 @@ function PillButton({
 }
 
 /**
- * The top-right floating control pill (`title: 'own'`, `frameControls: 'own'`): optional
+ * The top-right flat header controls (`title: 'own'`, `frameControls: 'own'`): optional
  * panel-specific controls (Hide details, More actions), a subtle separator, Fill and Fold on
  * desktop side panels, and Close.
  */

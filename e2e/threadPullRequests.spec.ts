@@ -2735,17 +2735,13 @@ const LONG_BODY = [
   'The fallback stays until the cache is warm after a deploy.',
 ].join('\n\n');
 
-/** The box that scrolls the panel: the nearest ancestor of its root whose content scrolls. */
+/** The box that scrolls the panel: `.mrpr-panel-body` below the top bar. */
 const scrollPanel = (page: Page, top: number) =>
   panel(page)
-    .locator('.mrpr-panel')
-    .evaluate((root, to) => {
-      let node = root.parentElement;
-      while (node && !/auto|scroll/.test(getComputedStyle(node).overflowY)) {
-        node = node.parentElement;
-      }
-      node?.scrollTo({ top: to });
-      return node?.scrollTop ?? -1;
+    .locator('.mrpr-panel-body')
+    .evaluate((body, to) => {
+      body.scrollTo({ top: to });
+      return body.scrollTop;
     }, top);
 
 test('on a phone the header scrolls away under a bar that brings it back', async ({

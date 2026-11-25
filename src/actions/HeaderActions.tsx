@@ -346,7 +346,7 @@ export function useHeaderActions({
             }}
             size="300"
             radii="300"
-            variant="SurfaceVariant"
+            variant="Surface"
             fill="None"
             className="mrpr-header-more"
             aria-label={more}

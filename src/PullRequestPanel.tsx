@@ -14,6 +14,7 @@ import {
   type ReactNode,
   type RefObject,
 } from 'react';
+import { createPortal } from 'react-dom';
 import { IconButton as PlainIconButton } from 'folds';
 import { ArrowLeft, ChevronDown, ChevronUp, FileDiff } from 'lucide-react';
 import { usePanelFrame, usePluginTranslation } from '@mindroom/client-sdk/core';
@@ -136,45 +137,17 @@ function TabBar({
   );
 }
 
-/** The box that scrolls the panel: the nearest ancestor whose content scrolls, the room's. */
+/** The box that scrolls the panel's content below the top bar. */
 function scrollerOf(element: HTMLElement): HTMLElement | null {
-  for (let node = element.parentElement; node; node = node.parentElement) {
-    if (/auto|scroll/.test(getComputedStyle(node).overflowY)) return node;
-  }
-  return null;
+  return element.closest<HTMLElement>('.mrpr-panel-body');
 }
 
 /**
- * Whether the header has scrolled out of view under the panel's top row, while `watches`: one
- * observer of the header against the box that scrolls, no listener of every scroll, made again
- * when the top row's height changes (Page Zoom).
+ * Whether the header has scrolled out of view at the top of the panel's body, while `watches`:
+ * one observer of the header against `.mrpr-panel-body`, with no scroll listener.
  */
-function useScrolledAway(
-  header: RefObject<HTMLElement | null>,
-  bar: RefObject<HTMLElement | null>,
-  watches: boolean
-): boolean {
+function useScrolledAway(header: RefObject<HTMLElement | null>, watches: boolean): boolean {
   const [away, setAway] = useState(false);
-  const [barSize, setBarSize] = useState(0);
-  useEffect(() => {
-    const element = bar.current;
-    if (!element || typeof ResizeObserver === 'undefined') return undefined;
-    const panel = element.closest<HTMLElement>('.mrpr-panel');
-    const observer = new ResizeObserver((entries) => {
-      const entry = entries[entries.length - 1];
-      if (!entry) return;
-      const borderHeight =
-        entry.borderBoxSize?.[0]?.blockSize ?? element.getBoundingClientRect().height;
-      const height = Math.round(borderHeight > 0 ? borderHeight : entry.contentRect.height);
-      setBarSize(height);
-      if (panel && height > 0) panel.style.setProperty('--mrpr-bar-actual-size', `${height}px`);
-    });
-    observer.observe(element);
-    return () => {
-      observer.disconnect();
-      panel?.style.removeProperty('--mrpr-bar-actual-size');
-    };
-  }, [bar]);
   useEffect(() => {
     const element = header.current;
     if (!watches || !element || typeof IntersectionObserver === 'undefined') return undefined;
@@ -183,13 +156,11 @@ function useScrolledAway(
         const entry = entries[entries.length - 1];
         if (entry) setAway(!entry.isIntersecting);
       },
-      // The top row stays over the box's top, so what is under it is out of view.
-      { root: scrollerOf(element), rootMargin: `-${barSize}px 0px 0px 0px` }
+      { root: scrollerOf(element), rootMargin: '0px' }
     );
     observer.observe(element);
-    // The observer made again for a new height keeps what the last one saw until it reports.
     return () => observer.disconnect();
-  }, [barSize, header, watches]);
+  }, [header, watches]);
   // Unwatched, it starts again from the header in view.
   useEffect(() => {
     if (!watches) setAway(false);
@@ -211,6 +182,7 @@ function Header({
   actions,
   freshness,
   scrolls,
+  barContainer,
   onUseToken,
   onForgetToken,
 }: {
@@ -220,13 +192,13 @@ function Header({
   actions: ReturnType<typeof usePullRequestActions>;
   freshness: ReturnType<typeof baseFreshness>;
   scrolls: boolean;
+  barContainer: HTMLDivElement | null;
   onUseToken?: () => void;
   onForgetToken?: () => void;
 }) {
   const t = usePluginTranslation('pull-requests');
   const headerId = useId();
   const headerRef = useRef<HTMLDivElement>(null);
-  const barRef = useRef<HTMLDivElement>(null);
   const swapRef = useRef<HTMLSpanElement>(null);
   const hideRef = useRef<HTMLButtonElement | null>(null);
   const { control, menu, lines, holds } = useHeaderActions({
@@ -237,7 +209,7 @@ function Header({
     onUseToken,
     onForgetToken,
   });
-  const scrolledAway = useScrolledAway(headerRef, barRef, scrolls && !holds);
+  const scrolledAway = useScrolledAway(headerRef, scrolls && !holds);
   // On the Code tab the header starts expanded; collapsing it stays until switching tabs or pull requests.
   const codeScope = scrolls ? '' : pullRequestUrl(ref);
   const [collapsedScope, setCollapsedScope] = useState('');
@@ -268,9 +240,11 @@ function Header({
     const header = headerRef.current;
     const scroller = header && scrollerOf(header);
     if (!scrolls || !holds || !header || !scroller) return;
-    const under = scroller.getBoundingClientRect().top + (barRef.current?.offsetHeight ?? 0);
-    if (shown.current || header.getBoundingClientRect().bottom <= under) {
-      scroller.scrollTo({ top: 0 });
+    if (
+      shown.current ||
+      header.getBoundingClientRect().bottom <= scroller.getBoundingClientRect().top
+    ) {
+      scroller.scrollTo?.({ top: 0 });
     }
   }, [scrolls, holds, actions.result]);
   useLayoutEffect(() => {
@@ -297,7 +271,7 @@ function Header({
     const header = headerRef.current;
     const scroller = header && scrollerOf(header);
     const still = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-    scroller?.scrollTo({ top: 0, behavior: still ? 'auto' : 'smooth' });
+    scroller?.scrollTo?.({ top: 0, behavior: still ? 'auto' : 'smooth' });
     header?.querySelector<HTMLElement>('.mrpr-panel-title')?.focus({ preventScroll: true });
   };
   const hideDetails = () => {
@@ -310,84 +284,87 @@ function Header({
       {t('badge.autoMerge', { method: pr.autoMerge.method })}
     </span>
   ) : null;
+  const bar = (
+    <>
+      <span ref={swapRef} className="mrpr-bar-swap">
+        {collapsed ? (
+          <button
+            type="button"
+            className="mrpr-bar-details"
+            aria-label={t('showDetails', { number: ref.number, title: pr.title })}
+            aria-expanded={scrolls ? undefined : false}
+            aria-controls={scrolls ? undefined : headerId}
+            data-mrpr-swap-focus
+            onClick={showDetails}
+          >
+            {stateIcon}
+            <span className={`mrpr-shrink-0 ${state.toneClassName}`}>#{ref.number}</span>
+            <span className="mrpr-truncate mrpr-bar-title">{pr.title}</span>
+            {autoMergeBadge}
+            {scrolls ? null : <ChevronDown aria-hidden className="mrpr-icon mrpr-shrink-0" />}
+          </button>
+        ) : (
+          <>
+            {stateIcon}
+            <a
+              className="mrpr-crumb-link mrpr-truncate"
+              href={`https://github.com/${ref.owner}/${ref.repo}`}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {ref.owner}/{ref.repo}
+            </a>
+            <a
+              className={`mrpr-crumb-link mrpr-shrink-0 ${state.toneClassName}`}
+              href={pr.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              data-mrpr-swap-focus
+            >
+              #{ref.number}
+            </a>
+            <span className="mrpr-badges">
+              {state.key === 'open' ? null : (
+                <span className={`mrpr-badge mrpr-badge-state ${state.toneClassName}`}>
+                  {t(`state.${state.key}`)}
+                </span>
+              )}
+              {autoMergeBadge}
+            </span>
+          </>
+        )}
+      </span>
+      <PanelControlPill>
+        {!scrolls && !collapsed && !holds ? (
+          <IconTooltip label={t('hideDetails')} align="End">
+            {(triggerRef) => (
+              <PlainIconButton
+                ref={(node: HTMLButtonElement | null) => {
+                  triggerRef(node);
+                  hideRef.current = node;
+                }}
+                size="300"
+                radii="300"
+                variant="Surface"
+                fill="None"
+                className="mrpr-header-more"
+                aria-label={t('hideDetails')}
+                aria-expanded
+                aria-controls={headerId}
+                onClick={hideDetails}
+              >
+                <ChevronUp aria-hidden className="mrpr-button-icon" />
+              </PlainIconButton>
+            )}
+          </IconTooltip>
+        ) : null}
+        {menu}
+      </PanelControlPill>
+    </>
+  );
   return (
     <>
-      <div ref={barRef} className="mrpr-crumbs mrpr-bar">
-        <span ref={swapRef} className="mrpr-bar-swap">
-          {collapsed ? (
-            <button
-              type="button"
-              className="mrpr-bar-details"
-              aria-label={t('showDetails', { number: ref.number, title: pr.title })}
-              aria-expanded={scrolls ? undefined : false}
-              aria-controls={scrolls ? undefined : headerId}
-              data-mrpr-swap-focus
-              onClick={showDetails}
-            >
-              {stateIcon}
-              <span className={`mrpr-shrink-0 ${state.toneClassName}`}>#{ref.number}</span>
-              <span className="mrpr-truncate mrpr-bar-title">{pr.title}</span>
-              {autoMergeBadge}
-              {scrolls ? null : <ChevronDown aria-hidden className="mrpr-icon mrpr-shrink-0" />}
-            </button>
-          ) : (
-            <>
-              {stateIcon}
-              <a
-                className="mrpr-crumb-link mrpr-truncate"
-                href={`https://github.com/${ref.owner}/${ref.repo}`}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                {ref.owner}/{ref.repo}
-              </a>
-              <a
-                className={`mrpr-crumb-link mrpr-shrink-0 ${state.toneClassName}`}
-                href={pr.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                data-mrpr-swap-focus
-              >
-                #{ref.number}
-              </a>
-              <span className="mrpr-badges">
-                {state.key === 'open' ? null : (
-                  <span className={`mrpr-badge mrpr-badge-state ${state.toneClassName}`}>
-                    {t(`state.${state.key}`)}
-                  </span>
-                )}
-                {autoMergeBadge}
-              </span>
-            </>
-          )}
-        </span>
-        <PanelControlPill>
-          {!scrolls && !collapsed && !holds ? (
-            <IconTooltip label={t('hideDetails')} align="End">
-              {(triggerRef) => (
-                <PlainIconButton
-                  ref={(node: HTMLButtonElement | null) => {
-                    triggerRef(node);
-                    hideRef.current = node;
-                  }}
-                  size="300"
-                  radii="300"
-                  variant="SurfaceVariant"
-                  fill="None"
-                  className="mrpr-header-more"
-                  aria-label={t('hideDetails')}
-                  aria-expanded
-                  aria-controls={headerId}
-                  onClick={hideDetails}
-                >
-                  <ChevronUp aria-hidden className="mrpr-button-icon" />
-                </PlainIconButton>
-              )}
-            </IconTooltip>
-          ) : null}
-          {menu}
-        </PanelControlPill>
-      </div>
+      {barContainer ? createPortal(bar, barContainer) : null}
       <div
         ref={headerRef}
         id={headerId}
@@ -623,9 +600,15 @@ function Panel({ roomId, request }: PanelProps) {
     setOverriding(false);
     setLatch(undefined);
   };
-  // Summary and Timeline scroll with the header, in the room's box; the Code tab scrolls in
-  // itself, under a header that starts expanded and can collapse into the top row.
-  const scrolls = tab !== 'code';
+  const [barElement, setBarElement] = useState<HTMLDivElement | null>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  // Summary, Timeline, and empty/loading/error views scroll in `.mrpr-panel-body` below
+  // `.mrpr-bar`; the Code tab keeps `.mrpr-panel-body` unscrolling and scrolls inside itself.
+  const loaded = Boolean(ref && pr && state);
+  const scrolls = tab !== 'code' || !loaded;
+  useLayoutEffect(() => {
+    if (!scrolls && bodyRef.current) bodyRef.current.scrollTop = 0;
+  }, [scrolls]);
   const frame = usePanelFrame();
   const framed = frame !== undefined && frame.layout !== 'folded';
   const panelClassName = [
@@ -649,105 +632,108 @@ function Panel({ roomId, request }: PanelProps) {
       }}
     >
       <PanelTokenFormContext.Provider value={tokenForm.context}>
-        <RemovedTokenNote className="mrpr-status mrpr-panel-removed" />
-        {!ref || !pr || !state ? (
-          <>
-            {/* The panel's name and control pill until a pull request shows. */}
-            <div className="mrpr-crumbs mrpr-bar">
+        <div ref={setBarElement} className="mrpr-crumbs mrpr-bar">
+          {!loaded ? (
+            <>
+              {/* The panel's name and controls until a pull request shows. */}
               <h2 className="mrpr-bar-label mrpr-truncate">{t('panelLabel')}</h2>
               <PanelControlPill />
-            </div>
-            {!ref ? (
-              <p className="mrpr-status mrpr-panel-note">{t('emptyPanel')}</p>
-            ) : (
-              <div className="mrpr-panel-note">
-                {error === undefined ? (
-                  <p className="mrpr-status">{t('loading')}</p>
-                ) : (
-                  <GitHubErrorState
-                    error={error}
-                    onRetry={() => void query.refetch()}
-                    withTokenForm={false}
-                  />
-                )}
-              </div>
-            )}
-          </>
-        ) : (
-          <Header
-            pr={pr}
-            pullRequestRef={ref}
-            state={state}
-            actions={actions}
-            freshness={freshness}
-            scrolls={scrolls}
-            // Who the requests go as and what changes that sit in its menu, out of the way.
-            onUseToken={
-              via === 'server' && !tokenForm.reason && !overriding
-                ? () => setOverriding(true)
-                : undefined
-            }
-            onForgetToken={token !== undefined ? forget : undefined}
-          />
-        )}
-        {/* Invariant: the panel's token form has exactly one owner, here, and one tree position,
-          keyed only by the server's origin and the pull request; the loading, error and loaded
-          views never mount their own copy. Once it has shown for (origin, pull request), it stays
-          mounted until the person cancels it, a save or removal it started succeeds, or the origin
-          or pull request changes. Reads and status changes never unmount it. */}
-        {shownReason ? (
-          <div className="mrpr-panel-token" key={formScope}>
-            <TokenForm
-              reason={shownReason}
-              inputRef={tokenForm.inputRef}
-              // Only one opened to use a token instead, or latched with nothing to show it for,
-              // closes: a failure keeps the other.
-              onCancel={
-                (shownReason === 'override' && overriding) || !formReason
-                  ? closeForm(held)
-                  : undefined
-              }
-              onDone={closeForm(held)}
-            />
-          </div>
-        ) : null}
-        {pr && state && ref ? (
-          <>
-            <TabBar
-              value={tab}
-              onChange={setTab}
-              end={<ChecksStatusLine pullRequest={pr} pullRequestRef={ref} />}
-            />
-            <div
-              className={tab === 'code' ? 'mrpr-tabpanel mrpr-tabpanel-code' : 'mrpr-tabpanel'}
-              role="tabpanel"
-              id={`mrpr-tabpanel-${tab}`}
-              aria-labelledby={`mrpr-tab-${tab}`}
-            >
-              {tab === 'summary' ? (
-                <SummaryTab pullRequest={pr} pullRequestRef={ref} />
-              ) : tab === 'timeline' ? (
-                <TimelineTab
-                  pullRequestRef={ref}
-                  pullRequest={pr}
-                  order={order}
-                  onOrder={setOrder}
-                  onOpenCommit={(sha) => {
-                    selectCommit(sha);
-                    setTab('code');
-                  }}
-                />
+            </>
+          ) : null}
+        </div>
+        <div ref={bodyRef} className="mrpr-panel-body">
+          <RemovedTokenNote className="mrpr-status mrpr-panel-removed" />
+          {!ref ? (
+            <p className="mrpr-status mrpr-panel-note">{t('emptyPanel')}</p>
+          ) : !pr || !state ? (
+            <div className="mrpr-panel-note">
+              {error === undefined ? (
+                <p className="mrpr-status">{t('loading')}</p>
               ) : (
-                <Files
-                  pullRequest={ref}
-                  commitCount={pr.commitCount}
-                  commit={selectedCommit}
-                  onCommitChange={selectCommit}
+                <GitHubErrorState
+                  error={error}
+                  onRetry={() => void query.refetch()}
+                  withTokenForm={false}
                 />
               )}
             </div>
-          </>
-        ) : null}
+          ) : (
+            <Header
+              pr={pr}
+              pullRequestRef={ref}
+              state={state}
+              actions={actions}
+              freshness={freshness}
+              scrolls={scrolls}
+              barContainer={barElement}
+              // Who the requests go as and what changes that sit in its menu, out of the way.
+              onUseToken={
+                via === 'server' && !tokenForm.reason && !overriding
+                  ? () => setOverriding(true)
+                  : undefined
+              }
+              onForgetToken={token !== undefined ? forget : undefined}
+            />
+          )}
+          {/* Invariant: the panel's token form has exactly one owner, here, and one tree position,
+            keyed only by the server's origin and the pull request; the loading, error and loaded
+            views never mount their own copy. Once it has shown for (origin, pull request), it stays
+            mounted until the person cancels it, a save or removal it started succeeds, or the origin
+            or pull request changes. Reads and status changes never unmount it. */}
+          {shownReason ? (
+            <div className="mrpr-panel-token" key={formScope}>
+              <TokenForm
+                reason={shownReason}
+                inputRef={tokenForm.inputRef}
+                // Only one opened to use a token instead, or latched with nothing to show it for,
+                // closes: a failure keeps the other.
+                onCancel={
+                  (shownReason === 'override' && overriding) || !formReason
+                    ? closeForm(held)
+                    : undefined
+                }
+                onDone={closeForm(held)}
+              />
+            </div>
+          ) : null}
+          {pr && state && ref ? (
+            <>
+              <TabBar
+                value={tab}
+                onChange={setTab}
+                end={<ChecksStatusLine pullRequest={pr} pullRequestRef={ref} />}
+              />
+              <div
+                className={tab === 'code' ? 'mrpr-tabpanel mrpr-tabpanel-code' : 'mrpr-tabpanel'}
+                role="tabpanel"
+                id={`mrpr-tabpanel-${tab}`}
+                aria-labelledby={`mrpr-tab-${tab}`}
+              >
+                {tab === 'summary' ? (
+                  <SummaryTab pullRequest={pr} pullRequestRef={ref} />
+                ) : tab === 'timeline' ? (
+                  <TimelineTab
+                    pullRequestRef={ref}
+                    pullRequest={pr}
+                    order={order}
+                    onOrder={setOrder}
+                    onOpenCommit={(sha) => {
+                      selectCommit(sha);
+                      setTab('code');
+                    }}
+                  />
+                ) : (
+                  <Files
+                    pullRequest={ref}
+                    commitCount={pr.commitCount}
+                    commit={selectedCommit}
+                    onCommitChange={selectCommit}
+                  />
+                )}
+              </div>
+            </>
+          ) : null}
+        </div>
       </PanelTokenFormContext.Provider>
     </div>
   );
