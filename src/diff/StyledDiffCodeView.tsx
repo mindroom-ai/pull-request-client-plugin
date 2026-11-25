@@ -1,13 +1,13 @@
 // Ported from T3 Code (https://github.com/pingdotgg/t3code, apps/web/src/components/diffs/StyledDiffCodeView.tsx at 8ab427c6), MIT, Copyright (c) 2026 T3 Tools Inc. See NOTICE.
-// Pierre's diff view in the app's colors and fonts. It highlights on the page's own thread: the
-// plugin ships no worker pool.
+// Pierre's diff view in the app's colors and fonts. Uses a surrounding worker pool when Web
+// Workers are available, falling back to main-thread highlighting otherwise.
 import {
   CodeView,
   type CodeViewHandle,
   type CodeViewReactOptions,
   type ControlledCodeViewProps,
 } from '@pierre/diffs/react';
-import type { Ref } from 'react';
+import { useMemo, type Ref } from 'react';
 
 import { useRootFontSize } from '../rootFontSize';
 import { DIFF_SURFACE_THEME_UNSAFE_CSS } from './diffRendering';
@@ -226,6 +226,8 @@ type StyledDiffCodeViewProps<LAnnotation> = Omit<
   readonly unsafeCSSExtra?: string;
 };
 
+const DIFF_VIEW_LAYOUT = { paddingTop: 0, paddingBottom: 0, gap: 0 };
+
 export function StyledDiffCodeView<LAnnotation = undefined>({
   options,
   viewerRef,
@@ -234,31 +236,39 @@ export function StyledDiffCodeView<LAnnotation = undefined>({
   ...props
 }: StyledDiffCodeViewProps<LAnnotation>) {
   const rem = useRootFontSize();
+  const itemMetrics = useMemo(
+    () => ({
+      lineHeight: 1.25 * rem,
+      diffHeaderHeight: 2 * rem,
+      hunkSeparatorHeight: 1.5 * rem,
+      // Zero both spacing and paddingTop; Pierre's expanded-file fallback otherwise adds a header
+      // gap.
+      spacing: 0,
+      paddingTop: 0,
+      // Include --diffs-gap-fallback in metrics or each expanded file loses a scrollable row.
+      paddingBottom: 0.5 * rem,
+    }),
+    [rem]
+  );
+  const mergedOptions = useMemo<CodeViewReactOptions<LAnnotation, undefined>>(
+    () => ({
+      ...options,
+      unsafeCSS: unsafeCSSExtra
+        ? `${DIFF_VIEW_UNSAFE_CSS}\n${unsafeCSSExtra}`
+        : DIFF_VIEW_UNSAFE_CSS,
+      // In px, from the rem sizes of the styles above.
+      itemMetrics,
+      layout: DIFF_VIEW_LAYOUT,
+    }),
+    [options, unsafeCSSExtra, itemMetrics]
+  );
   return (
     <CodeView<LAnnotation>
       {...props}
       {...(viewerRef ? { ref: viewerRef } : {})}
-      disableWorkerPool
+      disableWorkerPool={typeof Worker === 'undefined'}
       className={className ? `mrpr-diff-view ${className}` : 'mrpr-diff-view'}
-      options={{
-        ...options,
-        unsafeCSS: unsafeCSSExtra
-          ? `${DIFF_VIEW_UNSAFE_CSS}\n${unsafeCSSExtra}`
-          : DIFF_VIEW_UNSAFE_CSS,
-        // In px, from the rem sizes of the styles above.
-        itemMetrics: {
-          lineHeight: 1.25 * rem,
-          diffHeaderHeight: 2 * rem,
-          hunkSeparatorHeight: 1.5 * rem,
-          // Zero both spacing and paddingTop; Pierre's expanded-file fallback otherwise adds a header
-          // gap.
-          spacing: 0,
-          paddingTop: 0,
-          // Include --diffs-gap-fallback in metrics or each expanded file loses a scrollable row.
-          paddingBottom: 0.5 * rem,
-        },
-        layout: { paddingTop: 0, paddingBottom: 0, gap: 0 },
-      }}
+      options={mergedOptions}
     />
   );
 }

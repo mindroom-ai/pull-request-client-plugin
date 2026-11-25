@@ -50,7 +50,46 @@ const view = vi.hoisted(() => ({
   props: undefined as Record<string, unknown> | undefined,
 }));
 
-vi.mock('@pierre/diffs/react', async () => {
+const workerPool = vi.hoisted(() => ({
+  props: undefined as
+    | { poolOptions?: Record<string, unknown>; highlighterOptions?: Record<string, unknown> }
+    | undefined,
+  created: [] as Array<{ terminate: ReturnType<typeof vi.fn> }>,
+}));
+
+vi.mock('@pierre/diffs/worker/worker-portable.js?worker&inline', () => ({
+  default: class FakeDiffWorker {
+    listeners = new Map<string, Set<(event: unknown) => void>>();
+    terminate = vi.fn();
+    constructor() {
+      workerPool.created.push(this);
+    }
+    addEventListener(type: string, listener: (event: unknown) => void) {
+      const set = this.listeners.get(type) ?? new Set();
+      set.add(listener);
+      this.listeners.set(type, set);
+    }
+    postMessage(request: { id?: string; type?: string }) {
+      if (request.type === 'initialize') {
+        queueMicrotask(() => {
+          for (const listener of this.listeners.get('message') ?? []) {
+            listener({
+              data: {
+                type: 'success',
+                requestType: 'initialize',
+                id: request.id,
+                sentAt: Date.now(),
+              },
+            });
+          }
+        });
+      }
+    }
+  },
+}));
+
+vi.mock('@pierre/diffs/react', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@pierre/diffs/react')>();
   const { forwardRef, useImperativeHandle } = await import('react');
   type Annotation = { side: string; lineNumber: number };
   type Item = {
@@ -100,6 +139,15 @@ vi.mock('@pierre/diffs/react', async () => {
         </div>
       );
     }),
+    WorkerPoolContextProvider: function WorkerPoolContextProvider(
+      props: Parameters<typeof actual.WorkerPoolContextProvider>[0]
+    ) {
+      workerPool.props = {
+        poolOptions: props.poolOptions as unknown as Record<string, unknown>,
+        highlighterOptions: props.highlighterOptions as unknown as Record<string, unknown>,
+      };
+      return <actual.WorkerPoolContextProvider {...props} />;
+    },
   };
 });
 
@@ -464,6 +512,8 @@ beforeEach(() => {
   localStorage.clear();
   view.scrollTo.mockReset();
   view.props = undefined;
+  workerPool.props = undefined;
+  workerPool.created.length = 0;
   fetchMock.mockReset();
   fetchMock.mockImplementation(async (url) =>
     url.includes(`/commits/${commit(2).sha}`)
@@ -1047,6 +1097,44 @@ describe('CodeTab', () => {
   it('draws the diffs in the dark theme while the app shows a dark one', async () => {
     await show({ themeKind: 'dark' });
     expect(view.props?.options).toMatchObject({ theme: 'pierre-dark' });
+  });
+
+  it('mounts a single-worker pool when Worker is available and terminates it on unmount', async () => {
+    vi.stubGlobal('Worker', class FakeWorker {});
+    const tab = await show();
+    expect(view.props?.disableWorkerPool).toBe(false);
+    expect(workerPool.props?.poolOptions).toMatchObject({
+      poolSize: 1,
+      totalASTLRUCacheSize: 50,
+    });
+    expect(workerPool.props?.highlighterOptions).toEqual({
+      theme: { light: 'pierre-light', dark: 'pierre-dark' },
+      lineDiffType: 'none',
+      langs: [],
+    });
+    await vi.waitFor(() => expect(workerPool.created).toHaveLength(1), { timeout: 10_000 });
+    expect(workerPool.created[0].terminate).not.toHaveBeenCalled();
+
+    await act(async () => {
+      tab.unmount();
+    });
+    expect(workerPool.created[0].terminate).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps CodeView options, header, and footer props stable across unrelated UI toggles', async () => {
+    const tab = await show();
+    const initialOptions = view.props?.options;
+    const initialFooter = view.props?.renderCodeViewFooter;
+    await click(tab.getByRole('button', { name: 'Line distribution' }));
+    expect(view.props?.options).toBe(initialOptions);
+    expect(view.props?.renderCodeViewFooter).toBe(initialFooter);
+
+    const headerWithDistribution = view.props?.renderCodeViewHeader;
+    expect(headerWithDistribution).toBeTypeOf('function');
+    await click(tab.getByRole('button', { name: 'Files' }));
+    expect(view.props?.options).toBe(initialOptions);
+    expect(view.props?.renderCodeViewHeader).toBe(headerWithDistribution);
+    expect(view.props?.renderCodeViewFooter).toBe(initialFooter);
   });
 
   it('choosing a file scrolls its diff into view', async () => {

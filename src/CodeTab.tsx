@@ -13,7 +13,14 @@ import type {
   FileDiffLoadedFiles,
   FileDiffMetadata,
 } from '@pierre/diffs';
-import type { CodeViewAnnotationArgs, CodeViewHandle } from '@pierre/diffs/react';
+import {
+  WorkerPoolContextProvider,
+  type CodeViewAnnotationArgs,
+  type CodeViewHandle,
+  type WorkerInitializationRenderOptions,
+  type WorkerPoolOptions,
+} from '@pierre/diffs/react';
+import DiffWorker from '@pierre/diffs/worker/worker-portable.js?worker&inline';
 import type { GitStatus } from '@pierre/trees';
 import {
   ChartBar,
@@ -77,7 +84,7 @@ import {
   summarizeByKind,
   toDistributionFiles,
 } from './diff/lineDistribution.logic';
-import { StyledDiffCodeView } from './diff/StyledDiffCodeView';
+import { StyledDiffCodeView, type StyledDiffCodeViewOptions } from './diff/StyledDiffCodeView';
 import { annotationsKey, placeThreads, type ThreadGroup } from './diff/threadAnnotations';
 import { useViewedFiles, type ViewedState } from './diff/viewedFiles';
 import {
@@ -112,6 +119,31 @@ const NO_THREADS: ReviewThread[] = [];
 const NO_FOLDS: FileDiffFoldChoices = new Map();
 // Matches `@container (min-inline-size: 640px)` in styles.css where the Files tree sits beside diffs.
 const WIDE_TREE_MIN_WIDTH = 640;
+
+// Keep Shiki highlighting off the main thread in a single scoped worker whose heap is freed on
+// unmount via WorkerPoolContextProvider -> terminateWorkerPoolSingleton().
+const DIFF_WORKER_POOL_OPTIONS: WorkerPoolOptions = {
+  workerFactory: () => new DiffWorker(),
+  poolSize: 1,
+  totalASTLRUCacheSize: 50,
+};
+const DIFF_WORKER_HIGHLIGHTER_OPTIONS: WorkerInitializationRenderOptions = {
+  theme: DIFF_THEME_NAMES,
+  lineDiffType: 'none',
+  langs: [],
+};
+
+function ScopedDiffWorkerPool({ children }: { children: ReactNode }) {
+  if (typeof Worker === 'undefined') return children;
+  return (
+    <WorkerPoolContextProvider
+      poolOptions={DIFF_WORKER_POOL_OPTIONS}
+      highlighterOptions={DIFF_WORKER_HIGHLIGHTER_OPTIONS}
+    >
+      {children}
+    </WorkerPoolContextProvider>
+  );
+}
 
 /** What a file's viewed mark and fold are against: its patch, or its blob without one. */
 const markText = (file: PullRequestFile) =>
@@ -694,9 +726,13 @@ export function CodeTab({
     [viewFiles]
   );
 
-  const marked = listed
-    .filter((path) => markTexts.has(path))
-    .map((path) => ({ fileKey: path, path, patch: markTexts.get(path) ?? '' }));
+  const marked = useMemo(
+    () =>
+      listed
+        .filter((path) => markTexts.has(path))
+        .map((path) => ({ fileKey: path, path, patch: markTexts.get(path) ?? '' })),
+    [listed, markTexts]
+  );
   const stats = useMemo(
     () =>
       new Map(
@@ -719,60 +755,78 @@ export function CodeTab({
     [listed, statusByPath, stats]
   );
 
-  const updateFolds = (change: (current: Folds) => Partial<Folds>) =>
-    setFolds((stored) => {
-      const current = stored.view === view ? stored : folds;
-      return { ...current, ...change(current) };
-    });
-  const toggleFolded = (path: string) =>
-    updateFolds((current) => ({
-      choices: withFileDiffFold(
-        current.choices,
-        foldKeyOf(path),
-        !isFileDiffCollapsed(foldKeyOf(path), current.override, current.choices, isViewedNow(path))
-      ),
-    }));
+  const updateFolds = useCallback(
+    (change: (current: Folds) => Partial<Folds>) =>
+      setFolds((stored) => {
+        const current =
+          stored.view === view ? stored : { view, override: null, choices: NO_FOLDS, anchor: null };
+        return { ...current, ...change(current) };
+      }),
+    [view]
+  );
+  const toggleFolded = useCallback(
+    (path: string) =>
+      updateFolds((current) => ({
+        choices: withFileDiffFold(
+          current.choices,
+          foldKeyOf(path),
+          !isFileDiffCollapsed(
+            foldKeyOf(path),
+            current.override,
+            current.choices,
+            isViewedNow(path)
+          )
+        ),
+      })),
+    [updateFolds, foldKeyOf, isViewedNow]
+  );
   // Marking a file viewed folds it and unmarking it unfolds it; Shift-click does so from the
   // file last marked to this one, as the list shows them. Before the toolbar's collapse or expand
   // all is used, a mark drops the reader's fold, so the fold follows the mark; after it, the mark
   // sets the reader's fold.
-  const setViewed = (path: string, extendRange: boolean) => {
-    const patch = markTexts.get(path) ?? '';
-    const mark = viewed.stateOf(path, patch) !== 'viewed';
-    const range = getFileViewedRange(marked, path, extendRange ? folds.anchor : null);
-    if (extendRange) {
-      viewed.markRange(
-        range.map((file) => file.path),
-        range.map((file) => file.patch),
-        mark
-      );
-    } else {
-      viewed.toggle(path, patch);
-    }
-    updateFolds((current) => ({
-      anchor: path,
-      choices: range.reduce(
-        (next, file) =>
-          withFileDiffFold(
-            next,
-            foldKeyOf(file.path),
-            current.override === null ? undefined : mark
-          ),
-        current.choices
-      ),
-    }));
-  };
-  const header: FileHeaderState = {
-    statOf: (path) => stats.get(path),
-    viewedOf: (path) => {
-      const patch = markTexts.get(path);
-      return patch === undefined ? undefined : viewed.stateOf(path, patch);
+  const setViewed = useCallback(
+    (path: string, extendRange: boolean) => {
+      const patch = markTexts.get(path) ?? '';
+      const mark = viewed.stateOf(path, patch) !== 'viewed';
+      const range = getFileViewedRange(marked, path, extendRange ? folds.anchor : null);
+      if (extendRange) {
+        viewed.markRange(
+          range.map((file) => file.path),
+          range.map((file) => file.patch),
+          mark
+        );
+      } else {
+        viewed.toggle(path, patch);
+      }
+      updateFolds((current) => ({
+        anchor: path,
+        choices: range.reduce(
+          (next, file) =>
+            withFileDiffFold(
+              next,
+              foldKeyOf(file.path),
+              current.override === null ? undefined : mark
+            ),
+          current.choices
+        ),
+      }));
     },
-    setViewed,
-    foldedOf: collapsedOf,
-    toggleFolded,
-    foldButtons: foldButtonsRef.current,
-  };
+    [markTexts, viewed, marked, folds.anchor, updateFolds, foldKeyOf]
+  );
+  const header = useMemo<FileHeaderState>(
+    () => ({
+      statOf: (path) => stats.get(path),
+      viewedOf: (path) => {
+        const patch = markTexts.get(path);
+        return patch === undefined ? undefined : viewed.stateOf(path, patch);
+      },
+      setViewed,
+      foldedOf: collapsedOf,
+      toggleFolded,
+      foldButtons: foldButtonsRef.current,
+    }),
+    [stats, markTexts, viewed, setViewed, collapsedOf, toggleFolded]
+  );
   const allFolded = areAllDiffFilesCollapsed(
     items.map((item) => item.id),
     new Set(items.filter((item) => item.collapsed).map((item) => item.id))
@@ -792,80 +846,86 @@ export function CodeTab({
     }
   };
 
-  const focusRevealedTarget = (path: string, isDiffItem: boolean): boolean => {
+  const focusRevealedTarget = useCallback((path: string, isDiffItem: boolean): boolean => {
     const target = isDiffItem ? foldButtonsRef.current.get(path) : rowsRef.current.get(path);
     if (target?.isConnected) {
       target.focus({ preventScroll: true });
       return true;
     }
     return false;
-  };
+  }, []);
 
-  const reveal = (path: string, moveFocus = false) => {
-    cancelRevealFocus();
-    const isDiffItem = items.some((item) => item.id === path);
-    if (isDiffItem) {
-      // A folded file opens as it is revealed, and stays open as its mark changes.
-      updateFolds((current) => ({
-        choices: withFileDiffFold(current.choices, foldKeyOf(path), false),
-      }));
-      viewerRef.current?.scrollTo({ type: 'item', id: path, align: 'start' });
-    } else {
-      rowsRef.current.get(path)?.scrollIntoView({ block: 'nearest' });
-    }
-    if (!moveFocus) return;
-    // Move focus out of the off-screen scroll-away header (stacked tree or Line Distribution) to
-    // the revealed diff control (or the diffs container if the row is still virtualized). Also
-    // re-check on the next frame because Pierre's tree reclaims focus after onSelectionChange
-    // during the same click handler, and virtualized diff headers may not mount synchronously
-    // before CodeView finishes scrolling.
-    const moved = focusRevealedTarget(path, isDiffItem);
-    revealFocusFrameRef.current = window.requestAnimationFrame(() => {
-      revealFocusFrameRef.current = null;
-      const active = document.activeElement;
-      const inScrollAwayHeader = [
-        ...(diffsRef.current?.querySelectorAll('.mrpr-code-tree-stacked, .mrpr-dist') ?? []),
-      ].some((headerEl) => headerEl.contains(active));
-      if (
-        moved
-          ? !inScrollAwayHeader
-          : !inScrollAwayHeader && active !== null && active !== document.body
-      ) {
-        return;
+  const reveal = useCallback(
+    (path: string, moveFocus = false) => {
+      cancelRevealFocus();
+      const isDiffItem = items.some((item) => item.id === path);
+      if (isDiffItem) {
+        // A folded file opens as it is revealed, and stays open as its mark changes.
+        updateFolds((current) => ({
+          choices: withFileDiffFold(current.choices, foldKeyOf(path), false),
+        }));
+        viewerRef.current?.scrollTo({ type: 'item', id: path, align: 'start' });
+      } else {
+        rowsRef.current.get(path)?.scrollIntoView({ block: 'nearest' });
       }
-      if (!focusRevealedTarget(path, isDiffItem)) {
-        diffsRef.current?.focus({ preventScroll: true });
-      }
-    });
-  };
+      if (!moveFocus) return;
+      // Move focus out of the off-screen scroll-away header (stacked tree or Line Distribution) to
+      // the revealed diff control (or the diffs container if the row is still virtualized). Also
+      // re-check on the next frame because Pierre's tree reclaims focus after onSelectionChange
+      // during the same click handler, and virtualized diff headers may not mount synchronously
+      // before CodeView finishes scrolling.
+      const moved = focusRevealedTarget(path, isDiffItem);
+      revealFocusFrameRef.current = window.requestAnimationFrame(() => {
+        revealFocusFrameRef.current = null;
+        const active = document.activeElement;
+        const inScrollAwayHeader = [
+          ...(diffsRef.current?.querySelectorAll('.mrpr-code-tree-stacked, .mrpr-dist') ?? []),
+        ].some((headerEl) => headerEl.contains(active));
+        if (
+          moved
+            ? !inScrollAwayHeader
+            : !inScrollAwayHeader && active !== null && active !== document.body
+        ) {
+          return;
+        }
+        if (!focusRevealedTarget(path, isDiffItem)) {
+          diffsRef.current?.focus({ preventScroll: true });
+        }
+      });
+    },
+    [cancelRevealFocus, items, updateFolds, foldKeyOf, focusRevealedTarget]
+  );
 
-  const renderWithoutDiff = () =>
-    withoutDiff.length === 0 ? null : (
-      <ul className="mrpr-no-diff-list">
-        {withoutDiff.map((file) => (
-          <li
-            key={file.path}
-            className="mrpr-no-diff"
-            tabIndex={-1}
-            ref={(row) => {
-              if (row) rowsRef.current.set(file.path, row);
-              else rowsRef.current.delete(file.path);
-            }}
-          >
-            <span className="mrpr-no-diff-head">
-              <span className="mrpr-no-diff-path">{file.path}</span>
-              <FileMeta path={file.path} />
-            </span>
-            <span className="mrpr-meta">
-              <span>{t('noDiff')}</span>
-              <a href={file.url} target="_blank" rel="noopener noreferrer" className="mrpr-link">
-                {t('openOnGitHub')}
-              </a>
-            </span>
-          </li>
-        ))}
-      </ul>
-    );
+  const renderWithoutDiff = useCallback(
+    () =>
+      withoutDiff.length === 0 ? null : (
+        <ul className="mrpr-no-diff-list">
+          {withoutDiff.map((file) => (
+            <li
+              key={file.path}
+              className="mrpr-no-diff"
+              tabIndex={-1}
+              ref={(row) => {
+                if (row) rowsRef.current.set(file.path, row);
+                else rowsRef.current.delete(file.path);
+              }}
+            >
+              <span className="mrpr-no-diff-head">
+                <span className="mrpr-no-diff-path">{file.path}</span>
+                <FileMeta path={file.path} />
+              </span>
+              <span className="mrpr-meta">
+                <span>{t('noDiff')}</span>
+                <a href={file.url} target="_blank" rel="noopener noreferrer" className="mrpr-link">
+                  {t('openOnGitHub')}
+                </a>
+              </span>
+            </li>
+          ))}
+        </ul>
+      ),
+    [withoutDiff, t]
+  );
 
   // Nothing to show: the view has no file, every one is a hidden test, or only whitespace changed
   // while whitespace changes are hidden.
@@ -956,38 +1016,67 @@ export function CodeTab({
     ? t('code.distribution.clearDirFilter', { prefix: filterChipText })
     : filterChipText;
 
-  const renderCodeViewHeader =
-    stacked || showDistribution
-      ? () => (
-          <>
-            {stacked ? (
-              <div className="mrpr-code-tree-stacked">
-                <DiffFileTree
-                  ariaLabel={t('code.treeLabel', pullRequest)}
-                  entries={entries}
-                  initialExpansion="closed"
+  const renderCodeViewHeader = useMemo(
+    () =>
+      stacked || showDistribution
+        ? () => (
+            <>
+              {stacked ? (
+                <div className="mrpr-code-tree-stacked">
+                  <DiffFileTree
+                    ariaLabel={t('code.treeLabel', pullRequest)}
+                    entries={entries}
+                    initialExpansion="closed"
+                    onSelectFile={(path) => reveal(path, true)}
+                  />
+                </div>
+              ) : null}
+              {showDistribution ? (
+                <LineDistribution
+                  files={distributionFiles}
+                  scopedFiles={scopedDistributionFiles}
+                  activeKinds={activeKinds}
+                  dirPrefix={dirPrefix}
+                  view={prefs.distributionView}
+                  metric={prefs.distributionMetric}
+                  onToggleKind={toggleKind}
+                  onDirPrefixChange={setDirPrefix}
+                  onViewChange={(distributionView) => prefs.update({ distributionView })}
+                  onMetricChange={(distributionMetric) => prefs.update({ distributionMetric })}
                   onSelectFile={(path) => reveal(path, true)}
                 />
-              </div>
-            ) : null}
-            {showDistribution ? (
-              <LineDistribution
-                files={distributionFiles}
-                scopedFiles={scopedDistributionFiles}
-                activeKinds={activeKinds}
-                dirPrefix={dirPrefix}
-                view={prefs.distributionView}
-                metric={prefs.distributionMetric}
-                onToggleKind={toggleKind}
-                onDirPrefixChange={setDirPrefix}
-                onViewChange={(distributionView) => prefs.update({ distributionView })}
-                onMetricChange={(distributionMetric) => prefs.update({ distributionMetric })}
-                onSelectFile={(path) => reveal(path, true)}
-              />
-            ) : null}
-          </>
-        )
-      : undefined;
+              ) : null}
+            </>
+          )
+        : undefined,
+    [
+      stacked,
+      showDistribution,
+      t,
+      pullRequest,
+      entries,
+      reveal,
+      distributionFiles,
+      scopedDistributionFiles,
+      activeKinds,
+      dirPrefix,
+      prefs,
+      toggleKind,
+    ]
+  );
+
+  const diffViewOptions = useMemo<StyledDiffCodeViewOptions<ThreadGroup>>(
+    () => ({
+      theme: DIFF_THEME_NAMES[themeKind],
+      themeType: themeKind,
+      diffStyle: prefs.diffStyle,
+      overflow: prefs.wrap ? 'wrap' : 'scroll',
+      lineDiffType: 'none',
+      stickyHeaders: true,
+      loadDiffFiles: canLoadDiffFiles ? loadDiffFiles : undefined,
+    }),
+    [themeKind, prefs.diffStyle, prefs.wrap, canLoadDiffFiles, loadDiffFiles]
+  );
 
   return (
     <div ref={rootRef} className="mrpr-root mrpr-code" style={pluginRootStyle()}>
@@ -1194,26 +1283,20 @@ export function CodeTab({
             onClickCapture={onDiffsClickCapture}
           >
             <FileHeaderContext.Provider value={header}>
-              {/* The viewer must own its scroll element to position virtual rows within it. */}
-              <StyledDiffCodeView<ThreadGroup>
-                viewerRef={viewerRef}
-                items={items}
-                options={{
-                  theme: DIFF_THEME_NAMES[themeKind],
-                  themeType: themeKind,
-                  diffStyle: prefs.diffStyle,
-                  overflow: prefs.wrap ? 'wrap' : 'scroll',
-                  lineDiffType: 'none',
-                  stickyHeaders: true,
-                  loadDiffFiles: canLoadDiffFiles ? loadDiffFiles : undefined,
-                }}
-                renderCodeViewHeader={renderCodeViewHeader}
-                renderCodeViewFooter={renderWithoutDiff}
-                renderHeaderPrefix={renderHeaderPrefix}
-                renderHeaderMetadata={renderHeaderMetadata}
-                renderAnnotation={renderAnnotation}
-                unsafeCSSExtra={REPLACE_FILE_COUNTS_CSS}
-              />
+              <ScopedDiffWorkerPool>
+                {/* The viewer must own its scroll element to position virtual rows within it. */}
+                <StyledDiffCodeView<ThreadGroup>
+                  viewerRef={viewerRef}
+                  items={items}
+                  options={diffViewOptions}
+                  renderCodeViewHeader={renderCodeViewHeader}
+                  renderCodeViewFooter={renderWithoutDiff}
+                  renderHeaderPrefix={renderHeaderPrefix}
+                  renderHeaderMetadata={renderHeaderMetadata}
+                  renderAnnotation={renderAnnotation}
+                  unsafeCSSExtra={REPLACE_FILE_COUNTS_CSS}
+                />
+              </ScopedDiffWorkerPool>
             </FileHeaderContext.Provider>
           </div>
         </div>
