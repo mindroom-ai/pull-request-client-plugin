@@ -31,7 +31,6 @@ vi.mock('@mindroom/client-sdk/ui', async (importOriginal) => {
               const mapped = options?.imageSource?.(src);
               return mapped ? `<img alt="${alt}" src="${mapped}">` : '';
             })
-            .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
         : undefined,
   };
 });
@@ -362,7 +361,7 @@ describe('SummaryTab', () => {
         })
       );
       const plain = view.container.querySelector('.mrpr-markdown.mrpr-comment-plain');
-      expect(plain?.textContent).toBe('Fixes [#42](https://github.com/acme/widgets/issues/42)');
+      expect(plain?.textContent).toBe('Fixes #42');
       markdownReady.ready = true;
       view.unmount();
       const rendered = await show(

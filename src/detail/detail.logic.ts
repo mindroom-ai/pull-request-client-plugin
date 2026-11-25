@@ -13,7 +13,7 @@ import type {
   ReviewState,
 } from '../github';
 import type { ReviewThread } from '../reviewThreads';
-import { prepareGitHubMarkdown } from './githubMarkdown';
+import { stripGitHubHtmlComments } from './prepareGitHubMarkdown';
 
 // Host UTC offsets make lexical timestamp sorting unsafe.
 function instant(iso: string): number {
@@ -398,5 +398,5 @@ export function baseFreshness(
 
 /** Strips HTML comments outside code; returns `null` when nothing visible remains. */
 export function visibleBody(body: string): string | null {
-  return prepareGitHubMarkdown(body);
+  return stripGitHubHtmlComments(body);
 }

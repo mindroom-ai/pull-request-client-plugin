@@ -4,7 +4,7 @@ import { useMemo, type ReactNode } from 'react';
 import { MarkdownContent, useMarkdownHtml } from '@mindroom/client-sdk/ui';
 import type { GitHubBodyMeta } from '../githubBody';
 import { imageResolver, type ImageSources } from '../images';
-import { prepareGitHubMarkdown } from './githubMarkdown';
+import { linkifyGitHubHtml, stripGitHubHtmlComments } from './prepareGitHubMarkdown';
 import { useSignedImageFallback } from './imageFallback';
 
 export type GitHubMarkdownProps = {
@@ -16,10 +16,14 @@ export type GitHubMarkdownProps = {
 };
 
 export function useGitHubMarkdown(body: string, images: ImageSources, bodyMeta?: GitHubBodyMeta) {
-  const prepared = useMemo(() => prepareGitHubMarkdown(body, bodyMeta), [body, bodyMeta]);
+  const prepared = useMemo(() => stripGitHubHtmlComments(body), [body]);
   // One function per answer of GitHub's: a new one would sanitize the body again on each render.
   const imageSource = useMemo(() => imageResolver(images), [images]);
-  const html = useMarkdownHtml(prepared ?? '', { imageSource });
+  const rawHtml = useMarkdownHtml(prepared ?? '', { imageSource });
+  const html = useMemo(
+    () => (rawHtml === undefined ? undefined : linkifyGitHubHtml(rawHtml, bodyMeta)),
+    [rawHtml, bodyMeta]
+  );
   const imagesRef = useSignedImageFallback(images);
   return { prepared, html, imagesRef };
 }

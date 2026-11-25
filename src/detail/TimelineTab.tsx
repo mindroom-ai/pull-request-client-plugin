@@ -34,7 +34,6 @@ import {
   commitsCut,
   latestReviewOutcomes,
   reviewOutcome,
-  visibleBody,
   type ConversationItem,
   type TimelineEvent,
 } from './detail.logic';
@@ -186,9 +185,7 @@ function VerdictEvent({ review, headSha }: { review: Review; headSha: string }) 
             <RelativeTime timestamp={review.submittedAt} />
           )}
         </span>
-        {visibleBody(review.body) !== null ? (
-          <CommentBody body={review.body} images={review.images} bodyMeta={review.bodyMeta} />
-        ) : null}
+        <CommentBody body={review.body} images={review.images} bodyMeta={review.bodyMeta} />
       </div>
     </li>
   );

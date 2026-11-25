@@ -112,10 +112,19 @@ describe('CommentBody', () => {
         bodyMeta={bodyMeta}
       />
     );
-    expect(view.container.textContent).toBe(
-      'See [#42](https://github.com/acme/widgets/issues/42).'
+    expect(view.container.textContent).toBe('See #42.');
+    expect(markdown.inputs.at(-1)).toBe('See #42.');
+    markdown.html = '<p>See #42.</p>';
+    view.rerender(
+      <CommentBody
+        body={'<!-- auto-generated note -->\nSee #42.'}
+        images={NO_IMAGES}
+        bodyMeta={bodyMeta}
+      />
     );
-    expect(markdown.inputs.at(-1)).toBe('See [#42](https://github.com/acme/widgets/issues/42).');
+    const link = view.container.querySelector('a');
+    expect(link?.getAttribute('href')).toBe('https://github.com/acme/widgets/issues/42');
+    expect(link?.textContent).toBe('#42');
   });
 
   it('shows a short body whole, with no button', async () => {
