@@ -24,10 +24,8 @@ vi.mock('@mindroom/client-sdk/ui', async (importOriginal) => {
   const ui = await importOriginal<typeof import('@mindroom/client-sdk/ui')>();
   return {
     ...ui,
-    useMarkdownHtml: (markdown: string, options?: { stripHtmlComments?: boolean }) =>
-      options?.stripHtmlComments
-        ? markdown.replace(/<!--[\s\S]*?(?:-->|$)/gu, '').trim()
-        : markdown,
+    useMarkdownHtml: (markdown: string, options?: { commonMarkHtml?: boolean }) =>
+      options?.commonMarkHtml ? markdown.replace(/<!--[\s\S]*?(?:-->|$)/gu, '').trim() : markdown,
   };
 });
 

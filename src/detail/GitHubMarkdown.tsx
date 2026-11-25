@@ -21,7 +21,7 @@ export function useGitHubMarkdown(body: string, images: ImageSources, bodyMeta?:
   const visible = useMemo(() => visibleBody(body), [body]);
   // One function per answer of GitHub's: a new one would sanitize the body again on each render.
   const imageSource = useMemo(() => imageResolver(images), [images]);
-  const rawHtml = useMarkdownHtml(body, { imageSource, stripHtmlComments: true });
+  const rawHtml = useMarkdownHtml(body, { imageSource, commonMarkHtml: true });
   const html = useMemo(
     () => (rawHtml === undefined ? undefined : linkifyGitHubHtml(rawHtml, bodyMeta)),
     [rawHtml, bodyMeta]

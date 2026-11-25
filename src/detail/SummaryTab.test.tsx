@@ -18,7 +18,7 @@ vi.mock('focus-trap-react', async () => ({
 const markdownMock = vi.hoisted(() => ({
   ready: true,
   inputs: [] as string[],
-  stripHtmlComments: [] as (boolean | undefined)[],
+  commonMarkHtml: [] as (boolean | undefined)[],
 }));
 vi.mock('@mindroom/client-sdk/ui', async (importOriginal) => {
   const ui = await importOriginal<typeof import('@mindroom/client-sdk/ui')>();
@@ -28,11 +28,11 @@ vi.mock('@mindroom/client-sdk/ui', async (importOriginal) => {
       markdown: string,
       options?: {
         imageSource?: (src: string) => string | undefined;
-        stripHtmlComments?: boolean;
+        commonMarkHtml?: boolean;
       }
     ) => {
       markdownMock.inputs.push(markdown);
-      markdownMock.stripHtmlComments.push(options?.stripHtmlComments);
+      markdownMock.commonMarkHtml.push(options?.commonMarkHtml);
       if (!markdownMock.ready) return undefined;
       if (/^(?: {4}| {0,3}\t)[ \t]*\S/u.test(markdown)) {
         const code = markdown
@@ -42,7 +42,7 @@ vi.mock('@mindroom/client-sdk/ui', async (importOriginal) => {
           .replace(/>/g, '&gt;');
         return `<pre><code>${code}</code></pre>`;
       }
-      const source = options?.stripHtmlComments
+      const source = options?.commonMarkHtml
         ? markdown.replace(/<!--[\s\S]*?(?:-->|$)/gu, '').trim()
         : markdown;
       return source
@@ -184,7 +184,7 @@ beforeEach(() => {
   serve();
   markdownMock.ready = true;
   markdownMock.inputs = [];
-  markdownMock.stripHtmlComments = [];
+  markdownMock.commonMarkHtml = [];
   vi.stubGlobal('fetch', fetchMock);
   // jsdom has no scrollIntoView.
   Element.prototype.scrollIntoView = vi.fn();
@@ -371,7 +371,7 @@ describe('SummaryTab', () => {
     commentOnly.unmount();
     const unclosed = await show(pull({ body: '<!-- unclosed' }));
     expect(unclosed.getByText('No description.')).toBeTruthy();
-    expect(markdownMock.stripHtmlComments.at(-1)).toBe(true);
+    expect(markdownMock.commonMarkHtml.at(-1)).toBe(true);
   });
 
   it('distinguishes an unindented HTML comment from a 4-space indented code block', async () => {
@@ -384,7 +384,7 @@ describe('SummaryTab', () => {
     const indented = await show(pull({ body: indentedBody }));
     expect(indented.queryByText('No description.')).toBeNull();
     expect(markdownMock.inputs.at(-1)).toBe(indentedBody);
-    expect(markdownMock.stripHtmlComments.at(-1)).toBe(true);
+    expect(markdownMock.commonMarkHtml.at(-1)).toBe(true);
     expect(indented.container.querySelector('.mrpr-description pre code')?.textContent).toBe(
       '<!-- template marker -->'
     );
@@ -402,7 +402,7 @@ describe('SummaryTab', () => {
       const view = await show(pull({ body, bodyMeta }));
       const plain = view.container.querySelector('.mrpr-markdown.mrpr-comment-plain');
       expect(plain?.textContent).toBe(body);
-      expect(markdownMock.stripHtmlComments).toContain(true);
+      expect(markdownMock.commonMarkHtml).toContain(true);
       markdownMock.ready = true;
       view.unmount();
       const rendered = await show(pull({ body, bodyMeta }));
