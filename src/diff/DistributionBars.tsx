@@ -7,6 +7,7 @@ import {
   buildDirectoryRows,
   computeBarWidths,
   formatShare,
+  formatSigned,
   metricValue,
   sortFilesByMetric,
   statusBadge,
@@ -14,8 +15,16 @@ import {
   type DistributionViewProps,
 } from './lineDistribution.logic';
 
+type BarCounts = {
+  additions: number;
+  deletions: number;
+  value?: number;
+  netAdded?: number;
+  netRemoved?: number;
+};
+
 function BarRow(props: {
-  counts: { additions: number; deletions: number };
+  counts: BarCounts;
   maxValue: number;
   scopeTotal: number;
   metric: DistributionMetric;
@@ -25,15 +34,23 @@ function BarRow(props: {
 }) {
   const { counts, maxValue, scopeTotal, metric, fmt, onClick, children } = props;
   const { addPct, delPct } = computeBarWidths(counts, maxValue, metric);
-  const share = formatShare(metricValue(counts, metric), scopeTotal);
+  const share = formatShare(counts.value ?? metricValue(counts, metric), scopeTotal);
+  const delta = counts.additions - counts.deletions;
   const showAdd = counts.additions > 0 || metric === 'additions' || counts.deletions === 0;
   const showDel = metric === 'total' && counts.deletions > 0;
+  const netClass = delta > 0 ? 'mrpr-added' : delta < 0 ? 'mrpr-removed' : 'mrpr-dist-net-zero';
   return (
     <button type="button" className="mrpr-dist-bar-row" onClick={onClick}>
       <span className="mrpr-dist-bar-name-col">{children}</span>
       <span className="mrpr-dist-bar-stats mrpr-tabular">
-        {showAdd ? <span className="mrpr-added">+{fmt.format(counts.additions)}</span> : null}
-        {showDel ? <span className="mrpr-removed">-{fmt.format(counts.deletions)}</span> : null}
+        {metric === 'net' ? (
+          <span className={netClass}>{formatSigned(delta, fmt)}</span>
+        ) : (
+          <>
+            {showAdd ? <span className="mrpr-added">+{fmt.format(counts.additions)}</span> : null}
+            {showDel ? <span className="mrpr-removed">-{fmt.format(counts.deletions)}</span> : null}
+          </>
+        )}
         <span className="mrpr-dist-bar-pct">{share}</span>
       </span>
       <span aria-hidden className="mrpr-dist-bar-track">
@@ -68,20 +85,27 @@ export function DistributionBars(props: DistributionViewProps) {
   const topTotal = sortedFiles
     .slice(0, COMPACT_ROW_LIMIT)
     .reduce((sum, file) => sum + metricValue(file, metric), 0);
+  const isNet = metric === 'net';
+  const suffix = `${dirPrefix ? 'Folder' : ''}${isNet ? 'Net' : ''}`;
+  const singleNet = sortedFiles[0] ? sortedFiles[0].additions - sortedFiles[0].deletions : 0;
   const concentrationText =
-    sortedFiles.length > COMPACT_ROW_LIMIT
-      ? t(dirPrefix ? 'code.distribution.topFilesFolder' : 'code.distribution.topFiles', {
-          count: COMPACT_ROW_LIMIT,
-          share: formatShare(topTotal, scopeTotal),
-        })
-      : sortedFiles.length > 1
-        ? t(dirPrefix ? 'code.distribution.largestFileFolder' : 'code.distribution.largestFile', {
-            share: formatShare(metricValue(sortedFiles[0], metric), scopeTotal),
+    isNet && scopeTotal === 0
+      ? t('code.distribution.noNetChange')
+      : sortedFiles.length > COMPACT_ROW_LIMIT
+        ? t(`code.distribution.topFiles${suffix}`, {
+            count: COMPACT_ROW_LIMIT,
+            share: formatShare(topTotal, scopeTotal),
           })
-        : t('code.distribution.lineCount', {
-            count: scopeTotal,
-            formatted: fmt.format(scopeTotal),
-          });
+        : sortedFiles.length > 1
+          ? t(`code.distribution.largestFile${suffix}`, {
+              share: formatShare(metricValue(sortedFiles[0], metric), scopeTotal),
+            })
+          : isNet
+            ? t('code.distribution.netCount', { net: formatSigned(singleNet, fmt) })
+            : t('code.distribution.lineCount', {
+                count: scopeTotal,
+                formatted: fmt.format(scopeTotal),
+              });
 
   return (
     <>

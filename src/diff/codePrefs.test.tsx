@@ -85,6 +85,11 @@ describe('useCodePrefs', () => {
       distributionView: 'icicle',
       distributionMetric: 'additions',
     });
+    act(() => prefs.update({ distributionMetric: 'net' }));
+    expect(values().distributionMetric).toBe('net');
+    const reopened = await mount();
+    expect(values().distributionMetric).toBe('net');
+    reopened.unmount();
   });
 
   it('one change reaches every mounted reader', async () => {

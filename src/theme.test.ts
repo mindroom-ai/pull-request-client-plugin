@@ -30,4 +30,15 @@ describe('pluginRootStyle', () => {
       '--pr-surface-subtle-hover': color.SurfaceVariant.ContainerHover,
     });
   });
+
+  it('maps Net icicle tile colors to accessible theme container tokens', () => {
+    expect(pluginRootStyle()).toMatchObject({
+      '--pr-net-added': color.Success.ContainerActive,
+      '--pr-net-added-line': color.Success.ContainerLine,
+      '--pr-net-on-added': color.Success.OnContainer,
+      '--pr-net-removed': color.Critical.ContainerActive,
+      '--pr-net-removed-line': color.Critical.ContainerLine,
+      '--pr-net-on-removed': color.Critical.OnContainer,
+    });
+  });
 });

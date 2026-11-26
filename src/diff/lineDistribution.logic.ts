@@ -4,7 +4,7 @@ import type { PullRequestFile } from '../github';
 import { changedFileKind, type ChangedFileKind } from './changedFileKind';
 
 export type DistributionView = 'bars' | 'icicle';
-export type DistributionMetric = 'total' | 'additions';
+export type DistributionMetric = 'total' | 'additions' | 'net';
 export type DistributionViewProps = {
   scopedFiles: readonly DistributionFile[];
   dirPrefix: string;
@@ -22,7 +22,31 @@ export const ICICLE_ROW_HEIGHT = 42;
 export const ICICLE_DEFAULT_WIDTH = 620;
 const ICICLE_MIN_RECT_WIDTH = 1.5;
 
-type Totals = { files: number; additions: number; deletions: number; value: number };
+type Totals = {
+  files: number;
+  additions: number;
+  deletions: number;
+  value: number;
+  netAdded: number;
+  netRemoved: number;
+};
+const emptyTotals = (): Totals => ({
+  files: 0,
+  additions: 0,
+  deletions: 0,
+  value: 0,
+  netAdded: 0,
+  netRemoved: 0,
+});
+const addTotals = (target: Totals, file: DistributionFile, value: number) => {
+  const delta = file.additions - file.deletions;
+  target.files += 1;
+  target.additions += file.additions;
+  target.deletions += file.deletions;
+  target.value += value;
+  if (delta > 0) target.netAdded += delta;
+  else target.netRemoved -= delta;
+};
 export type DistributionFile = Pick<
   PullRequestFile,
   'path' | 'status' | 'additions' | 'deletions'
@@ -54,7 +78,15 @@ export type IcicleRect = {
 export const metricValue = (
   counts: { additions: number; deletions: number },
   metric: DistributionMetric
-) => (metric === 'additions' ? counts.additions : counts.additions + counts.deletions);
+) =>
+  metric === 'additions'
+    ? counts.additions
+    : metric === 'net'
+      ? Math.abs(counts.additions - counts.deletions)
+      : counts.additions + counts.deletions;
+
+export const formatSigned = (delta: number, fmt: Intl.NumberFormat): string =>
+  delta > 0 ? `+${fmt.format(delta)}` : delta < 0 ? `-${fmt.format(-delta)}` : fmt.format(0);
 
 export const toDistributionFiles = (files: readonly PullRequestFile[]): DistributionFile[] =>
   files.map(({ path, status, additions, deletions }) => ({
@@ -80,17 +112,8 @@ export function summarizeByKind(
 ): KindSummary[] {
   const byKind = new Map<ChangedFileKind, KindSummary>();
   for (const file of files) {
-    const entry = byKind.get(file.kind) ?? {
-      kind: file.kind,
-      files: 0,
-      additions: 0,
-      deletions: 0,
-      value: 0,
-    };
-    entry.files += 1;
-    entry.additions += file.additions;
-    entry.deletions += file.deletions;
-    entry.value += metricValue(file, metric);
+    const entry = byKind.get(file.kind) ?? { kind: file.kind, ...emptyTotals() };
+    addTotals(entry, file, metricValue(file, metric));
     byKind.set(file.kind, entry);
   }
   return DISTRIBUTION_KINDS.flatMap((kind) => (byKind.has(kind) ? [byKind.get(kind)!] : []));
@@ -152,15 +175,9 @@ export function buildDirectoryRows(
       name,
       dirPrefix: isFile ? '' : `${dirPrefix}${name}`,
       file: isFile ? file : null,
-      files: 0,
-      additions: 0,
-      deletions: 0,
-      value: 0,
+      ...emptyTotals(),
     };
-    row.files += 1;
-    row.additions += file.additions;
-    row.deletions += file.deletions;
-    row.value += metricValue(file, metric);
+    addTotals(row, file, metricValue(file, metric));
     map.set(name, row);
   }
   return [...map.values()].sort(byLargest);
@@ -176,16 +193,25 @@ export const sortFilesByMetric = (files: readonly DistributionFile[], metric: Di
 
 /** Proportional green/red bar widths as percentages of the widest item (0..100). */
 export function computeBarWidths(
-  counts: { additions: number; deletions: number },
+  counts: { additions: number; deletions: number; netAdded?: number; netRemoved?: number },
   maxValue: number,
   metric: DistributionMetric
 ): { addPct: number; delPct: number } {
-  const value = metricValue(counts, metric);
+  const [pos, neg] =
+    metric === 'additions'
+      ? [counts.additions, 0]
+      : metric === 'net'
+        ? [
+            counts.netAdded ?? Math.max(0, counts.additions - counts.deletions),
+            counts.netRemoved ?? Math.max(0, counts.deletions - counts.additions),
+          ]
+        : [counts.additions, counts.deletions];
+  const value = pos + neg;
   if (maxValue <= 0 || value <= 0) return { addPct: 0, delPct: 0 };
   const totalPct = Math.min(100, Math.max(1.5, (value / maxValue) * 100));
-  if (metric === 'additions' || counts.deletions === 0) return { addPct: totalPct, delPct: 0 };
-  if (counts.additions === 0) return { addPct: 0, delPct: totalPct };
-  let addPct = (counts.additions / value) * totalPct;
+  if (neg === 0) return { addPct: totalPct, delPct: 0 };
+  if (pos === 0) return { addPct: 0, delPct: totalPct };
+  let addPct = (pos / value) * totalPct;
   let delPct = totalPct - addPct;
   if (totalPct >= 1.6 && addPct < 0.8) [addPct, delPct] = [0.8, totalPct - 0.8];
   else if (totalPct >= 1.6 && delPct < 0.8) [delPct, addPct] = [0.8, totalPct - 0.8];
@@ -221,19 +247,13 @@ export function buildIcicleTree(
     name,
     path,
     file,
-    files: 0,
-    additions: 0,
-    deletions: 0,
-    value: 0,
+    ...emptyTotals(),
     kindValues: { code: 0, test: 0, docs: 0, generated: 0 },
     kindFiles: { code: 0, test: 0, docs: 0, generated: 0 },
     children: new Map(),
   });
   const add = (node: Draft, file: DistributionFile, value: number) => {
-    node.files += 1;
-    node.additions += file.additions;
-    node.deletions += file.deletions;
-    node.value += value;
+    addTotals(node, file, value);
     node.kindValues[file.kind] += value;
     node.kindFiles[file.kind] += 1;
   };
@@ -279,10 +299,13 @@ export function layoutIcicle(
   root: IcicleNode,
   width: number,
   maxDepth = ICICLE_MAX_DEPTH,
-  rowHeight = ICICLE_ROW_HEIGHT
+  rowHeight = ICICLE_ROW_HEIGHT,
+  fallbackToFiles = true
 ): { rects: IcicleRect[]; depth: number; height: number } {
   const safeWidth = Math.max(1, width);
-  if (root.files === 0) return { rects: [], depth: 1, height: rowHeight };
+  if (root.files === 0 || (root.value <= 0 && !fallbackToFiles)) {
+    return { rects: [], depth: 1, height: rowHeight };
+  }
   const weightOf = root.value > 0 ? (n: IcicleNode) => n.value : (n: IcicleNode) => n.files;
   const rects: IcicleRect[] = [];
   const walk = (node: IcicleNode, depth: number, x: number, w: number) => {

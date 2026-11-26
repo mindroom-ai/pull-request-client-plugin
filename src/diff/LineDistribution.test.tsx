@@ -156,6 +156,8 @@ describe('LineDistribution', () => {
     expect(props.onViewChange).toHaveBeenCalledWith('icicle');
     await click(getByRole('button', { name: '+Add' }));
     expect(props.onMetricChange).toHaveBeenCalledWith('additions');
+    await click(getByRole('button', { name: 'Net' }));
+    expect(props.onMetricChange).toHaveBeenCalledWith('net');
   });
 
   it('renders Icicle with group role, opaque fills, page-zoom scaling, keyboard-accessible nodes, resize viewBox, and inspect footer', async () => {
@@ -316,5 +318,140 @@ describe('LineDistribution', () => {
     });
     expect(icicle.container.textContent).not.toContain('NaN');
     expect(icicle.container.querySelectorAll('g.mrpr-dist-icicle-node').length).toBeGreaterThan(0);
+  });
+
+  it('renders Net Bars and Icicle with cancellation, signed labels, neutral dirs, zero-net empty state, and churn total captions', async () => {
+    const mixed = toDistributionFiles([
+      prFile('src/grow.ts', 120, 20),
+      prFile('src/shrink.ts', 10, 110),
+      prFile('src/even.ts', 30, 30),
+      prFile('docs/note.md', 40, 0, 'added'),
+    ]);
+    const kinds = new Set<ChangedFileKind>(['code', 'docs']);
+
+    // Net Bars: signed aggregate in crumb meta, sum(|net|) kind shares, split dir bar, signed file stats.
+    const bars = await mount({ files: mixed, activeKinds: kinds, metric: 'net' });
+    expect(bars.container.querySelector('.mrpr-dist-crumb-meta')?.textContent).toBe(
+      '4 files · +40 net'
+    );
+    expect(bars.getByRole('button', { name: /Code\s*83%/ }).getAttribute('title')).toContain(
+      '0 net'
+    );
+    const srcRow = bars.getByRole('button', { name: /^src\// });
+    expect(srcRow.querySelector('.mrpr-dist-bar-stats')?.textContent).toBe('083%');
+    expect(srcRow.querySelector('.mrpr-dist-bar-add')).not.toBeNull();
+    expect(srcRow.querySelector('.mrpr-dist-bar-del')).not.toBeNull();
+    const shrinkRow = bars.getByRole('button', { name: /shrink\.ts/ });
+    expect(shrinkRow.querySelector('.mrpr-removed')?.textContent).toBe('-100');
+    expect(shrinkRow.querySelector('.mrpr-dist-bar-add')).toBeNull();
+    bars.unmount();
+
+    // Drilled into canceling directory: shows 0 net (83%), never unsigned 200 lines.
+    const drilled = await mount({
+      files: mixed,
+      activeKinds: kinds,
+      dirPrefix: 'src/',
+      metric: 'net',
+    });
+    expect(drilled.container.querySelector('.mrpr-dist-crumb-meta')?.textContent).toBe(
+      '3 files · 0 net (83%)'
+    );
+    drilled.unmount();
+
+    // Net Icicle: neutral dirs with net captions, green/red file tiles with signs, inspect & legend.
+    const icicle = await mount({ files: mixed, activeKinds: kinds, view: 'icicle', metric: 'net' });
+    const srcDir = icicle.getByRole('button', { name: /^src\/: 0 net/ });
+    expect(srcDir.getAttribute('data-net')).toBeNull();
+    expect(srcDir.querySelector('rect.mrpr-dist-icicle-root-rect')).not.toBeNull();
+    expect(srcDir.querySelector('text.mrpr-dist-icicle-root-sub')?.textContent).toBe('83% · 0 net');
+    const growTile = icicle.getByRole('button', { name: /^src\/grow\.ts: \+100 net/ });
+    expect(growTile.getAttribute('data-net')).toBe('added');
+    expect(growTile.querySelector('text.mrpr-dist-icicle-sub')?.textContent).toBe('42% · +100');
+    const shrinkTile = icicle.getByRole('button', { name: /^src\/shrink\.ts: -100 net/ });
+    expect(shrinkTile.getAttribute('data-net')).toBe('removed');
+    expect(shrinkTile.querySelector('text.mrpr-dist-icicle-sub')?.textContent).toBe('42% · -100');
+    expect(icicle.queryByRole('button', { name: /^src\/even\.ts:/ })).toBeNull();
+    expect(icicle.container.querySelector('.mrpr-dist-foot')?.textContent).toMatch(
+      /\+ grows.*- shrinks/
+    );
+    await act(async () => srcDir.focus());
+    expect(icicle.container.querySelector('.mrpr-dist-icicle-inspect')?.textContent).toMatch(
+      /0 net.*-160/
+    );
+    icicle.unmount();
+
+    // Phone width: narrow Net file tile drops share prefix to keep compact signed number without spill.
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      return this.classList.contains('mrpr-dist-icicle-box') ? 260 : 0;
+    });
+    const phone = await mount({ files: mixed, activeKinds: kinds, view: 'icicle', metric: 'net' });
+    expect(
+      phone
+        .getByRole('button', { name: /^docs\/note\.md: \+40 net/ })
+        .querySelector('text.mrpr-dist-icicle-sub')?.textContent
+    ).toBe('+40');
+    expect(
+      phone
+        .getByRole('button', { name: /^docs\/: \+40 net/ })
+        .querySelector('text.mrpr-dist-icicle-root-sub')
+    ).toBeNull();
+    phone.unmount();
+
+    // All net=0: no file-count fallback in kind bar or icicle; clean empty state in both views.
+    const allZero = toDistributionFiles([
+      prFile('src/swap.ts', 45, 45),
+      prFile('docs/swap.md', 10, 10),
+    ]);
+    const zeroBars = await mount({ files: allZero, activeKinds: kinds, metric: 'net' });
+    expect(zeroBars.container.querySelectorAll('.mrpr-dist-kind-seg')).toHaveLength(0);
+    expect(zeroBars.getByText('No net line change')).toBeTruthy();
+    zeroBars.unmount();
+
+    const zeroIcicle = await mount({
+      files: allZero,
+      activeKinds: kinds,
+      view: 'icicle',
+      metric: 'net',
+    });
+    expect(zeroIcicle.container.querySelectorAll('g.mrpr-dist-icicle-node')).toHaveLength(0);
+    expect(zeroIcicle.getByText('No net line change')).toBeTruthy();
+    zeroIcicle.unmount();
+
+    // Total icicle explains churn width; +Add stays additions-only; single shrinking Net bar uses signed footer.
+    const churn = toDistributionFiles([prFile('src/trim.ts', 10, 190)]);
+    const codeOnly = new Set<ChangedFileKind>(['code']);
+    const totalIcicle = await mount({
+      files: churn,
+      activeKinds: codeOnly,
+      view: 'icicle',
+      metric: 'total',
+    });
+    expect(
+      totalIcicle
+        .getByRole('button', { name: /^src\/trim\.ts:/ })
+        .querySelector('text.mrpr-dist-icicle-sub')?.textContent
+    ).toBe('100% · 200');
+    totalIcicle.unmount();
+
+    const addIcicle = await mount({
+      files: churn,
+      activeKinds: codeOnly,
+      view: 'icicle',
+      metric: 'additions',
+    });
+    expect(
+      addIcicle
+        .getByRole('button', { name: /^src\/trim\.ts:/ })
+        .querySelector('text.mrpr-dist-icicle-sub')?.textContent
+    ).toBe('100% · +10');
+    expect(addIcicle.container.querySelector('.mrpr-dist-foot')?.textContent).toContain(
+      'Color = kind'
+    );
+    addIcicle.unmount();
+
+    const singleNet = await mount({ files: churn, activeKinds: codeOnly, metric: 'net' });
+    expect(singleNet.container.querySelector('.mrpr-dist-foot')?.textContent).toBe('-180 net');
   });
 });

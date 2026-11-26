@@ -9,6 +9,7 @@ import {
   canHideKind,
   computeBarWidths,
   formatShare,
+  formatSigned,
   layoutIcicle,
   normalizeDirPrefix,
   sortFilesByMetric,
@@ -208,5 +209,68 @@ describe('icicle tree and dynamic-depth layout', () => {
       expect(Number.isFinite(rect.width)).toBe(true);
       expect(rect.width).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('net metric transforms', () => {
+  const MIXED = toDistributionFiles([
+    prFile('src/grow.ts', 120, 20),
+    prFile('src/shrink.ts', 10, 110),
+    prFile('src/even.ts', 30, 30),
+    prFile('docs/note.md', 40, 0, 'added'),
+  ]);
+
+  it('sums abs per-file nets for groups/kinds, preserves signed deltas, ranks by |net|, and splits bars', () => {
+    const fmt = new Intl.NumberFormat('en');
+    expect([formatSigned(40, fmt), formatSigned(-80, fmt), formatSigned(-0, fmt)]).toEqual([
+      '+40',
+      '-80',
+      '0',
+    ]);
+    expect(
+      summarizeByKind(MIXED, 'net').map((k) => [k.kind, k.value, k.additions - k.deletions])
+    ).toEqual([
+      ['code', 200, 0],
+      ['docs', 40, 40],
+    ]);
+    const dirs = buildDirectoryRows(MIXED, '', 'net');
+    expect(dirs.map((r) => [r.name, r.value, r.additions - r.deletions])).toEqual([
+      ['src/', 200, 0],
+      ['docs/', 40, 40],
+    ]);
+    expect(sortFilesByMetric(MIXED, 'net').map((f) => f.path)).toEqual([
+      'src/grow.ts',
+      'src/shrink.ts',
+      'docs/note.md',
+      'src/even.ts',
+    ]);
+    // Growing, shrinking, zero-net files, and canceling directory (50/50 green/red split).
+    expect([
+      computeBarWidths(MIXED[0], 100, 'net'),
+      computeBarWidths(MIXED[1], 100, 'net'),
+      computeBarWidths(MIXED[2], 100, 'net'),
+      computeBarWidths(dirs[0], 200, 'net'),
+    ]).toEqual([
+      { addPct: 100, delPct: 0 },
+      { addPct: 0, delPct: 100 },
+      { addPct: 0, delPct: 0 },
+      { addPct: 50, delPct: 50 },
+    ]);
+  });
+
+  it('omits zero-net files in icicle and avoids file-count fallback when all net=0', () => {
+    const paths = layoutIcicle(
+      buildIcicleTree(MIXED, '', 'net'),
+      600,
+      5,
+      ICICLE_ROW_HEIGHT,
+      false
+    ).rects.map((r) => r.node.path);
+    expect(paths).toEqual(['', 'src/', 'src/grow.ts', 'src/shrink.ts', 'docs/', 'docs/note.md']);
+
+    const allZero = toDistributionFiles([prFile('a/one.ts', 40, 40), prFile('b/two.md', 15, 15)]);
+    expect(
+      layoutIcicle(buildIcicleTree(allZero, '', 'net'), 600, 5, ICICLE_ROW_HEIGHT, false).rects
+    ).toEqual([]);
   });
 });

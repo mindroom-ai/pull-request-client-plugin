@@ -64,7 +64,9 @@ function readCodePrefs(raw: string | null): CodePrefs {
         ? stored.distributionView
         : DEFAULTS.distributionView,
     distributionMetric:
-      stored.distributionMetric === 'total' || stored.distributionMetric === 'additions'
+      stored.distributionMetric === 'total' ||
+      stored.distributionMetric === 'additions' ||
+      stored.distributionMetric === 'net'
         ? stored.distributionMetric
         : DEFAULTS.distributionMetric,
   };

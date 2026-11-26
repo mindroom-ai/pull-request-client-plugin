@@ -10,6 +10,7 @@ import {
   buildBreadcrumbs,
   canHideKind,
   formatShare,
+  formatSigned,
   metricValue,
   summarizeByKind,
   type DistributionFile,
@@ -90,6 +91,10 @@ export function LineDistribution(props: LineDistributionProps) {
     () => scopedFiles.reduce((sum, file) => sum + metricValue(file, metric), 0),
     [scopedFiles, metric]
   );
+  const scopeNet = useMemo(
+    () => scopedFiles.reduce((sum, file) => sum + (file.additions - file.deletions), 0),
+    [scopedFiles]
+  );
   const crumbs = useMemo(() => buildBreadcrumbs(dirPrefix), [dirPrefix]);
 
   const handleToggleKind = (kind: ChangedFileKind) => {
@@ -98,10 +103,13 @@ export function LineDistribution(props: LineDistributionProps) {
   };
 
   const filesText = t('code.fileCount', { count: scopedFiles.length });
-  const linesText = t('code.distribution.lineCount', {
-    count: scopeTotal,
-    formatted: fmt.format(scopeTotal),
-  });
+  const linesText =
+    metric === 'net'
+      ? t('code.distribution.netCount', { net: formatSigned(scopeNet, fmt) })
+      : t('code.distribution.lineCount', {
+          count: scopeTotal,
+          formatted: fmt.format(scopeTotal),
+        });
   const scopeMeta = dirPrefix
     ? t('code.distribution.scopeSummaryWithShare', {
         files: filesText,
@@ -126,7 +134,7 @@ export function LineDistribution(props: LineDistributionProps) {
         <div className="mrpr-dist-top">
           <div className="mrpr-dist-kind-bar" aria-hidden="true">
             {kindSummaries.map((summary) => {
-              const weight = allTotal > 0 ? summary.value : summary.files;
+              const weight = allTotal > 0 ? summary.value : metric === 'net' ? 0 : summary.files;
               if (weight <= 0) return null;
               const on = activeKinds.has(summary.kind);
               return (
@@ -150,13 +158,19 @@ export function LineDistribution(props: LineDistributionProps) {
                 const on = activeKinds.has(summary.kind);
                 const kindName = t(`breakdown.${summary.kind}`);
                 const share = formatShare(summary.value, allTotal);
-                const title = t('code.distribution.kindChipTitle', {
-                  kind: kindName,
-                  files: t('code.fileCount', { count: summary.files }),
-                  additions: fmt.format(summary.additions),
-                  deletions: fmt.format(summary.deletions),
-                  share,
-                });
+                const title = t(
+                  metric === 'net'
+                    ? 'code.distribution.kindChipTitleNet'
+                    : 'code.distribution.kindChipTitle',
+                  {
+                    kind: kindName,
+                    files: t('code.fileCount', { count: summary.files }),
+                    net: formatSigned(summary.additions - summary.deletions, fmt),
+                    additions: fmt.format(summary.additions),
+                    deletions: fmt.format(summary.deletions),
+                    share,
+                  }
+                );
                 return (
                   <button
                     key={summary.kind}
@@ -198,6 +212,11 @@ export function LineDistribution(props: LineDistributionProps) {
                     id: 'additions',
                     text: t('code.distribution.metricAdditions'),
                     title: t('code.distribution.metricAdditionsHint'),
+                  },
+                  {
+                    id: 'net',
+                    text: t('code.distribution.metricNet'),
+                    title: t('code.distribution.metricNetHint'),
                   },
                 ]}
               />
