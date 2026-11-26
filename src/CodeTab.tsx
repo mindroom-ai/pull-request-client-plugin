@@ -126,10 +126,14 @@ const WIDE_TREE_MIN_WIDTH = 640;
 let diffWorkerBlobUrl: string | undefined;
 
 function createDiffWorker(): Worker {
-  diffWorkerBlobUrl ??= URL.createObjectURL(
-    new Blob([diffWorkerSource], { type: 'text/javascript;charset=utf-8' })
-  );
-  return new Worker(diffWorkerBlobUrl);
+  try {
+    diffWorkerBlobUrl ??= URL.createObjectURL(
+      new Blob([diffWorkerSource], { type: 'text/javascript;charset=utf-8' })
+    );
+    return new Worker(diffWorkerBlobUrl);
+  } catch {
+    return new Worker(`data:text/javascript;charset=utf-8,${encodeURIComponent(diffWorkerSource)}`);
+  }
 }
 
 const DIFF_WORKER_POOL_OPTIONS: WorkerPoolOptions = {

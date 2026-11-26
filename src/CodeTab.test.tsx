@@ -1103,6 +1103,34 @@ describe('CodeTab', () => {
     expect(view.props?.options).toMatchObject({ theme: 'pierre-dark' });
   });
 
+  it('falls back to a data URL worker when URL.createObjectURL throws', async () => {
+    const originalCreateObjectURL = Object.getOwnPropertyDescriptor(URL, 'createObjectURL');
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      writable: true,
+      value: vi.fn(() => {
+        throw new Error('Blob URLs unavailable');
+      }),
+    });
+    try {
+      vi.stubGlobal('Worker', FakeDiffWorker);
+      const tab = await show();
+      await vi.waitFor(() => expect(workerPool.created).toHaveLength(1), { timeout: 10_000 });
+      expect(workerPool.created[0].url).toMatch(/^data:text\/javascript;charset=utf-8,/);
+      await act(async () => {
+        tab.unmount();
+      });
+      expect(workerPool.created[0].terminate).toHaveBeenCalledTimes(1);
+    } finally {
+      if (originalCreateObjectURL) {
+        Object.defineProperty(URL, 'createObjectURL', originalCreateObjectURL);
+      } else {
+        delete (URL as Partial<typeof URL>).createObjectURL;
+      }
+    }
+  });
+
+  // Relies on test order: no earlier test populates the module-level diffWorkerBlobUrl cache.
   it('mounts a single-worker pool, reuses one Blob URL across opens, and terminates on unmount', async () => {
     const originalCreateObjectURL = Object.getOwnPropertyDescriptor(URL, 'createObjectURL');
     const createObjectURL = vi.fn(
