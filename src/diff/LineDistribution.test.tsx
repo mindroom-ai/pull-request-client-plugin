@@ -363,24 +363,24 @@ describe('LineDistribution', () => {
     const srcDir = icicle.getByRole('button', { name: /^src\/: 0 net/ });
     expect(srcDir.getAttribute('data-net')).toBeNull();
     expect(srcDir.querySelector('rect.mrpr-dist-icicle-root-rect')).not.toBeNull();
-    expect(srcDir.querySelector('text.mrpr-dist-icicle-root-sub')?.textContent).toBe('83% · 0 net');
+    expect(srcDir.querySelector('text.mrpr-dist-icicle-root-sub')?.textContent).toBe('0 net');
     const growTile = icicle.getByRole('button', { name: /^src\/grow\.ts: \+100 net/ });
     expect(growTile.getAttribute('data-net')).toBe('added');
-    expect(growTile.querySelector('text.mrpr-dist-icicle-sub')?.textContent).toBe('42% · +100');
+    expect(growTile.querySelector('text.mrpr-dist-icicle-sub')?.textContent).toBe('+100');
     const shrinkTile = icicle.getByRole('button', { name: /^src\/shrink\.ts: -100 net/ });
     expect(shrinkTile.getAttribute('data-net')).toBe('removed');
-    expect(shrinkTile.querySelector('text.mrpr-dist-icicle-sub')?.textContent).toBe('42% · -100');
+    expect(shrinkTile.querySelector('text.mrpr-dist-icicle-sub')?.textContent).toBe('-100');
     expect(icicle.queryByRole('button', { name: /^src\/even\.ts:/ })).toBeNull();
     expect(icicle.container.querySelector('.mrpr-dist-foot')?.textContent).toMatch(
       /\+ grows.*- shrinks/
     );
     await act(async () => srcDir.focus());
     expect(icicle.container.querySelector('.mrpr-dist-icicle-inspect')?.textContent).toMatch(
-      /0 net.*-160/
+      /0 net.*-160.*83%/
     );
     icicle.unmount();
 
-    // Phone width: narrow Net file tile drops share prefix to keep compact signed number without spill.
+    // Phone width: narrow Net dir drops optional "net" suffix; leaf keeps signed single number.
     vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (
       this: HTMLElement
     ) {
@@ -395,8 +395,8 @@ describe('LineDistribution', () => {
     expect(
       phone
         .getByRole('button', { name: /^docs\/: \+40 net/ })
-        .querySelector('text.mrpr-dist-icicle-root-sub')
-    ).toBeNull();
+        .querySelector('text.mrpr-dist-icicle-root-sub')?.textContent
+    ).toBe('+40');
     phone.unmount();
 
     // All net=0: no file-count fallback in kind bar or icicle; clean empty state in both views.

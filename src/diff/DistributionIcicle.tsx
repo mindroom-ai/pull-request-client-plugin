@@ -146,14 +146,13 @@ export function DistributionIcicle(props: DistributionViewProps) {
               : metric === 'additions'
                 ? `+${compactFmt.format(node.additions)}`
                 : compactFmt.format(node.value);
-            const shortStat =
-              isNet && !node.file
-                ? t('code.distribution.netCount', { net: compactValue })
-                : compactValue;
+            const subCandidates = isNet
+              ? node.file
+                ? [compactValue]
+                : [t('code.distribution.netCount', { net: compactValue }), compactValue]
+              : [`${share} · ${compactValue}`, compactValue];
             const subStat =
-              w > minLabelWidth
-                ? fitSubStat([`${share} · ${shortStat}`, shortStat], w, padX, subCharWidth)
-                : null;
+              w > minLabelWidth ? fitSubStat(subCandidates, w, padX, subCharWidth) : null;
             const interactiveProps = interactive
               ? {
                   role: 'button' as const,
