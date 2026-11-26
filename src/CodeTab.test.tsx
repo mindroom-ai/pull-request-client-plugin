@@ -14,7 +14,8 @@ import {
 } from './github';
 import plugin from './index';
 import type { ReviewThread } from './reviewThreads';
-import { CodeTab, type ListState } from './CodeTab';
+import { CodeTab, resetDiffWorkerPool, type ListState } from './CodeTab';
+import type { WorkerPoolManager } from '@pierre/diffs/worker';
 import {
   hydratePartialDiff,
   type FileDiffContentsLoader,
@@ -59,6 +60,7 @@ const workerPool = vi.hoisted(() => ({
   props: undefined as
     | { poolOptions?: Record<string, unknown>; highlighterOptions?: Record<string, unknown> }
     | undefined,
+  manager: undefined as WorkerPoolManager | undefined,
   created: [] as FakeDiffWorkerRecord[],
 }));
 
@@ -68,9 +70,25 @@ vi.mock('@pierre/diffs/worker/worker-portable.js?raw', () => ({
 
 const FakeDiffWorker = createFakeDiffWorkerClass(workerPool.created);
 
+vi.mock('@pierre/diffs/worker', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@pierre/diffs/worker')>();
+  return {
+    ...actual,
+    getOrCreateWorkerPoolSingleton(
+      props: Parameters<typeof actual.getOrCreateWorkerPoolSingleton>[0]
+    ) {
+      workerPool.props = {
+        poolOptions: props.poolOptions as unknown as Record<string, unknown>,
+        highlighterOptions: props.highlighterOptions as unknown as Record<string, unknown>,
+      };
+      return actual.getOrCreateWorkerPoolSingleton(props);
+    },
+  };
+});
+
 vi.mock('@pierre/diffs/react', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@pierre/diffs/react')>();
-  const { forwardRef, useImperativeHandle } = await import('react');
+  const { forwardRef, useContext, useImperativeHandle } = await import('react');
   type Annotation = { side: string; lineNumber: number };
   type Item = {
     id: string;
@@ -92,6 +110,7 @@ vi.mock('@pierre/diffs/react', async (importOriginal) => {
   return {
     CodeView: forwardRef<unknown, Props>(function CodeView(props, ref) {
       view.props = props;
+      workerPool.manager = useContext(actual.WorkerPoolContext);
       useImperativeHandle(ref, () => ({ scrollTo: view.scrollTo }));
       return (
         <div data-testid="diff-view">
@@ -119,15 +138,7 @@ vi.mock('@pierre/diffs/react', async (importOriginal) => {
         </div>
       );
     }),
-    WorkerPoolContextProvider: function WorkerPoolContextProvider(
-      props: Parameters<typeof actual.WorkerPoolContextProvider>[0]
-    ) {
-      workerPool.props = {
-        poolOptions: props.poolOptions as unknown as Record<string, unknown>,
-        highlighterOptions: props.highlighterOptions as unknown as Record<string, unknown>,
-      };
-      return <actual.WorkerPoolContextProvider {...props} />;
-    },
+    WorkerPoolContext: actual.WorkerPoolContext,
   };
 });
 
@@ -493,6 +504,7 @@ beforeEach(() => {
   view.scrollTo.mockReset();
   view.props = undefined;
   workerPool.props = undefined;
+  workerPool.manager = undefined;
   workerPool.created.length = 0;
   fetchMock.mockReset();
   fetchMock.mockImplementation(async (url) =>
@@ -503,6 +515,7 @@ beforeEach(() => {
   vi.stubGlobal('fetch', fetchMock);
 });
 afterEach(() => {
+  resetDiffWorkerPool();
   delete (Element.prototype as Partial<Element>).scrollIntoView;
   vi.unstubAllGlobals();
 });
@@ -1079,7 +1092,7 @@ describe('CodeTab', () => {
     expect(view.props?.options).toMatchObject({ theme: 'pierre-dark' });
   });
 
-  it('mounts a single-worker pool, reuses one Blob URL across opens, and terminates on unmount', async () => {
+  it('keeps a single persistent worker and Blob URL across mount, unmount, and remount', async () => {
     const createObjectURL = vi.fn(
       (_blob: Blob) => `blob:diff-worker-${createObjectURL.mock.calls.length}`
     );
@@ -1096,7 +1109,10 @@ describe('CodeTab', () => {
         lineDiffType: 'none',
         langs: [],
       });
-      await vi.waitFor(() => expect(workerPool.created).toHaveLength(1), { timeout: 10_000 });
+      const firstManager = workerPool.manager;
+      expect(firstManager?.getPreferredHighlighter()).toBe('shiki-js');
+      await vi.waitFor(() => expect(firstManager?.isInitialized()).toBe(true), { timeout: 10_000 });
+      expect(workerPool.created).toHaveLength(1);
       expect(createObjectURL).toHaveBeenCalledTimes(1);
       expect(createObjectURL.mock.calls[0]?.[0]).toBeInstanceOf(Blob);
       expect(createObjectURL.mock.calls[0]?.[0].type).toBe('text/javascript;charset=utf-8');
@@ -1106,17 +1122,63 @@ describe('CodeTab', () => {
       await act(async () => {
         firstOpen.unmount();
       });
-      expect(workerPool.created[0].terminate).toHaveBeenCalledTimes(1);
+      expect(workerPool.created[0].terminate).not.toHaveBeenCalled();
 
       const secondOpen = await show();
-      await vi.waitFor(() => expect(workerPool.created).toHaveLength(2), { timeout: 10_000 });
+      expect(workerPool.manager).toBe(firstManager);
+      expect(workerPool.created).toHaveLength(1);
       expect(createObjectURL).toHaveBeenCalledTimes(1);
-      expect(workerPool.created[1].url).toBe('blob:diff-worker-1');
+      expect(workerPool.created[0].terminate).not.toHaveBeenCalled();
 
       await act(async () => {
         secondOpen.unmount();
       });
-      expect(workerPool.created[1].terminate).toHaveBeenCalledTimes(1);
+      expect(workerPool.created[0].terminate).not.toHaveBeenCalled();
+
+      resetDiffWorkerPool();
+      expect(workerPool.created[0].terminate).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('recovers from a post-init worker error so the next mount spawns a fresh worker', async () => {
+    const createObjectURL = vi.fn(
+      (_blob: Blob) => `blob:diff-worker-${createObjectURL.mock.calls.length}`
+    );
+    await withMockedCreateObjectURL(createObjectURL, async () => {
+      vi.stubGlobal('Worker', FakeDiffWorker);
+      const firstOpen = await show();
+      const firstManager = workerPool.manager;
+      await vi.waitFor(() => expect(firstManager?.isInitialized()).toBe(true), { timeout: 10_000 });
+      expect(workerPool.created).toHaveLength(1);
+
+      workerPool.created[0].emitError(new Event('error'));
+      expect(workerPool.created[0].terminate).toHaveBeenCalledTimes(1);
+      expect(firstManager?.isWorkingPool()).toBe(false);
+
+      await act(async () => {
+        firstOpen.unmount();
+      });
+
+      const secondOpen = await show();
+      const secondManager = workerPool.manager;
+      expect(secondManager).not.toBe(firstManager);
+      await vi.waitFor(() => expect(secondManager?.isInitialized()).toBe(true), {
+        timeout: 10_000,
+      });
+      expect(workerPool.created).toHaveLength(2);
+      expect(workerPool.created[1]).not.toBe(workerPool.created[0]);
+      expect(workerPool.created[1].url).toBe('blob:diff-worker-1');
+      expect(createObjectURL).toHaveBeenCalledTimes(1);
+      expect(workerPool.created[1].terminate).not.toHaveBeenCalled();
+
+      // A stale error from the replaced worker must not tear down the active singleton.
+      workerPool.created[0].emitError(new Event('error'));
+      expect(workerPool.created[1].terminate).not.toHaveBeenCalled();
+      expect(secondManager?.isWorkingPool()).toBe(true);
+
+      await act(async () => {
+        secondOpen.unmount();
+      });
     });
   });
 

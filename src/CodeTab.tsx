@@ -14,12 +14,17 @@ import type {
   FileDiffMetadata,
 } from '@pierre/diffs';
 import {
-  WorkerPoolContextProvider,
+  WorkerPoolContext,
   type CodeViewAnnotationArgs,
   type CodeViewHandle,
   type WorkerInitializationRenderOptions,
   type WorkerPoolOptions,
 } from '@pierre/diffs/react';
+import {
+  getOrCreateWorkerPoolSingleton,
+  terminateWorkerPoolSingleton,
+  type WorkerPoolManager,
+} from '@pierre/diffs/worker';
 import diffWorkerSource from '@pierre/diffs/worker/worker-portable.js?raw';
 import type { GitStatus } from '@pierre/trees';
 import {
@@ -120,10 +125,12 @@ const NO_FOLDS: FileDiffFoldChoices = new Map();
 // Matches `@container (min-inline-size: 640px)` in styles.css where the Files tree sits beside diffs.
 const WIDE_TREE_MIN_WIDTH = 640;
 
-// Keep Shiki highlighting off the main thread in a single scoped worker whose heap is freed on
-// unmount via WorkerPoolContextProvider -> terminateWorkerPoolSingleton(). Reuse one module-level
-// Blob URL instead of Vite's ?worker&inline factory, which leaks a new 1.3 MB Blob URL per open.
+// Keep Shiki highlighting off the main thread in one persistent worker across Code-tab opens:
+// terminating the worker on every unmount leaks ~70-78 MB per open/close in iOS WebKit. Reuse one
+// module-level Blob URL instead of Vite's ?worker&inline factory, which leaks a 1.3 MB Blob URL
+// per worker creation.
 let diffWorkerBlobUrl: string | undefined;
+let diffWorkerPool: WorkerPoolManager | undefined;
 
 function createDiffWorker(): Worker {
   try {
@@ -147,16 +154,50 @@ const DIFF_WORKER_HIGHLIGHTER_OPTIONS: WorkerInitializationRenderOptions = {
   langs: [],
 };
 
-function ScopedDiffWorkerPool({ children }: { children: ReactNode }) {
-  if (typeof Worker === 'undefined') return children;
-  return (
-    <WorkerPoolContextProvider
-      poolOptions={DIFF_WORKER_POOL_OPTIONS}
-      highlighterOptions={DIFF_WORKER_HIGHLIGHTER_OPTIONS}
-    >
-      {children}
-    </WorkerPoolContextProvider>
+function getOrCreateDiffWorkerPool(): WorkerPoolManager {
+  const pool = getOrCreateWorkerPoolSingleton({
+    poolOptions: {
+      ...DIFF_WORKER_POOL_OPTIONS,
+      // @pierre/diffs already handles startup failures (workersFailed = true -> main-thread
+      // fallback). Post-init worker errors leave a single-worker pool wedged, so tear down the
+      // singleton so the next mount creates a fresh worker.
+      onWorkerError() {
+        if (diffWorkerPool?.isInitialized() && diffWorkerPool === pool) {
+          terminateWorkerPoolSingleton();
+          diffWorkerPool = undefined;
+        }
+      },
+    },
+    highlighterOptions: DIFF_WORKER_HIGHLIGHTER_OPTIONS,
+  });
+  diffWorkerPool = pool;
+  return pool;
+}
+
+/**
+ * Terminate the persistent diff worker pool and release its cached Blob URL.
+ * Wired to Vite HMR disposal and exported for test isolation.
+ */
+export function resetDiffWorkerPool(): void {
+  terminateWorkerPoolSingleton();
+  diffWorkerPool = undefined;
+  const blobUrl = diffWorkerBlobUrl;
+  diffWorkerBlobUrl = undefined;
+  if (blobUrl !== undefined && typeof URL.revokeObjectURL === 'function') {
+    URL.revokeObjectURL(blobUrl);
+  }
+}
+
+import.meta.hot?.dispose(() => {
+  resetDiffWorkerPool();
+});
+
+function DiffWorkerPool({ children }: { children: ReactNode }) {
+  const [pool] = useState<WorkerPoolManager | undefined>(() =>
+    typeof Worker === 'undefined' ? undefined : getOrCreateDiffWorkerPool()
   );
+  if (!pool) return children;
+  return <WorkerPoolContext.Provider value={pool}>{children}</WorkerPoolContext.Provider>;
 }
 
 /** What a file's viewed mark and fold are against: its patch, or its blob without one. */
@@ -1297,7 +1338,7 @@ export function CodeTab({
             onClickCapture={onDiffsClickCapture}
           >
             <FileHeaderContext.Provider value={header}>
-              <ScopedDiffWorkerPool>
+              <DiffWorkerPool>
                 {/* The viewer must own its scroll element to position virtual rows within it. */}
                 <StyledDiffCodeView<ThreadGroup>
                   viewerRef={viewerRef}
@@ -1310,7 +1351,7 @@ export function CodeTab({
                   renderAnnotation={renderAnnotation}
                   unsafeCSSExtra={REPLACE_FILE_COUNTS_CSS}
                 />
-              </ScopedDiffWorkerPool>
+              </DiffWorkerPool>
             </FileHeaderContext.Provider>
           </div>
         </div>
