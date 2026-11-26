@@ -66,7 +66,7 @@ describe('pullRequestQuery reload and merged monotonicity', () => {
   const TOKEN_KEY = 'mindroom.plugin:%40plugin-tester%3Aexample.org/pull-requests/githubToken';
   const pullJson = (extra: Record<string, unknown> = {}) =>
     new Response(JSON.stringify({ title: 'T', state: 'open', node_id: 'PR_kw7', ...extra }));
-  const flush = (fn: () => Promise<unknown>) => act(async () => (await fn(), await settled()));
+  const flush = (fn: () => unknown) => act(async () => (await fn(), await settled()));
 
   const mount = async (responder: () => Promise<Response>) => {
     localStorage.setItem(TOKEN_KEY, 'tok');

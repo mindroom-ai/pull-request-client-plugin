@@ -609,6 +609,33 @@ describe('HeaderActions', () => {
     expect(view.queryByRole('button', { name: 'Dismiss' })).toBeNull();
   });
 
+  it('keeps a confirmed action announcement-only even if the pull request later changes elsewhere', async () => {
+    const draftPr: PullRequest = { ...open, draft: true };
+    const confirmed: ActionResult = { action: 'draft', outcome: 'done' };
+    const view = await renderPluginComponent(withResult(confirmed, draftPr), {
+      id: 'pull-requests',
+      plugin,
+    });
+    expect(view.getByRole('status').className).toBe('mrpr-sr-only');
+    expect(view.queryByRole('button', { name: 'Dismiss' })).toBeNull();
+    // Marked ready later on GitHub: the old "Converted to draft" line must not reappear.
+    view.rerender(withResult(confirmed, open));
+    expect(view.getByRole('status').className).toBe('mrpr-sr-only');
+    expect(view.queryByRole('button', { name: 'Dismiss' })).toBeNull();
+
+    // Same once a stale post-write read catches up and later changes elsewhere.
+    const staleThenConfirmed: ActionResult = { action: 'draft', outcome: 'done' };
+    view.rerender(withResult(staleThenConfirmed, open));
+    expect(view.getByRole('status').className).toBe('mrpr-action-result');
+    expect(view.getByRole('button', { name: 'Dismiss' })).toBeTruthy();
+    view.rerender(withResult(staleThenConfirmed, draftPr));
+    expect(view.getByRole('status').className).toBe('mrpr-sr-only');
+    expect(view.queryByRole('button', { name: 'Dismiss' })).toBeNull();
+    view.rerender(withResult(staleThenConfirmed, open));
+    expect(view.getByRole('status').className).toBe('mrpr-sr-only');
+    expect(view.queryByRole('button', { name: 'Dismiss' })).toBeNull();
+  });
+
   it('draws no Merge button on a merged pull request', async () => {
     const view = await show(merged);
     await waitUntil(() => expect(moreActions(view)).toBeTruthy());

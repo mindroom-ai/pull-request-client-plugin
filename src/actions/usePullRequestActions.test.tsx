@@ -502,10 +502,9 @@ describe('usePullRequestActions', () => {
     pullAnswer = () => hold(() => respond(mergedPull));
     act(() => actions.perform('merge'));
     await waitUntil(() => expect(pullReads()).toHaveLength(2));
-    // The confirmed merge marks the summary merged without fabricating mergedAt, while keeping the
-    // pull request locked until the refresh read settles.
-    expect(shown?.state).toBe('merged');
-    expect(shown?.mergedAt).toBeNull();
+    // The write is answered, but the panel still shows the open pull request: unlocked now, its
+    // Merge would send a second merge of a merged pull request.
+    expect(shown?.state).toBe('open');
     expect(actions.pending).toBe('merge');
     expect(actions.result).toBeNull();
     act(() => actions.perform('merge'));
@@ -589,7 +588,7 @@ describe('usePullRequestActions', () => {
       expect(pullReads()[1]![1]?.cache).toBe('reload');
       pullAnswer = async () =>
         respond(apiPull({ state: 'closed', closed_at: '2026-11-16T00:00:00Z' }));
-      await pass(1_500);
+      await pass(1_000);
       expect(pullReads()).toHaveLength(3);
       expect(pullReads()[2]![1]?.cache).toBe('reload');
       expect(shown?.state).toBe('closed');

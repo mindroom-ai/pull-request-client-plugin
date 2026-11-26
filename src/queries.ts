@@ -123,13 +123,12 @@ export const reloadPullRequest = (queryClient: QueryClient, ref: PullRequestRef)
   invalidateAfterWrite(queryClient, { queryKey: pullRequestKey(ref) });
 
 /** Records a confirmed merge in the summary cache so a stale pre-merge read cannot regress it. */
-export async function markPullRequestMerged(
+export function markPullRequestMerged(
   queryClient: QueryClient,
   ref: PullRequestRef,
   access: AccessKey
-): Promise<void> {
+): void {
   const queryKey = keyOf(ref, access);
-  await queryClient.cancelQueries({ queryKey, exact: true });
   queryClient.setQueryData<PullRequest>(queryKey, (current) =>
     current && !refusedData.has(current) && current.state !== 'merged'
       ? { ...current, state: 'merged' }
@@ -288,15 +287,16 @@ const pullRequestQuery = (
         reload,
       }).then(
         (pr) => {
+          const current = client.getQueryData<PullRequest>(queryKey);
           if (
-            before !== undefined &&
-            !refusedData.has(before) &&
-            before.state === 'merged' &&
+            current !== undefined &&
+            !refusedData.has(current) &&
+            current.state === 'merged' &&
             pr.state !== 'merged' &&
-            before.nodeId !== '' &&
-            before.nodeId === pr.nodeId
+            current.nodeId !== '' &&
+            current.nodeId === pr.nodeId
           ) {
-            return before;
+            return current;
           }
           if (before) refusedData.delete(before);
           return pr;
@@ -321,7 +321,11 @@ export function usePullRequest(ref: PullRequestRef | undefined, options: Refetch
 
 // GitHub computes whether a pull request merges after its base moved, in about a second; until
 // then its `mergeable` is null. It is read again after each of these, while it still is.
-const MERGEABLE_RECHECKS = [1_000, 2_000, 4_000];
+const MERGEABLE_RECHECKS = [1_000, 2_000, 4_000] as const;
+
+// Single best-effort reload delay when a reversible post-write read returns stale pre-write state,
+// reusing the initial GitHub propagation interval rather than polling across the 60s cache window.
+export const POST_WRITE_RECHECK_MS = MERGEABLE_RECHECKS[0];
 
 /**
  * While GitHub still computes whether the open pull request `pr` merges (`mergeable` null), reads

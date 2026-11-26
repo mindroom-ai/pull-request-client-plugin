@@ -1075,6 +1075,50 @@ describe('with the GitHub account connected in MindRoom', () => {
     expect(view.queryByRole('menuitem', { name: 'Forget token' })).toBeNull();
   });
 
+  it.each([
+    ['fresh merged', { state: 'closed', merged_at: '2026-11-16T00:00:00Z' }],
+    ['stale open', {}],
+  ])(
+    'hands focus from Confirm merge to More actions when the post-merge GET is held and returns %s',
+    async (_label, postMergePull) => {
+      let pullCalls = 0;
+      let releasePostMerge!: (response: Response) => void;
+      const mindroom = githubServer(async (url, init) => {
+        if (url.endsWith('/pulls/200') && (!init?.method || init.method === 'GET')) {
+          pullCalls += 1;
+          if (pullCalls === 2) {
+            return new Promise<Response>((resolve) => {
+              releasePostMerge = resolve;
+            });
+          }
+        }
+        return github(url, init);
+      });
+      roomServer.current = mindroom.server;
+      const view = await show();
+      const merge = await view.findByRole('button', { name: 'Squash and merge' });
+      act(() => merge.focus());
+      await click(merge);
+      const confirm = await view.findByRole('button', { name: 'Confirm merge?' });
+      act(() => confirm.focus());
+      await click(confirm);
+      await waitUntil(() => expect(pullCalls).toBe(2));
+      // While the post-merge GET is still pending, the button stays mounted and keeps focus.
+      expect(document.activeElement).toBe(confirm);
+      await act(async () => {
+        releasePostMerge(
+          respond(pull({ node_id: 'PR_kw200', head, mergeable: true, ...postMergePull }))
+        );
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      await waitUntil(() =>
+        expect(view.container.querySelector('.mrpr-badge-state')?.textContent).toBe('Merged')
+      );
+      expect(view.queryByRole('button', { name: 'Squash and merge' })).toBeNull();
+      expect(document.activeElement).toBe(view.getByRole('button', { name: 'More actions' }));
+    }
+  );
+
   it('keeps who it goes as in More actions also for a viewer who cannot write', async () => {
     const reader = { ...repository, viewerPermission: 'READ' };
     const mindroom = githubServer(async (url, init) =>

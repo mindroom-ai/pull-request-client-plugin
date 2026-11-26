@@ -14,6 +14,7 @@ import {
   type Repository,
 } from '../github';
 import {
+  POST_WRITE_RECHECK_MS,
   markPullRequestMerged,
   pullRequestKey,
   recheckStalePullRequest,
@@ -35,7 +36,6 @@ export type ActionResult =
 // panel opened again on a pull request mid-action shows it running. By `actionKey`.
 type Entry = { pending: PullRequestAction | null; result: ActionResult | null };
 const IDLE: Entry = { pending: null, result: null };
-const STALE_RECHECK_MS = 1_500;
 const REVERSIBLE_STATE_ACTIONS: ReadonlySet<PullRequestAction> = new Set([
   'close',
   'reopen',
@@ -152,15 +152,17 @@ export function usePullRequestActions(
     const finish = async (result: ActionResult) => {
       let read = false;
       try {
-        if (result.outcome === 'done' && result.action === 'merge') {
-          await markPullRequestMerged(queryClient, ref, used);
-        }
         // Whatever came, GitHub may hold another state than the one loaded: a refusal says it
         // moved, and a failed answer may come after GitHub took the write. The action runs on
         // until that state is read: unlocked before, the controls would offer the pull request
         // as it was (a second merge of a merged one, which GitHub then refuses).
         read = await refreshPullRequest(queryClient, ref, used);
       } finally {
+        // Record a confirmed merge right as the action unlocks so a stale open GET cannot regress
+        // it, while keeping the focused button mounted until busy flips false and focus hands off.
+        if (result.outcome === 'done' && result.action === 'merge') {
+          markPullRequestMerged(queryClient, ref, used);
+        }
         // The outcome stays with its own pull request, to show when that one is shown again.
         const outcome =
           !read && result.outcome !== 'failed' ? { ...result, unread: true as const } : result;
@@ -178,7 +180,7 @@ export function usePullRequestActions(
               setTimeout(() => {
                 staleRechecks.delete(key);
                 void recheckStalePullRequest(queryClient, ref, used);
-              }, STALE_RECHECK_MS)
+              }, POST_WRITE_RECHECK_MS)
             );
           }
         }
