@@ -344,6 +344,9 @@ describe('LineDistribution', () => {
     const shrinkRow = bars.getByRole('button', { name: /shrink\.ts/ });
     expect(shrinkRow.querySelector('.mrpr-removed')?.textContent).toBe('-100');
     expect(shrinkRow.querySelector('.mrpr-dist-bar-add')).toBeNull();
+    expect(bars.container.querySelector('.mrpr-dist-foot')?.textContent).toBe(
+      'Largest file: 42% of absolute file changes'
+    );
     bars.unmount();
 
     // Drilled into canceling directory: shows 0 net (83%), never unsigned 200 lines.
@@ -398,6 +401,22 @@ describe('LineDistribution', () => {
         .querySelector('text.mrpr-dist-icicle-root-sub')?.textContent
     ).toBe('+40');
     phone.unmount();
+
+    // Narrow Net tile below 34px filename cutoff (32.5px) still renders signed caption when it fits.
+    const tightNet = toDistributionFiles([
+      prFile('src/big.ts', 70, 0),
+      prFile('src/small.ts', 10, 0),
+    ]);
+    const tight = await mount({
+      files: tightNet,
+      activeKinds: new Set<ChangedFileKind>(['code']),
+      view: 'icicle',
+      metric: 'net',
+    });
+    const smallTile = tight.getByRole('button', { name: /^src\/small\.ts: \+10 net/ });
+    expect(smallTile.querySelector('text.mrpr-dist-icicle-label')).toBeNull();
+    expect(smallTile.querySelector('text.mrpr-dist-icicle-sub')?.textContent).toBe('+10');
+    tight.unmount();
 
     // All net=0: no file-count fallback in kind bar or icicle; clean empty state in both views.
     const allZero = toDistributionFiles([

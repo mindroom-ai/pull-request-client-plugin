@@ -31,14 +31,14 @@ describe('pluginRootStyle', () => {
     });
   });
 
-  it('maps Net icicle tile colors to accessible theme container tokens', () => {
-    expect(pluginRootStyle()).toMatchObject({
-      '--pr-net-added': color.Success.ContainerActive,
-      '--pr-net-added-line': color.Success.ContainerLine,
-      '--pr-net-on-added': color.Success.OnContainer,
-      '--pr-net-removed': color.Critical.ContainerActive,
-      '--pr-net-removed-line': color.Critical.ContainerLine,
-      '--pr-net-on-removed': color.Critical.OnContainer,
+  it('uses fixed high-contrast Net icicle tile colors matching the categorical palette', () => {
+    const style = pluginRootStyle() as Record<string, unknown>;
+    expect(style).toMatchObject({
+      '--pr-net-added': '#176644',
+      '--pr-net-removed': '#923b41',
+      '--pr-kind-on-fill': '#ffffff',
     });
+    expect(style['--pr-net-on-added']).toBeUndefined();
+    expect(style['--pr-net-on-removed']).toBeUndefined();
   });
 });

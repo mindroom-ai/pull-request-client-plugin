@@ -52,6 +52,17 @@ export function DistributionIcicle(props: DistributionViewProps) {
   const subCharWidth = 6 * zoom;
   const minLabelWidth = 34 * zoom;
 
+  const tree = useMemo(
+    () => buildIcicleTree(scopedFiles, dirPrefix, metric),
+    [scopedFiles, dirPrefix, metric]
+  );
+  const isNet = metric === 'net';
+  const { rects, height } = useMemo(
+    () => layoutIcicle(tree, width, ICICLE_MAX_DEPTH, rowHeight, !isNet),
+    [tree, width, rowHeight, isNet]
+  );
+  const hasRects = rects.length > 0;
+
   useLayoutEffect(() => {
     const el = boxRef.current;
     if (!el) return undefined;
@@ -66,32 +77,21 @@ export function DistributionIcicle(props: DistributionViewProps) {
     });
     observer.observe(el);
     return () => observer.disconnect();
-  }, []);
+  }, [hasRects]);
 
-  const tree = useMemo(
-    () => buildIcicleTree(scopedFiles, dirPrefix, metric),
-    [scopedFiles, dirPrefix, metric]
-  );
-  const isNet = metric === 'net';
-  const { rects, height } = useMemo(
-    () => layoutIcicle(tree, width, ICICLE_MAX_DEPTH, rowHeight, !isNet),
-    [tree, width, rowHeight, isNet]
-  );
   const inspectedPath = inspectedState?.scope === dirPrefix ? inspectedState.path : null;
   const inspected =
     inspectedPath === null
       ? null
       : (rects.find((r) => r.node.path === inspectedPath)?.node ?? null);
 
-  if (rects.length === 0) {
+  if (!hasRects) {
     return (
-      <>
-        <div ref={boxRef} className="mrpr-dist-icicle-box">
-          <div className="mrpr-dist-icicle-empty">
-            {t(isNet ? 'code.distribution.noNetChange' : 'code.distribution.noMatchingFiles')}
-          </div>
+      <div ref={boxRef} className="mrpr-dist-icicle-box">
+        <div className="mrpr-dist-icicle-empty">
+          {t(isNet ? 'code.distribution.noNetChange' : 'code.distribution.noMatchingFiles')}
         </div>
-      </>
+      </div>
     );
   }
   const inspectedDelta = inspected ? inspected.additions - inspected.deletions : 0;
@@ -152,7 +152,7 @@ export function DistributionIcicle(props: DistributionViewProps) {
                 : [t('code.distribution.netCount', { net: compactValue }), compactValue]
               : [`${share} · ${compactValue}`, compactValue];
             const subStat =
-              w > minLabelWidth ? fitSubStat(subCandidates, w, padX, subCharWidth) : null;
+              isNet || w > minLabelWidth ? fitSubStat(subCandidates, w, padX, subCharWidth) : null;
             const interactiveProps = interactive
               ? {
                   role: 'button' as const,

@@ -2504,6 +2504,12 @@ button.mrpr-thread-menu-item[aria-current='true'] {
 .mrpr-dist [data-kind='generated'] {
   --mrpr-kind-color: var(--pr-kind-generated);
 }
+.mrpr-dist [data-net='added'] {
+  --mrpr-kind-color: var(--pr-net-added);
+}
+.mrpr-dist [data-net='removed'] {
+  --mrpr-kind-color: var(--pr-net-removed);
+}
 
 .mrpr-filter-chip:focus-visible,
 .mrpr-dist-chip:focus-visible,
@@ -2890,20 +2896,9 @@ button.mrpr-thread-menu-item[aria-current='true'] {
   stroke-width: 1;
 }
 
-.mrpr-dist [data-net='added'] {
-  --mrpr-net-fill: var(--pr-net-added);
-  --mrpr-net-line: var(--pr-net-added-line);
-  --mrpr-net-fg: var(--pr-net-on-added);
-}
-.mrpr-dist [data-net='removed'] {
-  --mrpr-net-fill: var(--pr-net-removed);
-  --mrpr-net-line: var(--pr-net-removed-line);
-  --mrpr-net-fg: var(--pr-net-on-removed);
-}
-
 .mrpr-dist-icicle-rect {
-  fill: var(--mrpr-net-fill, var(--mrpr-kind-color));
-  stroke: var(--mrpr-net-line, color-mix(in srgb, var(--pr-surface) 30%, transparent));
+  fill: var(--mrpr-kind-color);
+  stroke: color-mix(in srgb, var(--pr-surface) 30%, transparent);
   stroke-width: 0.75;
 }
 
@@ -2932,7 +2927,7 @@ button.mrpr-thread-menu-item[aria-current='true'] {
   fill: var(--pr-fg);
 }
 .mrpr-dist-icicle-label {
-  fill: var(--mrpr-net-fg, var(--pr-kind-on-fill));
+  fill: var(--pr-kind-on-fill);
 }
 
 .mrpr-dist-icicle-root-sub,
@@ -2945,7 +2940,7 @@ button.mrpr-thread-menu-item[aria-current='true'] {
   fill: var(--pr-muted);
 }
 .mrpr-dist-icicle-sub {
-  fill: var(--mrpr-net-fg, var(--pr-kind-on-fill));
+  fill: var(--pr-kind-on-fill);
 }
 
 .mrpr-dist-net-legend {
@@ -2956,9 +2951,8 @@ button.mrpr-thread-menu-item[aria-current='true'] {
 .mrpr-dist-swatch {
   inline-size: 0.5625rem;
   block-size: 0.5625rem;
-  border: 1px solid var(--mrpr-net-line);
   border-radius: 0.125rem;
-  background: var(--mrpr-net-fill);
+  background: var(--mrpr-kind-color);
 }
 
 .mrpr-dist-foot {
