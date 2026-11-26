@@ -110,31 +110,37 @@ describe('CodeTab diff worker fallbacks', () => {
   });
 
   it('keeps @pierre/diffs main-thread fallback on startup worker failure without respawning', async () => {
-    await withMockedCreateObjectURL(
-      vi.fn(() => 'blob:diff-worker-startup-fail'),
-      async () => {
-        vi.stubGlobal('Worker', FailingInitDiffWorker);
-        const firstOpen = await renderCodeTab();
-        const firstManager = captured.manager;
-        await vi.waitFor(() => expect(firstManager?.getStats().workersFailed).toBe(true), {
-          timeout: 10_000,
-        });
-        expect(firstManager?.isWorkingPool()).toBe(false);
-        expect(created).toHaveLength(1);
-        expect(created[0].terminate).toHaveBeenCalledTimes(1);
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await withMockedCreateObjectURL(
+        vi.fn(() => 'blob:diff-worker-startup-fail'),
+        async () => {
+          vi.stubGlobal('Worker', FailingInitDiffWorker);
+          const firstOpen = await renderCodeTab();
+          const firstManager = captured.manager;
+          await vi.waitFor(() => expect(firstManager?.getStats().workersFailed).toBe(true), {
+            timeout: 10_000,
+          });
+          expect(consoleError).toHaveBeenCalledTimes(1);
+          expect(firstManager?.isWorkingPool()).toBe(false);
+          expect(created).toHaveLength(1);
+          expect(created[0].terminate).toHaveBeenCalledTimes(1);
 
-        await act(async () => {
-          firstOpen.unmount();
-        });
+          await act(async () => {
+            firstOpen.unmount();
+          });
 
-        const secondOpen = await renderCodeTab();
-        expect(captured.manager).toBe(firstManager);
-        expect(created).toHaveLength(1);
+          const secondOpen = await renderCodeTab();
+          expect(captured.manager).toBe(firstManager);
+          expect(created).toHaveLength(1);
 
-        await act(async () => {
-          secondOpen.unmount();
-        });
-      }
-    );
+          await act(async () => {
+            secondOpen.unmount();
+          });
+        }
+      );
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 });

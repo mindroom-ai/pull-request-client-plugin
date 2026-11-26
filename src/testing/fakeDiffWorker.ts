@@ -12,7 +12,10 @@ export function createFakeDiffWorkerClass(
 ) {
   return class FakeDiffWorker {
     listeners = new Map<string, Set<(event: unknown) => void>>();
-    terminate = vi.fn();
+    terminated = false;
+    terminate = vi.fn(() => {
+      this.terminated = true;
+    });
     url: string | URL;
     constructor(url: string | URL) {
       this.url = url;
@@ -24,13 +27,16 @@ export function createFakeDiffWorkerClass(
       this.listeners.set(type, set);
     }
     emitError(event: unknown = new Event('error')) {
+      if (this.terminated) return;
       for (const listener of this.listeners.get('error') ?? []) {
         listener(event);
       }
     }
     postMessage(request: { id?: string; type?: string }) {
+      if (this.terminated) return;
       if (request.type === 'initialize') {
         queueMicrotask(() => {
+          if (this.terminated) return;
           if (options?.failInitialize) {
             this.emitError(new Event('error'));
             return;

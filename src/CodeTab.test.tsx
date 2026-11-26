@@ -1140,46 +1140,60 @@ describe('CodeTab', () => {
     });
   });
 
-  it('recovers from a post-init worker error so the next mount spawns a fresh worker', async () => {
+  it('restarts the singleton worker in place after a post-init worker error', async () => {
     const createObjectURL = vi.fn(
       (_blob: Blob) => `blob:diff-worker-${createObjectURL.mock.calls.length}`
     );
-    await withMockedCreateObjectURL(createObjectURL, async () => {
-      vi.stubGlobal('Worker', FakeDiffWorker);
-      const firstOpen = await show();
-      const firstManager = workerPool.manager;
-      await vi.waitFor(() => expect(firstManager?.isInitialized()).toBe(true), { timeout: 10_000 });
-      expect(workerPool.created).toHaveLength(1);
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await withMockedCreateObjectURL(createObjectURL, async () => {
+        vi.stubGlobal('Worker', FakeDiffWorker);
+        const firstOpen = await show();
+        const manager = workerPool.manager;
+        await vi.waitFor(() => expect(manager?.isInitialized()).toBe(true), { timeout: 10_000 });
+        expect(workerPool.created).toHaveLength(1);
 
-      workerPool.created[0].emitError(new Event('error'));
-      expect(workerPool.created[0].terminate).toHaveBeenCalledTimes(1);
-      expect(firstManager?.isWorkingPool()).toBe(false);
+        const errorEvent = new Event('error');
+        workerPool.created[0].emitError(errorEvent);
+        expect(consoleError).toHaveBeenCalledWith(
+          'Worker error:',
+          errorEvent,
+          workerPool.created[0]
+        );
+        expect(workerPool.created[0].terminate).toHaveBeenCalledTimes(1);
+        expect(manager?.isInitialized()).toBe(false);
+        expect(manager?.getStats().managerState).toBe('waiting');
+        expect(manager?.isWorkingPool()).toBe(false);
 
-      await act(async () => {
-        firstOpen.unmount();
+        await act(async () => {
+          firstOpen.unmount();
+        });
+
+        // Next mount receives the same singleton manager; CodeView.isReady() calls initialize()
+        // when managerState === 'waiting' to spawn a fresh worker in place.
+        const secondOpen = await show();
+        expect(workerPool.manager).toBe(manager);
+        await manager?.initialize();
+        expect(manager?.isInitialized()).toBe(true);
+        expect(manager?.isWorkingPool()).toBe(true);
+        expect(workerPool.created).toHaveLength(2);
+        expect(workerPool.created[1]).not.toBe(workerPool.created[0]);
+        expect(workerPool.created[1].url).toBe('blob:diff-worker-1');
+        expect(createObjectURL).toHaveBeenCalledTimes(1);
+        expect(workerPool.created[1].terminate).not.toHaveBeenCalled();
+
+        // A terminated worker cannot fire again to disrupt the recovered worker.
+        workerPool.created[0].emitError(new Event('error'));
+        expect(workerPool.created[1].terminate).not.toHaveBeenCalled();
+        expect(manager?.isWorkingPool()).toBe(true);
+
+        await act(async () => {
+          secondOpen.unmount();
+        });
       });
-
-      const secondOpen = await show();
-      const secondManager = workerPool.manager;
-      expect(secondManager).not.toBe(firstManager);
-      await vi.waitFor(() => expect(secondManager?.isInitialized()).toBe(true), {
-        timeout: 10_000,
-      });
-      expect(workerPool.created).toHaveLength(2);
-      expect(workerPool.created[1]).not.toBe(workerPool.created[0]);
-      expect(workerPool.created[1].url).toBe('blob:diff-worker-1');
-      expect(createObjectURL).toHaveBeenCalledTimes(1);
-      expect(workerPool.created[1].terminate).not.toHaveBeenCalled();
-
-      // A stale error from the replaced worker must not tear down the active singleton.
-      workerPool.created[0].emitError(new Event('error'));
-      expect(workerPool.created[1].terminate).not.toHaveBeenCalled();
-      expect(secondManager?.isWorkingPool()).toBe(true);
-
-      await act(async () => {
-        secondOpen.unmount();
-      });
-    });
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
   it('keeps CodeView options, header, and footer props stable across unrelated UI toggles', async () => {

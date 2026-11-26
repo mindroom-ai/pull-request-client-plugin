@@ -130,7 +130,6 @@ const WIDE_TREE_MIN_WIDTH = 640;
 // module-level Blob URL instead of Vite's ?worker&inline factory, which leaks a 1.3 MB Blob URL
 // per worker creation.
 let diffWorkerBlobUrl: string | undefined;
-let diffWorkerPool: WorkerPoolManager | undefined;
 
 function createDiffWorker(): Worker {
   try {
@@ -155,22 +154,23 @@ const DIFF_WORKER_HIGHLIGHTER_OPTIONS: WorkerInitializationRenderOptions = {
 };
 
 function getOrCreateDiffWorkerPool(): WorkerPoolManager {
-  const pool = getOrCreateWorkerPoolSingleton({
+  let pool: WorkerPoolManager | null = null;
+  pool = getOrCreateWorkerPoolSingleton({
     poolOptions: {
       ...DIFF_WORKER_POOL_OPTIONS,
       // @pierre/diffs already handles startup failures (workersFailed = true -> main-thread
-      // fallback). Post-init worker errors leave a single-worker pool wedged, so tear down the
-      // singleton so the next mount creates a fresh worker.
-      onWorkerError() {
-        if (diffWorkerPool?.isInitialized() && diffWorkerPool === pool) {
-          terminateWorkerPoolSingleton();
-          diffWorkerPool = undefined;
+      // fallback). Post-init worker errors leave a single-worker pool wedged, so terminate the
+      // singleton in place: open CodeViews and later mounts then restart cleanly inside the same
+      // manager via CodeView.isReady() -> initialize() without orphaning an extra worker.
+      onWorkerError(event, worker) {
+        console.error('Worker error:', event, worker);
+        if (pool?.isInitialized()) {
+          pool.terminate();
         }
       },
     },
     highlighterOptions: DIFF_WORKER_HIGHLIGHTER_OPTIONS,
   });
-  diffWorkerPool = pool;
   return pool;
 }
 
@@ -180,7 +180,6 @@ function getOrCreateDiffWorkerPool(): WorkerPoolManager {
  */
 export function resetDiffWorkerPool(): void {
   terminateWorkerPoolSingleton();
-  diffWorkerPool = undefined;
   const blobUrl = diffWorkerBlobUrl;
   diffWorkerBlobUrl = undefined;
   if (blobUrl !== undefined && typeof URL.revokeObjectURL === 'function') {
