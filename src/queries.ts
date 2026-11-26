@@ -132,7 +132,7 @@ export function markPullRequestMerged(
   queryClient.setQueryData<PullRequest>(queryKey, (current) =>
     current && !refusedData.has(current) && current.state !== 'merged'
       ? { ...current, state: 'merged' }
-      : current
+      : undefined
   );
 }
 
