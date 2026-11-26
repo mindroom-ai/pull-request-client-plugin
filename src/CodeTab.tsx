@@ -20,7 +20,7 @@ import {
   type WorkerInitializationRenderOptions,
   type WorkerPoolOptions,
 } from '@pierre/diffs/react';
-import DiffWorker from '@pierre/diffs/worker/worker-portable.js?worker&inline';
+import diffWorkerSource from '@pierre/diffs/worker/worker-portable.js?raw';
 import type { GitStatus } from '@pierre/trees';
 import {
   ChartBar,
@@ -121,9 +121,19 @@ const NO_FOLDS: FileDiffFoldChoices = new Map();
 const WIDE_TREE_MIN_WIDTH = 640;
 
 // Keep Shiki highlighting off the main thread in a single scoped worker whose heap is freed on
-// unmount via WorkerPoolContextProvider -> terminateWorkerPoolSingleton().
+// unmount via WorkerPoolContextProvider -> terminateWorkerPoolSingleton(). Reuse one module-level
+// Blob URL instead of Vite's ?worker&inline factory, which leaks a new 1.3 MB Blob URL per open.
+let diffWorkerBlobUrl: string | undefined;
+
+function createDiffWorker(): Worker {
+  diffWorkerBlobUrl ??= URL.createObjectURL(
+    new Blob([diffWorkerSource], { type: 'text/javascript;charset=utf-8' })
+  );
+  return new Worker(diffWorkerBlobUrl);
+}
+
 const DIFF_WORKER_POOL_OPTIONS: WorkerPoolOptions = {
-  workerFactory: () => new DiffWorker(),
+  workerFactory: createDiffWorker,
   poolSize: 1,
   totalASTLRUCacheSize: 50,
 };
