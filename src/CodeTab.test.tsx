@@ -21,6 +21,11 @@ import {
   type FileDiffMetadata,
 } from '@pierre/diffs';
 import { fnv1a32, getDiffLineStat } from './diff/diffRendering';
+import {
+  createFakeDiffWorkerClass,
+  withMockedCreateObjectURL,
+  type FakeDiffWorkerRecord,
+} from './testing/fakeDiffWorker';
 import { trapOptions } from './testing/focusTrapStandIn';
 import {
   greenhouseAfter,
@@ -54,43 +59,14 @@ const workerPool = vi.hoisted(() => ({
   props: undefined as
     | { poolOptions?: Record<string, unknown>; highlighterOptions?: Record<string, unknown> }
     | undefined,
-  created: [] as Array<{ url: string | URL; terminate: ReturnType<typeof vi.fn> }>,
+  created: [] as FakeDiffWorkerRecord[],
 }));
 
 vi.mock('@pierre/diffs/worker/worker-portable.js?raw', () => ({
   default: '/* fake diff worker */',
 }));
 
-class FakeDiffWorker {
-  listeners = new Map<string, Set<(event: unknown) => void>>();
-  terminate = vi.fn();
-  url: string | URL;
-  constructor(url: string | URL) {
-    this.url = url;
-    workerPool.created.push(this);
-  }
-  addEventListener(type: string, listener: (event: unknown) => void) {
-    const set = this.listeners.get(type) ?? new Set();
-    set.add(listener);
-    this.listeners.set(type, set);
-  }
-  postMessage(request: { id?: string; type?: string }) {
-    if (request.type === 'initialize') {
-      queueMicrotask(() => {
-        for (const listener of this.listeners.get('message') ?? []) {
-          listener({
-            data: {
-              type: 'success',
-              requestType: 'initialize',
-              id: request.id,
-              sentAt: Date.now(),
-            },
-          });
-        }
-      });
-    }
-  }
-}
+const FakeDiffWorker = createFakeDiffWorkerClass(workerPool.created);
 
 vi.mock('@pierre/diffs/react', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@pierre/diffs/react')>();
@@ -1103,45 +1079,11 @@ describe('CodeTab', () => {
     expect(view.props?.options).toMatchObject({ theme: 'pierre-dark' });
   });
 
-  it('falls back to a data URL worker when URL.createObjectURL throws', async () => {
-    const originalCreateObjectURL = Object.getOwnPropertyDescriptor(URL, 'createObjectURL');
-    Object.defineProperty(URL, 'createObjectURL', {
-      configurable: true,
-      writable: true,
-      value: vi.fn(() => {
-        throw new Error('Blob URLs unavailable');
-      }),
-    });
-    try {
-      vi.stubGlobal('Worker', FakeDiffWorker);
-      const tab = await show();
-      await vi.waitFor(() => expect(workerPool.created).toHaveLength(1), { timeout: 10_000 });
-      expect(workerPool.created[0].url).toMatch(/^data:text\/javascript;charset=utf-8,/);
-      await act(async () => {
-        tab.unmount();
-      });
-      expect(workerPool.created[0].terminate).toHaveBeenCalledTimes(1);
-    } finally {
-      if (originalCreateObjectURL) {
-        Object.defineProperty(URL, 'createObjectURL', originalCreateObjectURL);
-      } else {
-        delete (URL as Partial<typeof URL>).createObjectURL;
-      }
-    }
-  });
-
-  // Relies on test order: no earlier test populates the module-level diffWorkerBlobUrl cache.
   it('mounts a single-worker pool, reuses one Blob URL across opens, and terminates on unmount', async () => {
-    const originalCreateObjectURL = Object.getOwnPropertyDescriptor(URL, 'createObjectURL');
     const createObjectURL = vi.fn(
       (_blob: Blob) => `blob:diff-worker-${createObjectURL.mock.calls.length}`
     );
-    Object.defineProperty(URL, 'createObjectURL', {
-      configurable: true,
-      writable: true,
-      value: createObjectURL,
-    });
-    try {
+    await withMockedCreateObjectURL(createObjectURL, async () => {
       vi.stubGlobal('Worker', FakeDiffWorker);
       const firstOpen = await show();
       expect(view.props?.disableWorkerPool).toBe(false);
@@ -1175,13 +1117,7 @@ describe('CodeTab', () => {
         secondOpen.unmount();
       });
       expect(workerPool.created[1].terminate).toHaveBeenCalledTimes(1);
-    } finally {
-      if (originalCreateObjectURL) {
-        Object.defineProperty(URL, 'createObjectURL', originalCreateObjectURL);
-      } else {
-        delete (URL as Partial<typeof URL>).createObjectURL;
-      }
-    }
+    });
   });
 
   it('keeps CodeView options, header, and footer props stable across unrelated UI toggles', async () => {

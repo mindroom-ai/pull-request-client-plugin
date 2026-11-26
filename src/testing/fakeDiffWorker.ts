@@ -1,0 +1,60 @@
+import { vi } from 'vitest';
+
+export interface FakeDiffWorkerRecord {
+  url: string | URL;
+  terminate: ReturnType<typeof vi.fn>;
+}
+
+export function createFakeDiffWorkerClass(created: FakeDiffWorkerRecord[]) {
+  return class FakeDiffWorker {
+    listeners = new Map<string, Set<(event: unknown) => void>>();
+    terminate = vi.fn();
+    url: string | URL;
+    constructor(url: string | URL) {
+      this.url = url;
+      created.push(this);
+    }
+    addEventListener(type: string, listener: (event: unknown) => void) {
+      const set = this.listeners.get(type) ?? new Set();
+      set.add(listener);
+      this.listeners.set(type, set);
+    }
+    postMessage(request: { id?: string; type?: string }) {
+      if (request.type === 'initialize') {
+        queueMicrotask(() => {
+          for (const listener of this.listeners.get('message') ?? []) {
+            listener({
+              data: {
+                type: 'success',
+                requestType: 'initialize',
+                id: request.id,
+                sentAt: Date.now(),
+              },
+            });
+          }
+        });
+      }
+    }
+  };
+}
+
+export async function withMockedCreateObjectURL(
+  value: (blob: Blob) => string,
+  run: () => Promise<void>
+) {
+  const original = Object.getOwnPropertyDescriptor(URL, 'createObjectURL');
+  Object.defineProperty(URL, 'createObjectURL', {
+    configurable: true,
+    writable: true,
+    value,
+  });
+  try {
+    await run();
+  } finally {
+    if (original) {
+      Object.defineProperty(URL, 'createObjectURL', original);
+    } else {
+      delete (URL as Partial<typeof URL>).createObjectURL;
+    }
+  }
+}
