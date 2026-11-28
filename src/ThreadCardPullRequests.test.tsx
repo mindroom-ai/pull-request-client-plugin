@@ -7,7 +7,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import plugin from './index';
 import PullRequestPanel from './PullRequestPanel';
 import { pullRequestKey, refreshPullRequest, STALE_TIME } from './queries';
-import { FakeIntersectionObserver, observers, report } from './testing/intersectionObserver';
+import {
+  FakeIntersectionObserver,
+  observers,
+  settleOnScreen,
+} from './testing/intersectionObserver';
 import { linkedRoom, type TestLink, type TestWorktree } from './testing/linkedRoom';
 import { githubServer } from './testing/mindroomServer';
 import { ThreadCardPullRequests } from './ThreadCardPullRequests';
@@ -132,6 +136,20 @@ const summaryNumbers = (urls: readonly string[]) =>
 
 const proxiedSummaries = (mindroom: ReturnType<typeof githubServer>) =>
   summaryNumbers(mindroom.githubRequests().map(({ path }) => path));
+
+const openSecondWithChecks = () =>
+  githubServer(async (url) => {
+    if (url.endsWith('/pulls/2')) return Response.json({ state: 'open', head: { sha: 'abc123' } });
+    if (url.includes('/pulls/')) {
+      return Response.json({ state: 'closed', merged_at: '2026-11-18T10:00:00Z' });
+    }
+    if (url.includes('/check-runs?')) {
+      return Response.json({
+        check_runs: [{ name: 'Build', status: 'completed', conclusion: 'success' }],
+      });
+    }
+    return Response.json({ statuses: [] });
+  });
 
 beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -292,11 +310,12 @@ describe('ThreadCardPullRequests', () => {
     ).toHaveLength(requests.length);
   });
 
-  it('cancels a queued summary when only an unseen card still links to it', async () => {
+  it('cancels a queued summary until another card that links to it is seen', async () => {
     vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver);
     const slots = held();
-    const mindroom = githubServer(async () => {
-      await slots.reply;
+    const resumed = held();
+    const mindroom = githubServer(async (url) => {
+      await (url.endsWith('/pulls/5') ? resumed.reply : slots.reply);
       return Response.json({ state: 'closed' });
     });
     roomServer.current = mindroom.server;
@@ -323,17 +342,24 @@ describe('ThreadCardPullRequests', () => {
     const view = await renderPluginComponent(wave(), { id: 'pull-requests', plugin });
     try {
       const rows = [...view.container.querySelectorAll('.mrpr-thread-card-chips')].slice(0, 5);
-      await act(async () => report(true, (target) => rows.includes(target)));
+      await settleOnScreen((target) => rows.includes(target));
       const fifth = { queryKey: pullRequestKey(sampleRef(5)) };
       await vi.waitFor(() => expect(client.isFetching(fifth)).toBe(1));
       expect(proxiedSummaries(mindroom)).toEqual([1, 2, 3, 4]);
       view.rerender(wave(true));
       expect(client.isFetching(fifth)).toBe(0);
+      slots.release();
+      await vi.waitFor(() => expect(client.isFetching()).toBe(0));
+      expect(proxiedSummaries(mindroom)).toEqual([1, 2, 3, 4]);
+      await settleOnScreen();
+      await vi.waitFor(() => expect(proxiedSummaries(mindroom)).toEqual([1, 2, 3, 4, 5]));
+      const signal = mindroom.server.request.mock.lastCall?.[1]?.signal;
+      view.unmount();
+      expect(signal?.aborted).toBe(true);
     } finally {
       slots.release();
+      resumed.release();
     }
-    await vi.waitFor(() => expect(client.isFetching()).toBe(0));
-    expect(proxiedSummaries(mindroom)).toEqual([1, 2, 3, 4]);
   });
 
   const interactiveSurfaces = ['side panel', 'thread actions menu', 'chip hover card'] as const;
@@ -555,8 +581,9 @@ describe('ThreadCardPullRequests', () => {
   });
 
   it.each(['fetching', 'paused'])(
-    'uses stale cached order on remount while refreshes are %s',
+    'preserves cached order on remount when settled refreshes are %s',
     async (fetchStatus) => {
+      vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver);
       const refresh = held();
       let refreshing = false;
       const mindroom = githubServer(async (url) => {
@@ -572,9 +599,9 @@ describe('ThreadCardPullRequests', () => {
       const room = roomWith([1, 2].map(sampleRef));
       const options = { phone: true, client };
       const first = await show(room, options);
+      await settleOnScreen();
       await first.findByRole('img', { name: 'Pull request mindroom-ai/sample-repo #2: Open' });
       first.unmount();
-      await client.invalidateQueries({ queryKey: ['pull-requests', 'pr'], refetchType: 'none' });
       const access = `server:${mindroom.server.origin}:octo:0`;
       const keys = [1, 2].map((number) => [...pullRequestKey(sampleRef(number)), access]);
       const statuses = () => keys.map((key) => client.getQueryState(key)?.fetchStatus);
@@ -582,6 +609,12 @@ describe('ThreadCardPullRequests', () => {
         refreshing = true;
         onlineManager.setOnline(fetchStatus !== 'paused');
         const remount = await show(room, options);
+        expect(statuses()).toEqual(['idle', 'idle']);
+        await act(async () => {
+          void client.invalidateQueries({ queryKey: ['pull-requests', 'pr'] });
+        });
+        expect(statuses()).toEqual(['idle', 'idle']);
+        await settleOnScreen();
         await vi.waitFor(() => expect(statuses()).toEqual([fetchStatus, fetchStatus]));
         expect(chips(remount).map((chip) => chip.textContent)).toEqual(['#2']);
       } finally {
@@ -677,9 +710,9 @@ describe('ThreadCardPullRequests', () => {
     await view.findByRole('img', { name: 'Pull request mindroom-ai/sample-repo #3: Open' });
   });
 
-  it('waits for the chip row to be on screen before reading hidden summaries', async () => {
+  it('waits for the row before reading hidden summaries and for the chip before reading checks', async () => {
     vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver);
-    const mindroom = githubServer(async () => Response.json({ state: 'closed' }));
+    const mindroom = openSecondWithChecks();
     roomServer.current = mindroom.server;
     const client = new QueryClient();
     const view = await show(roomWith([1, 2].map(sampleRef)), { phone: true, client });
@@ -688,35 +721,27 @@ describe('ThreadCardPullRequests', () => {
     expect(proxiedSummaries(mindroom)).toEqual([]);
     const row = view.container.querySelector('.mrpr-thread-card-chips');
     expect(row).not.toBeNull();
-    await act(async () => report(true, (target) => target === row));
-    await vi.waitFor(() => expect(proxiedSummaries(mindroom)).toEqual([1, 2]));
-    await act(async () => report(true));
-    await view.findByRole('img', { name: 'Pull request mindroom-ai/sample-repo #1: Closed' });
+    await settleOnScreen((target) => target === row);
+    await view.findByRole('img', { name: 'Pull request mindroom-ai/sample-repo #2: Open' });
     expect(proxiedSummaries(mindroom)).toEqual([1, 2]);
+    expect(mindroom.githubRequests()).toHaveLength(2);
+    await settleOnScreen();
+    await vi.waitFor(() =>
+      expect(view.container.querySelector('.mrpr-chip-checks')?.getAttribute('class')).toContain(
+        'mrpr-tone-success'
+      )
+    );
+    expect(mindroom.githubRequests()).toHaveLength(4);
   });
 
-  it('shows the cached open pull request and checks on remount before being seen', async () => {
-    vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver);
-    const mindroom = githubServer(async (url) => {
-      if (url.endsWith('/pulls/2'))
-        return Response.json({ state: 'open', head: { sha: 'abc123' } });
-      if (url.includes('/pulls/')) {
-        return Response.json({ state: 'closed', merged_at: '2026-11-18T10:00:00Z' });
-      }
-      if (url.includes('/check-runs?')) {
-        return Response.json({
-          check_runs: [{ name: 'Build', status: 'completed', conclusion: 'success' }],
-        });
-      }
-      return Response.json({ statuses: [] });
-    });
+  it('reuses fresh cached order and checks on remount and only loads a cold added link', async () => {
+    vi.stubGlobal('IntersectionObserver', undefined);
+    const mindroom = openSecondWithChecks();
     roomServer.current = mindroom.server;
     const client = new QueryClient();
     const room = roomWith([1, 2].map(sampleRef));
     const first = await show(room, { phone: true, client });
-    await act(async () => report(true));
     await first.findByRole('img', { name: 'Pull request mindroom-ai/sample-repo #2: Open' });
-    await act(async () => report(true));
     await vi.waitFor(() => {
       expect(first.container.querySelector('.mrpr-chip-checks')?.getAttribute('class')).toContain(
         'mrpr-tone-success'
@@ -724,9 +749,10 @@ describe('ThreadCardPullRequests', () => {
       expect(client.isFetching()).toBe(0);
     });
     first.unmount();
-    await client.invalidateQueries({ queryKey: ['pull-requests'], refetchType: 'none' });
-    observers.length = 0;
-    const asked = mindroom.githubRequests().length;
+    vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver);
+    const paths = () => mindroom.githubRequests().map(({ path }) => path);
+    const asked = paths();
+    expect(asked).toHaveLength(4); // Two summaries, plus the visible pull request's checks.
     const remount = await show(room, { phone: true, client });
     const chip = remount.getByRole('img', {
       name: 'Pull request mindroom-ai/sample-repo #2: Open',
@@ -736,16 +762,48 @@ describe('ThreadCardPullRequests', () => {
     expect(remount.container.querySelector('.mrpr-chip-checks')?.getAttribute('class')).toContain(
       'mrpr-tone-success'
     );
-    expect(mindroom.githubRequests()).toHaveLength(asked);
+    expect(paths()).toEqual(asked);
     // Adding an uncached pull request before being seen keeps the settled rank without fetching.
     remount.rerenderRoom(roomWith([1, 2, 3].map(sampleRef)));
     expect(chips(remount).map((entry) => entry.textContent)).toEqual(['#2']);
-    expect(mindroom.githubRequests()).toHaveLength(asked);
-    await act(async () => report(true));
+    expect(paths()).toEqual(asked);
+    await settleOnScreen();
     await vi.waitFor(() => {
       expect(proxiedSummaries(mindroom)).toContain(3);
       expect(client.isFetching()).toBe(0);
     });
+    expect(paths()).toEqual([...asked, '/repos/mindroom-ai/sample-repo/pulls/3']);
+  });
+
+  it('refreshes an inactive, explicitly invalidated fresh summary once the row settles', async () => {
+    vi.stubGlobal('IntersectionObserver', undefined);
+    let reopened = false;
+    const mindroom = githubServer(async (url) =>
+      Response.json({ state: reopened && url.endsWith('/pulls/2') ? 'open' : 'closed' })
+    );
+    roomServer.current = mindroom.server;
+    const client = new QueryClient();
+    const room = roomWith([1, 2].map(sampleRef));
+    const options = { phone: true, client };
+    const first = await show(room, options);
+    await first.findByRole('img', { name: 'Pull request mindroom-ai/sample-repo #1: Closed' });
+    await vi.waitFor(() => expect(client.isFetching()).toBe(0));
+    expect(proxiedSummaries(mindroom)).toEqual([1, 2]);
+    first.unmount();
+
+    reopened = true;
+    const queryKey = pullRequestKey(sampleRef(2));
+    await client.invalidateQueries({ queryKey });
+    vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver);
+    const remount = await show(room, options);
+    expect(
+      remount.getByRole('img', { name: 'Pull request mindroom-ai/sample-repo #1: Closed' })
+    ).toBeDefined();
+    expect(proxiedSummaries(mindroom)).toEqual([1, 2]);
+    const row = remount.container.querySelector('.mrpr-thread-card-chips');
+    await settleOnScreen((target) => target === row);
+    await remount.findByRole('img', { name: 'Pull request mindroom-ai/sample-repo #2: Open' });
+    expect(proxiedSummaries(mindroom)).toEqual([1, 2, 2]);
   });
 
   it('waits on partial cache and keeps anonymous link order before being seen', async () => {
@@ -767,7 +825,7 @@ describe('ThreadCardPullRequests', () => {
     const partial = await show(roomWith([1, 2].map(sampleRef)), { phone: true, client });
     expect(chips(partial).map((entry) => entry.textContent)).toEqual(['#1']);
     expect(proxiedSummaries(mindroom)).toEqual([]);
-    await act(async () => report(true));
+    await settleOnScreen();
     await partial.findByRole('img', { name: 'Pull request mindroom-ai/sample-repo #2: Open' });
     partial.unmount();
     roomServer.current = undefined;
@@ -789,7 +847,7 @@ describe('ThreadCardPullRequests', () => {
     { status: 404, priorAnswer: true },
     { status: 502, priorAnswer: false },
   ])(
-    'handles a hidden $status on remount and reconnect (prior answer: $priorAnswer)',
+    'handles a hidden $status after visibility settles and on reconnect (prior answer: $priorAnswer)',
     async ({ status, priorAnswer }) => {
       let failing = true;
       const mindroom = githubServer(async (url) =>
@@ -808,12 +866,18 @@ describe('ThreadCardPullRequests', () => {
       const view = await show(room, options);
       await vi.waitFor(() => expect(client.getQueryState(key)?.status).toBe('error'));
       const hiddenReads = () => proxiedSummaries(mindroom).filter((number) => number === 2).length;
-      const expected = hiddenReads() + (status === 502 ? 1 : 0);
+      const before = hiddenReads();
+      const expected = before + (status === 502 ? 1 : 0);
       view.unmount();
       failing = false;
+      vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver);
       await show(room, options);
-      await vi.waitFor(() => expect(client.isFetching()).toBe(0));
-      expect(hiddenReads()).toBe(expected);
+      expect(hiddenReads()).toBe(before);
+      await settleOnScreen();
+      await vi.waitFor(() => {
+        expect(hiddenReads()).toBe(expected);
+        expect(client.isFetching()).toBe(0);
+      });
       await act(async () => {
         onlineManager.setOnline(false);
         onlineManager.setOnline(true);
@@ -822,32 +886,6 @@ describe('ThreadCardPullRequests', () => {
       expect(hiddenReads()).toBe(expected);
     }
   );
-
-  it('does not refetch a refused hidden summary when becoming seen on remount', async () => {
-    vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver);
-    let failing = true;
-    const mindroom = githubServer(async (url) =>
-      url.endsWith('/pulls/2') && failing
-        ? Response.json({}, { status: 404 })
-        : Response.json({ state: 'open' })
-    );
-    roomServer.current = mindroom.server;
-    const client = new QueryClient({ defaultOptions: { queries: { retryDelay: 0 } } });
-    const key = [...pullRequestKey(sampleRef(2)), `server:${mindroom.server.origin}:octo:0`];
-    const room = roomWith([1, 2].map(sampleRef));
-    const first = await show(room, { phone: true, client });
-    await act(async () => report(true));
-    await vi.waitFor(() => expect(client.getQueryState(key)?.status).toBe('error'));
-    const hiddenReads = () => proxiedSummaries(mindroom).filter((number) => number === 2).length;
-    const before = hiddenReads();
-    first.unmount();
-    failing = false;
-    observers.length = 0;
-    await show(room, { phone: true, client });
-    await act(async () => report(true));
-    await vi.waitFor(() => expect(client.isFetching()).toBe(0));
-    expect(hiddenReads()).toBe(before);
-  });
 
   it('keeps anonymous link order and reads only the shown pull requests', async () => {
     const client = new QueryClient();

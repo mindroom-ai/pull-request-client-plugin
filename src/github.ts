@@ -117,7 +117,11 @@ export class GitHubError extends Error {
 export const refused = (error: unknown) =>
   error instanceof GitHubError && (error.kind === 'notFound' || error.kind === 'badToken');
 
-function errorKind(response: Response, hasToken: boolean): GitHubErrorKind {
+type GitHubResponse = Pick<Response, 'ok' | 'status' | 'headers' | 'body'> & {
+  json(): Promise<unknown>;
+};
+
+function errorKind(response: GitHubResponse, hasToken: boolean): GitHubErrorKind {
   const { status } = response;
   if (status === 404 || (status === 401 && !hasToken)) return 'notFound';
   if (status === 401) return 'badToken';
@@ -174,16 +178,15 @@ type GitHubInit = {
 
 /**
  * One request to GitHub's API at `path`: to GitHub itself, with the token when one is given, or
- * through the MindRoom server, whose answer of GitHub's status, body and rate limit headers is made
- * a `Response` again, so that both are read the same. Rejects when no answer came, and tells the
- * server's `disconnected` when it says the account is no longer connected, `unreadable` when it
- * cannot read the token saved there.
+ * through the MindRoom server, which already parsed the JSON body. Rejects when no answer came,
+ * and tells the server's `disconnected` when it says the account is no longer connected,
+ * `unreadable` when it cannot read the token saved there.
  */
 async function githubFetch(
   token: GitHubAuth | undefined,
   path: string,
   { method, accept, body, signal, cache, maxBytes }: GitHubInit
-): Promise<Response> {
+): Promise<GitHubResponse> {
   if (token === undefined || typeof token === 'string') {
     const headers: Record<string, string> = {
       Accept: accept,
@@ -218,22 +221,35 @@ async function githubFetch(
     throw error;
   }
   const status = answer?.status;
-  if (typeof status !== 'number' || status < 200 || status > 599) {
+  if (typeof status !== 'number' || !Number.isInteger(status) || status < 200 || status > 599) {
     throw new TypeError('MindRoom gave no answer of GitHub');
   }
   const headers = new Headers();
   for (const [name, value] of Object.entries(record(answer?.headers) ?? {})) {
     if (typeof value === 'string') headers.set(name, value);
   }
-  const content = answer?.body;
   // Answers such as 204 and 304 take no body at all.
-  const empty = content === null || content === undefined || [204, 205, 304].includes(status);
-  const text = empty ? null : typeof content === 'string' ? content : JSON.stringify(content);
-  return new Response(text, { status, headers });
+  const content = [204, 205, 304].includes(status) ? null : answer?.body;
+  return {
+    status,
+    ok: status < 300,
+    headers,
+    async json() {
+      if (content === null || content === undefined) throw new SyntaxError('Empty GitHub body');
+      // The proxy may relay text even for a JSON endpoint. As with Response.json, ignore a BOM.
+      return typeof content === 'string' ? JSON.parse(content.replace(/^\uFEFF/, '')) : content;
+    },
+    get body() {
+      // Only raw blob reads use a stream; the proxy guarantees text for these answers.
+      return maxBytes !== undefined && typeof content === 'string'
+        ? new Response(content).body
+        : null;
+    },
+  };
 }
 
 /** When GitHub's rate limit resets, in milliseconds since the epoch; in a minute when it says not. */
-function resetTime(response: Response): number {
+function resetTime(response: GitHubResponse): number {
   const now = Date.now();
   const readSeconds = (name: string) => Number(response.headers.get(name) ?? NaN);
   const remaining = response.headers.get('x-ratelimit-remaining');
@@ -256,7 +272,7 @@ async function readGitHub(
   accept: string,
   maxBytes?: number,
   reload = false
-): Promise<Response> {
+): Promise<GitHubResponse> {
   const withToken = Boolean(token);
   const { budget, who } = budgetOf(token);
   const limit = rateLimits.get(budget);
@@ -264,7 +280,7 @@ async function readGitHub(
     throw new GitHubError('rateLimited', limit.status);
   }
   rateLimits.delete(budget);
-  let response: Response;
+  let response: GitHubResponse;
   try {
     // GitHub allows a minute of caching, so a read just after a write could show the state from
     // before it. With a token the browser revalidates by ETag (`no-cache`), or skips cached ETags
@@ -331,7 +347,7 @@ export class GitHubWriteError extends Error {
   }
 }
 
-function writeErrorKind(response: Response): GitHubWriteErrorKind {
+function writeErrorKind(response: GitHubResponse): GitHubWriteErrorKind {
   const { status, headers } = response;
   if (status === 401) return 'badToken';
   // GitHub's limits answer 429, or 403 with no requests left or with a time to retry after.
@@ -361,7 +377,7 @@ async function sendRest(
   token: GitHubAuth,
   signal?: AbortSignal
 ): Promise<unknown> {
-  let response: Response;
+  let response: GitHubResponse;
   try {
     response = await githubFetch(token, path, { method, accept: JSON_MEDIA, body, signal });
   } catch (error) {
@@ -582,7 +598,7 @@ const repoPath = (ref: PullRequestRef) => `/repos/${ref.owner}/${ref.repo}`;
 
 const RAW_BLOB_MEDIA = 'application/vnd.github.raw+json';
 
-async function readRawDiffBlob(response: Response): Promise<Uint8Array | null> {
+async function readRawDiffBlob(response: GitHubResponse): Promise<Uint8Array | null> {
   if (Number(response.headers.get('content-length')) > MAX_DIFF_BLOB_BYTES) {
     await response.body?.cancel().catch(() => undefined);
     return null;
@@ -626,7 +642,7 @@ export async function fetchDiffBlob(
   signal?: AbortSignal
 ): Promise<string | null> {
   if (!/^[0-9a-f]{40}$/i.test(sha)) return null;
-  let response: Response;
+  let response: GitHubResponse;
   try {
     response = await readGitHub(
       `${repoPath(ref)}/git/blobs/${sha}`,

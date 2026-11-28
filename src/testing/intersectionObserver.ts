@@ -1,3 +1,5 @@
+import { act } from './act';
+
 // Intersection observers that report only when a test tells them to.
 export const observers: FakeIntersectionObserver[] = [];
 
@@ -19,14 +21,24 @@ export class FakeIntersectionObserver {
   }
 }
 
-/** Reports to each observer that its matching elements are on screen, or not. */
-export const report = (isIntersecting: boolean, matches = (_target: Element) => true) => {
+/** Reports the intersection states of matching elements, in delivery order. */
+export const report = (visible: boolean | boolean[], matches = (_target: Element) => true) => {
+  const states = typeof visible === 'boolean' ? [visible] : visible;
   for (const observer of observers) {
     const entries = [...observer.targets]
       .filter(matches)
-      .map((target) => ({ target, isIntersecting }) as IntersectionObserverEntry);
+      .flatMap((target) =>
+        states.map((isIntersecting) => ({ target, isIntersecting }) as IntersectionObserverEntry)
+      );
     if (entries.length > 0) {
       observer.callback(entries, observer as unknown as IntersectionObserver);
     }
   }
 };
+
+/** Leaves matching elements on screen for the visibility dwell and flushes the latch. */
+export const settleOnScreen = (matches?: (target: Element) => boolean) =>
+  act(async () => {
+    report(true, matches);
+    await new Promise<void>((resolve) => setTimeout(resolve, 300));
+  });

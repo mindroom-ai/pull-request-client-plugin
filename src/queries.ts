@@ -94,10 +94,10 @@ function invalidateAfterWrite(client: QueryClient, filters: InvalidateQueryFilte
  * settles once the pull request itself is read again. Its other parts (the files, the checks,
  * the comments) are not waited for: a large pull request's files take long, and nothing that
  * depends on the write reads them. Resolves to whether that read worked: false leaves on screen
- * the pull request from before the write. True also when nothing on screen reads it. `access`,
- * the key of the access the write went with, is the read that counts: what another room shows
- * of the pull request with another access (anonymously, as not found) is asked again too, each
- * with the access its own key names (`authFor`), but says nothing of this write.
+ * the pull request from before the write. True also when nothing on screen reads it. Only active
+ * queries refetch. `access`, the key of the access the write used, is the read that counts:
+ * another room with another access still refetches with the access its own key names (`authFor`),
+ * but says nothing of this write.
  */
 export async function refreshPullRequest(
   queryClient: QueryClient,
@@ -112,10 +112,8 @@ export async function refreshPullRequest(
   // Each query once: asked again by both, the first request would be dropped for the second.
   void invalidateAfterWrite(queryClient, { queryKey, predicate: (query) => !read(query) });
   await invalidateAfterWrite(queryClient, { queryKey, predicate: read });
-  // Only what is on screen was asked again; a failure of an earlier read, as the one without a
-  // token of a private pull request, is not this read's.
-  const shown = queryClient.getQueryCache().findAll({ queryKey, predicate: read, type: 'active' });
-  return shown.every((query) => query.state.status !== 'error');
+  const active = queryClient.getQueryCache().findAll({ queryKey, predicate: read, type: 'active' });
+  return active.every((query) => query.state.status !== 'error');
 }
 
 /** Reloads a pull request's queries bypassing cached ETags (after a write or manual refresh). */
@@ -144,7 +142,7 @@ export const recheckStalePullRequest = (
 ): Promise<void> =>
   invalidateAfterWrite(queryClient, { queryKey: keyOf(ref, access), exact: true, type: 'active' });
 
-type QueryState = { state: { data: unknown; error: unknown } };
+type QueryState = { state: { data: unknown; error: unknown; errorUpdatedAt: number } };
 
 // What a pull request's query read before GitHub refused it, until a read works again: no answer,
 // also beside a later read that failed.
@@ -162,12 +160,9 @@ export const answerOf = <T>(query: { data: T | undefined; error: unknown }) =>
   isRefused(query) ? undefined : query.data;
 
 // Mark overview observers without changing the query key shared with foreground surfaces.
-export const BACKGROUND_READ = { meta: { mindroomPullRequestsBackground: true } } as const;
+const BACKGROUND_READ = { meta: { mindroomPullRequestsBackground: true } } as const;
 
-/** What a caller can change of a query's refetching: the chips leave out the refetch on window focus,
- * a thread's details also the one on mount, for an answer and for a refusal alike, and the banner's
- * button with access adds an interval (`useBannerRefetch`); `enabled: false` reads only what is
- * already there. */
+/** Observer-specific controls for automatic refetching. `enabled: false` reads only what is cached. */
 export type RefetchOptions = {
   meta?: typeof BACKGROUND_READ.meta;
   enabled?: false | ((query: QueryState) => boolean);
@@ -181,9 +176,31 @@ export type RefetchOptions = {
   refetchIntervalInBackground?: boolean;
 };
 
-// A chip asks again when it shows after its answer went stale, not when the tab regains focus:
-// every chip seen so far would ask at once, and without a token that spends the hourly limit.
 export const NO_FOCUS_REFETCH = { refetchOnWindowFocus: false };
+
+const SETTLED_CARD_READ = { ...NO_FOCUS_REFETCH, ...BACKGROUND_READ, enabled: unlessRefused };
+const CACHED_CARD_READ: RefetchOptions = { ...SETTLED_CARD_READ, enabled: false };
+
+/** Row summaries read only cached data until visibility settles and never retry refusals. */
+export const cardRefetch = (settled: boolean): RefetchOptions =>
+  settled ? SETTLED_CARD_READ : CACHED_CARD_READ;
+
+const canReadChip = (query: QueryState) => {
+  const { error, errorUpdatedAt } = query.state;
+  // TanStack considers errors without data stale immediately, so age the 404 itself.
+  return (
+    unlessRefused(query) ||
+    (error instanceof GitHubError &&
+      error.status === 404 &&
+      Date.now() - errorUpdatedAt >= STALE_TIME)
+  );
+};
+const HOVERED_CHIP_READ = { ...NO_FOCUS_REFETCH, enabled: canReadChip };
+const SETTLED_CHIP_READ = { ...HOVERED_CHIP_READ, ...BACKGROUND_READ };
+
+/** Settled chips can refetch on enable. Hover also enables the chip and gives it priority. */
+export const chipRefetch = (settled: boolean, hovered: boolean): RefetchOptions =>
+  hovered ? HOVERED_CHIP_READ : settled ? SETTLED_CHIP_READ : CACHED_CARD_READ;
 
 // Share four slots across background proxied summaries and checks (one or up to two POSTs).
 const MAX_PROXY_READ_JOBS = 4;
