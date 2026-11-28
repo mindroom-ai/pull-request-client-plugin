@@ -8,7 +8,7 @@ import type { PullRequestRef } from './github';
 import { PullRequestHoverCard, useHoverCard } from './PullRequestHoverCard';
 import { pullRequestChecksStatePresentation } from './presentation';
 import { usePullRequestStatus } from './pullRequestStatus';
-import { cardRefetch } from './queries';
+import { chipRefetch } from './queries';
 import { pluginRootStyle } from './theme';
 
 // Wait past the host's 280 ms page slide and 260 ms swipe settle.
@@ -60,7 +60,7 @@ export function PullRequestChip({
   const hoverCardOpen = useHoverCard(element);
   const { pr, state, checks, error, checkList } = usePullRequestStatus(
     pullRequest,
-    cardRefetch(settled, hoverCardOpen)
+    chipRefetch(settled, hoverCardOpen)
   );
   const mark = checks && pullRequestChecksStatePresentation(checks);
   // Until GitHub sent the pull request, or when it refused, the plain icon in the draft's tone.

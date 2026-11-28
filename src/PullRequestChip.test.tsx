@@ -6,6 +6,7 @@ import { renderPluginComponent } from '@mindroom/client-sdk/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import plugin from './index';
 import { PullRequestChip } from './PullRequestChip';
+import { HOVER_CARD_DELAY_MS } from './PullRequestHoverCard';
 import { pullRequestKey, STALE_TIME } from './queries';
 import { act } from './testing/act';
 import {
@@ -299,6 +300,49 @@ describe('PullRequestChip', () => {
     await vi.waitFor(() => expect(mark(view)).toContain('mrpr-tone-failure'));
   });
 
+  it.each(['visibility', 'hover'])('retries an aged cached 404 on %s', async (trigger) => {
+    vi.stubGlobal('IntersectionObserver', undefined);
+    fetchMock.mockImplementation(async () => respond({ message: 'Not Found' }, 404));
+    const first = await show();
+    const { client } = first;
+    await act(() => answered(client, '/pulls/412'));
+    expect(client.getQueryState([...pullRequestKey(REF), false])?.status).toBe('error');
+    first.view.unmount();
+
+    fetchMock.mockClear();
+    vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver);
+    const fresh = await show({}, undefined, client);
+    await settleOnScreen();
+    expect(fetchMock).not.toHaveBeenCalled();
+    fresh.view.unmount();
+
+    const realNow = Date.now;
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => realNow() + STALE_TIME + 1);
+    try {
+      serve(pull({ title: 'Available again' }));
+      pointer(true);
+      const { view } = await show({}, undefined, client);
+      expect(fetchMock).not.toHaveBeenCalled();
+
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      await act(async () => {
+        if (trigger === 'hover') hover(view.getByRole('img', { name: LABEL }));
+        else report(true);
+        vi.advanceTimersByTime(trigger === 'hover' ? HOVER_CARD_DELAY_MS - 1 : 299);
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+      await act(async () => {
+        vi.advanceTimersByTime(1);
+        vi.useRealTimers();
+      });
+      await view.findByRole('img', { name: `${LABEL}: Open\nAvailable again` });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+      clock.mockRestore();
+    }
+  });
+
   it.each([
     ['not found', () => respond({ message: 'Not Found' }, 404)],
     // A limit that reset long ago, so the plugin asks GitHub again in the tests after this one.
@@ -321,7 +365,7 @@ describe('PullRequestChip', () => {
     await show({}, undefined, client);
     await settleOnScreen();
     if (kind === 'rate limited') await answered(client, '/pulls/412');
-    // An expired rate limit can be retried, unlike a refusal.
+    // An expired rate limit can be retried, unlike a fresh refusal.
     expect(fetchMock).toHaveBeenCalledTimes(kind === 'rate limited' ? 1 : 0);
   });
 

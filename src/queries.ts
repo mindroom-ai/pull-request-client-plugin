@@ -94,9 +94,10 @@ function invalidateAfterWrite(client: QueryClient, filters: InvalidateQueryFilte
  * settles once the pull request itself is read again. Its other parts (the files, the checks,
  * the comments) are not waited for: a large pull request's files take long, and nothing that
  * depends on the write reads them. Resolves to whether that read worked: false leaves on screen
- * the pull request from before the write. Only active queries refetch. `access`, the key of the
- * access the write used, is the read that counts: another room with another access still refetches
- * with the access its own key names (`authFor`), but says nothing of this write.
+ * the pull request from before the write. True also when nothing on screen reads it. Only active
+ * queries refetch. `access`, the key of the access the write used, is the read that counts:
+ * another room with another access still refetches with the access its own key names (`authFor`),
+ * but says nothing of this write.
  */
 export async function refreshPullRequest(
   queryClient: QueryClient,
@@ -141,7 +142,7 @@ export const recheckStalePullRequest = (
 ): Promise<void> =>
   invalidateAfterWrite(queryClient, { queryKey: keyOf(ref, access), exact: true, type: 'active' });
 
-type QueryState = { state: { data: unknown; error: unknown } };
+type QueryState = { state: { data: unknown; error: unknown; errorUpdatedAt: number } };
 
 // What a pull request's query read before GitHub refused it, until a read works again: no answer,
 // also beside a later read that failed.
@@ -177,14 +178,29 @@ export type RefetchOptions = {
 
 export const NO_FOCUS_REFETCH = { refetchOnWindowFocus: false };
 
-const HOVERED_CARD_READ = { ...NO_FOCUS_REFETCH, enabled: unlessRefused };
-const SETTLED_CARD_READ = { ...HOVERED_CARD_READ, ...BACKGROUND_READ };
+const SETTLED_CARD_READ = { ...NO_FOCUS_REFETCH, ...BACKGROUND_READ, enabled: unlessRefused };
 const CACHED_CARD_READ: RefetchOptions = { ...SETTLED_CARD_READ, enabled: false };
 
-/** Before visibility settles, show the cache without making the query active. Afterward,
- * TanStack Query refetches on enable if the cache is aged or invalidated. Hover is foreground. */
-export const cardRefetch = (settled: boolean, hovered = false): RefetchOptions =>
-  hovered ? HOVERED_CARD_READ : settled ? SETTLED_CARD_READ : CACHED_CARD_READ;
+/** Row summaries read only cached data until visibility settles and never retry refusals. */
+export const cardRefetch = (settled: boolean): RefetchOptions =>
+  settled ? SETTLED_CARD_READ : CACHED_CARD_READ;
+
+const canReadChip = (query: QueryState) => {
+  const { error, errorUpdatedAt } = query.state;
+  // TanStack considers errors without data stale immediately, so age the 404 itself.
+  return (
+    unlessRefused(query) ||
+    (error instanceof GitHubError &&
+      error.status === 404 &&
+      Date.now() - errorUpdatedAt >= STALE_TIME)
+  );
+};
+const HOVERED_CHIP_READ = { ...NO_FOCUS_REFETCH, enabled: canReadChip };
+const SETTLED_CHIP_READ = { ...HOVERED_CHIP_READ, ...BACKGROUND_READ };
+
+/** Settled chips can refetch on enable. Hover also enables the chip and gives it priority. */
+export const chipRefetch = (settled: boolean, hovered: boolean): RefetchOptions =>
+  hovered ? HOVERED_CHIP_READ : settled ? SETTLED_CHIP_READ : CACHED_CARD_READ;
 
 // Share four slots across background proxied summaries and checks (one or up to two POSTs).
 const MAX_PROXY_READ_JOBS = 4;
