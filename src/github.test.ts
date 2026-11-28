@@ -1667,11 +1667,17 @@ describe('through MindRoom', () => {
     headers,
   });
 
-  it('reads through the server, never from GitHub itself', async () => {
+  it('reads parsed JSON through the server without re-encoding it', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
     const via = viaServer(() => answered(apiPull));
-    expect((await fetchPullRequest(ref, via)).title).toBe('T');
+    const stringify = vi.spyOn(JSON, 'stringify');
+    try {
+      expect((await fetchPullRequest(ref, via)).title).toBe('T');
+      expect(stringify).not.toHaveBeenCalledWith(apiPull);
+    } finally {
+      stringify.mockRestore();
+    }
     expect(fetchMock).not.toHaveBeenCalled();
     expect(via.paths).toEqual(['/api/github/request']);
     expect(via.sent).toEqual([
@@ -1681,6 +1687,11 @@ describe('through MindRoom', () => {
         accept: 'application/vnd.github.full+json',
       },
     ]);
+  });
+
+  it('still parses JSON relayed as text', async () => {
+    const via = viaServer(() => answered('\uFEFF{"title":"From text"}'));
+    expect((await fetchPullRequest(ref, via)).title).toBe('From text');
   });
 
   it("maps GitHub's refusals as for a token", async () => {
@@ -1716,9 +1727,9 @@ describe('through MindRoom', () => {
   it("holds one account's rate limit on a server to that account alone", async () => {
     vi.useFakeTimers({ now: Date.parse('2026-01-01T00:00:00Z'), toFake: ['Date'] });
     try {
-      const reset = String(Date.now() / 1000 + 600);
-      const headers = { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': reset };
-      const alice = viaServer(() => answered({ message: 'limit' }, 403, headers));
+      const alice = viaServer(() =>
+        answered({ message: 'You have exceeded a secondary rate limit.' }, 403)
+      );
       await expect(fetchPullRequest(ref, alice)).rejects.toEqual(
         new GitHubError('rateLimited', 403)
       );

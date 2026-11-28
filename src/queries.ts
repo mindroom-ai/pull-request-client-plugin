@@ -94,9 +94,8 @@ function invalidateAfterWrite(client: QueryClient, filters: InvalidateQueryFilte
  * settles once the pull request itself is read again. Its other parts (the files, the checks,
  * the comments) are not waited for: a large pull request's files take long, and nothing that
  * depends on the write reads them. Resolves to whether that read worked: false leaves on screen
- * the pull request from before the write. True also when nothing on screen reads it. `access`,
- * the key of the access the write went with, is the read that counts: what another room shows
- * of the pull request with another access (anonymously, as not found) is asked again too, each
+ * the pull request from before the write. Only active queries refetch. `access`, the key of the
+ * access the write used, is the read that counts: another room with another access still refetches
  * with the access its own key names (`authFor`), but says nothing of this write.
  */
 export async function refreshPullRequest(
@@ -112,10 +111,8 @@ export async function refreshPullRequest(
   // Each query once: asked again by both, the first request would be dropped for the second.
   void invalidateAfterWrite(queryClient, { queryKey, predicate: (query) => !read(query) });
   await invalidateAfterWrite(queryClient, { queryKey, predicate: read });
-  // Only what is on screen was asked again; a failure of an earlier read, as the one without a
-  // token of a private pull request, is not this read's.
-  const shown = queryClient.getQueryCache().findAll({ queryKey, predicate: read, type: 'active' });
-  return shown.every((query) => query.state.status !== 'error');
+  const active = queryClient.getQueryCache().findAll({ queryKey, predicate: read, type: 'active' });
+  return active.every((query) => query.state.status !== 'error');
 }
 
 /** Reloads a pull request's queries bypassing cached ETags (after a write or manual refresh). */
@@ -162,12 +159,9 @@ export const answerOf = <T>(query: { data: T | undefined; error: unknown }) =>
   isRefused(query) ? undefined : query.data;
 
 // Mark overview observers without changing the query key shared with foreground surfaces.
-export const BACKGROUND_READ = { meta: { mindroomPullRequestsBackground: true } } as const;
+const BACKGROUND_READ = { meta: { mindroomPullRequestsBackground: true } } as const;
 
-/** What a caller can change of a query's refetching: the chips leave out the refetch on window focus,
- * a thread's details also the one on mount, for an answer and for a refusal alike, and the banner's
- * button with access adds an interval (`useBannerRefetch`); `enabled: false` reads only what is
- * already there. */
+/** Observer-specific controls for automatic refetching. `enabled: false` reads only what is cached. */
 export type RefetchOptions = {
   meta?: typeof BACKGROUND_READ.meta;
   enabled?: false | ((query: QueryState) => boolean);
@@ -181,9 +175,17 @@ export type RefetchOptions = {
   refetchIntervalInBackground?: boolean;
 };
 
-// A chip asks again when it shows after its answer went stale, not when the tab regains focus:
-// every chip seen so far would ask at once, and without a token that spends the hourly limit.
 export const NO_FOCUS_REFETCH = { refetchOnWindowFocus: false };
+
+/** Overview queries wait for visibility only on a cache miss. Keeping cached queries enabled
+ * avoids a stale refetch on the visibility transition and lets invalidation still refresh them. */
+export const cardRefetch = (seen: boolean): RefetchOptions => ({
+  ...BACKGROUND_READ,
+  ...NO_FOCUS_REFETCH,
+  enabled: (query) => (seen || query.state.data !== undefined) && unlessRefused(query),
+  refetchOnMount: false,
+  refetchOnReconnect: seen,
+});
 
 // Share four slots across background proxied summaries and checks (one or up to two POSTs).
 const MAX_PROXY_READ_JOBS = 4;

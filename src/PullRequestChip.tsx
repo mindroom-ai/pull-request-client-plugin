@@ -8,10 +8,8 @@ import type { PullRequestRef } from './github';
 import { PullRequestHoverCard, useHoverCard } from './PullRequestHoverCard';
 import { pullRequestChecksStatePresentation } from './presentation';
 import { usePullRequestStatus } from './pullRequestStatus';
-import { BACKGROUND_READ, NO_FOCUS_REFETCH } from './queries';
+import { cardRefetch } from './queries';
 import { pluginRootStyle } from './theme';
-
-export const CHIP_REFETCH = { ...NO_FOCUS_REFETCH, ...BACKGROUND_READ };
 
 /** Whether `element` has been on screen; at once where the browser cannot tell. */
 export function useOnScreenOnce(element: Element | null): boolean {
@@ -40,15 +38,15 @@ export function PullRequestChip({
 }) {
   const t = usePluginTranslation('pull-requests');
   const [element, setElement] = useState<HTMLElement | null>(null);
-  // The Compact view draws every card of a room: a chip asks GitHub once it has been on screen,
-  // while still reading already-cached status on first render.
+  // The Compact view draws every card of a room: a chip waits until it is seen to load uncached status.
   const seen = useOnScreenOnce(element);
   // The hover card stands in for a title, which would show a second tooltip, a slow one.
   const hoverCardOpen = useHoverCard(element);
-  const refetch = hoverCardOpen ? NO_FOCUS_REFETCH : CHIP_REFETCH;
+  const refetch = cardRefetch(seen);
+  // An open hover card promotes queued reads without retrying an existing refusal.
   const { pr, state, checks, error, checkList } = usePullRequestStatus(
     pullRequest,
-    seen ? refetch : { ...refetch, enabled: false }
+    hoverCardOpen ? { ...refetch, meta: undefined } : refetch
   );
   const mark = checks && pullRequestChecksStatePresentation(checks);
   // Until GitHub sent the pull request, or when it refused, the plain icon in the draft's tone.

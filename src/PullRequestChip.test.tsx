@@ -6,6 +6,8 @@ import { renderPluginComponent } from '@mindroom/client-sdk/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import plugin from './index';
 import { PullRequestChip } from './PullRequestChip';
+import { STALE_TIME } from './queries';
+import { act } from './testing/act';
 import { FakeIntersectionObserver, observers, report } from './testing/intersectionObserver';
 import { githubServer } from './testing/mindroomServer';
 import { GitHubServerContext } from './token';
@@ -242,7 +244,7 @@ describe('PullRequestChip', () => {
     expect(requested('/pulls/412')).toBe(true);
   });
 
-  it('shows cached state and checks on remount before being seen, without fetching', async () => {
+  it('shows aged state and checks across remount and intersection without fetching', async () => {
     vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver);
     saveToken();
     const widget = { owner: 'acme', repo: 'widget', number: 7 };
@@ -256,7 +258,7 @@ describe('PullRequestChip', () => {
     });
     const first = await show({ pullRequest: widget });
     expect(fetchMock).not.toHaveBeenCalled();
-    report(true);
+    await act(async () => report(true));
     await vi.waitFor(() =>
       expect(
         first.view.container.querySelector('.mrpr-chip-checks')?.getAttribute('class')
@@ -264,21 +266,25 @@ describe('PullRequestChip', () => {
     );
     await answered(first.client, '/check-runs');
     first.view.unmount();
-    await first.client.invalidateQueries({ queryKey: ['pull-requests'], refetchType: 'none' });
     fetchMock.mockClear();
     observers.length = 0;
-    const remount = await show({ pullRequest: widget }, undefined, first.client);
-    const chip = remount.view.getByRole('img', {
-      name: 'Pull request acme/widget #7: Open\nShip widget',
-    });
-    expect(chip.firstElementChild?.getAttribute('class')).toContain('mrpr-tone-open');
-    expect(
-      remount.view.container.querySelector('.mrpr-chip-checks')?.getAttribute('class')
-    ).toContain('mrpr-tone-success');
-    expect(fetchMock).not.toHaveBeenCalled();
-    report(true);
-    await answered(remount.client, '/check-runs');
-    expect(requested('/pulls/7')).toBe(true);
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + STALE_TIME + 1 });
+    try {
+      const remount = await show({ pullRequest: widget }, undefined, first.client);
+      const chip = remount.view.getByRole('img', {
+        name: 'Pull request acme/widget #7: Open\nShip widget',
+      });
+      expect(chip.firstElementChild?.getAttribute('class')).toContain('mrpr-tone-open');
+      expect(
+        remount.view.container.querySelector('.mrpr-chip-checks')?.getAttribute('class')
+      ).toContain('mrpr-tone-success');
+      expect(fetchMock).not.toHaveBeenCalled();
+      await act(async () => report(true));
+      await vi.waitFor(() => expect(remount.client.isFetching()).toBe(0));
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it.each([
@@ -288,7 +294,7 @@ describe('PullRequestChip', () => {
       'rate limited',
       () => respond({}, 403, { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': '0' }),
     ],
-  ])('shows the number and the neutral icon when GitHub answers %s', async (_, answer) => {
+  ])('shows the number and the neutral icon when GitHub answers %s', async (kind, answer) => {
     fetchMock.mockImplementation(async () => answer());
     const { view, client } = await show();
     await answered(client, '/pulls/412');
@@ -297,6 +303,14 @@ describe('PullRequestChip', () => {
     expect(chip.firstElementChild?.getAttribute('class')).toContain('mrpr-tone-draft');
     expect(chip.hasAttribute('title')).toBe(false);
     expect(requested('/check-runs')).toBe(false);
+    view.unmount();
+    fetchMock.mockClear();
+    vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver);
+    await show({}, undefined, client);
+    await act(async () => report(true));
+    await vi.waitFor(() => expect(client.isFetching()).toBe(0));
+    // An expired rate limit can be retried, unlike a refusal.
+    expect(fetchMock).toHaveBeenCalledTimes(kind === 'rate limited' ? 1 : 0);
   });
 
   it('is a span without a tab stop when it has nothing to select', async () => {
