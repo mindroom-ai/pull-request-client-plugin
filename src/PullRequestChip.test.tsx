@@ -6,9 +6,14 @@ import { renderPluginComponent } from '@mindroom/client-sdk/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import plugin from './index';
 import { PullRequestChip } from './PullRequestChip';
-import { STALE_TIME } from './queries';
+import { pullRequestKey, STALE_TIME } from './queries';
 import { act } from './testing/act';
-import { FakeIntersectionObserver, observers, report } from './testing/intersectionObserver';
+import {
+  FakeIntersectionObserver,
+  observers,
+  report,
+  settleOnScreen,
+} from './testing/intersectionObserver';
 import { githubServer } from './testing/mindroomServer';
 import { GitHubServerContext } from './token';
 
@@ -229,7 +234,7 @@ describe('PullRequestChip', () => {
     expect(view.container.querySelector('.mrpr-chip-checks')).toBeNull();
   });
 
-  it('asks GitHub nothing until it has been on screen, then shows the state', async () => {
+  it('asks GitHub nothing until it settles on screen, then shows the state', async () => {
     vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver);
     serve(pull({ state: 'closed' }));
     const { view } = await show();
@@ -239,52 +244,59 @@ describe('PullRequestChip', () => {
     report(false);
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(fetchMock).not.toHaveBeenCalled();
-    report(true);
+    await settleOnScreen();
     await view.findByRole('img', { name: /: Closed/ });
     expect(requested('/pulls/412')).toBe(true);
   });
 
-  it('shows aged state and checks across remount and intersection without fetching', async () => {
-    vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver);
+  it('shows aged state and checks during a glance and refreshes after sustained visibility', async () => {
+    vi.stubGlobal('IntersectionObserver', undefined);
     saveToken();
-    const widget = { owner: 'acme', repo: 'widget', number: 7 };
-    fetchMock.mockImplementation(async (url) => {
-      if (url.endsWith('/repos/acme/widget/pulls/7'))
-        return respond(pull({ title: 'Ship widget' }));
-      if (url.includes(`/commits/${SHA}/check-runs?`))
-        return respond({ check_runs: [run('success')] });
-      if (url.includes(`/commits/${SHA}/status?`)) return respond({ statuses: [] });
-      return respond({ message: 'Not Found' }, 404);
-    });
-    const first = await show({ pullRequest: widget });
-    expect(fetchMock).not.toHaveBeenCalled();
-    await act(async () => report(true));
-    await vi.waitFor(() =>
-      expect(
-        first.view.container.querySelector('.mrpr-chip-checks')?.getAttribute('class')
-      ).toContain('mrpr-tone-success')
-    );
-    await answered(first.client, '/check-runs');
+    serve(pull(), [run('success')]);
+    const first = await show();
+    const mark = (view: typeof first.view) =>
+      view.container.querySelector('.mrpr-chip-checks')?.getAttribute('class');
+    await vi.waitFor(() => expect(mark(first.view)).toContain('mrpr-tone-success'));
     first.view.unmount();
+    const { client } = first;
+    const updatedAt = Date.now() - STALE_TIME - 1;
+    for (const [key, data] of client.getQueriesData({ queryKey: pullRequestKey(REF) })) {
+      client.setQueryData(key, data, { updatedAt });
+    }
     fetchMock.mockClear();
-    observers.length = 0;
-    vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + STALE_TIME + 1 });
+    serve(pull({ title: 'Updated title' }), [run('failure')]);
+    vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver);
+    const { view } = await show({}, undefined, client);
+    const cached = () => view.getByRole('img', { name: `${LABEL}: Open\nAdd pull request chips` });
+    expect(cached()).toBeDefined();
+    expect(mark(view)).toContain('mrpr-tone-success');
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     try {
-      const remount = await show({ pullRequest: widget }, undefined, first.client);
-      const chip = remount.view.getByRole('img', {
-        name: 'Pull request acme/widget #7: Open\nShip widget',
+      await act(async () => {
+        // The last sample in a batch says it is off screen.
+        report([true, false]);
+        vi.advanceTimersByTime(300);
+        report(true);
+        vi.advanceTimersByTime(200);
+        report(false);
+        vi.advanceTimersByTime(300);
+        report(true);
+        vi.advanceTimersByTime(299);
       });
-      expect(chip.firstElementChild?.getAttribute('class')).toContain('mrpr-tone-open');
-      expect(
-        remount.view.container.querySelector('.mrpr-chip-checks')?.getAttribute('class')
-      ).toContain('mrpr-tone-success');
       expect(fetchMock).not.toHaveBeenCalled();
-      await act(async () => report(true));
-      await vi.waitFor(() => expect(remount.client.isFetching()).toBe(0));
-      expect(fetchMock).not.toHaveBeenCalled();
+      expect(cached()).toBeDefined();
+      expect(mark(view)).toContain('mrpr-tone-success');
+      await act(async () => {
+        vi.advanceTimersByTime(1);
+        vi.useRealTimers();
+      });
     } finally {
       vi.useRealTimers();
     }
+    await view.findByRole('img', { name: `${LABEL}: Open\nUpdated title` });
+    await vi.waitFor(() => expect(mark(view)).toContain('mrpr-tone-failure'));
   });
 
   it.each([
@@ -307,8 +319,8 @@ describe('PullRequestChip', () => {
     fetchMock.mockClear();
     vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver);
     await show({}, undefined, client);
-    await act(async () => report(true));
-    await vi.waitFor(() => expect(client.isFetching()).toBe(0));
+    await settleOnScreen();
+    if (kind === 'rate limited') await answered(client, '/pulls/412');
     // An expired rate limit can be retried, unlike a refusal.
     expect(fetchMock).toHaveBeenCalledTimes(kind === 'rate limited' ? 1 : 0);
   });
@@ -670,12 +682,15 @@ describe('PullRequestChip hover card', () => {
     expect(chip.hasAttribute('aria-describedby')).toBe(false);
   });
 
-  it('shows the repository and the number while the pull request loads', async () => {
+  it('starts a cold read on hover without waiting for visibility to settle', async () => {
+    vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver);
     fetchMock.mockImplementation(() => new Promise<Response>(() => {}));
     pointer(true);
     const { view } = await show();
-    hover(view.getByRole('img', { name: LABEL }));
+    expect(fetchMock).not.toHaveBeenCalled();
+    await act(async () => hover(view.getByRole('img', { name: LABEL })));
     const tooltip = await view.findByRole('tooltip');
+    await vi.waitFor(() => expect(requested('/pulls/412')).toBe(true));
     expect(text(tooltip.querySelector('.mrpr-hover-head'))).toBe('mindroom-ai/mindroom-chat #412');
     expect(text(tooltip.querySelector('.mrpr-status'))).toBe('Loading pull request');
   });
@@ -692,5 +707,6 @@ describe('PullRequestChip hover card', () => {
       'GitHub did not find this pull request. A private repository needs a token.'
     );
     expect(tooltip.querySelector('button')).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

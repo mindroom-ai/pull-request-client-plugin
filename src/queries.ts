@@ -177,15 +177,14 @@ export type RefetchOptions = {
 
 export const NO_FOCUS_REFETCH = { refetchOnWindowFocus: false };
 
-/** Overview queries wait for visibility only on a cache miss. Keeping cached queries enabled
- * avoids a stale refetch on the visibility transition and lets invalidation still refresh them. */
-export const cardRefetch = (seen: boolean): RefetchOptions => ({
-  ...BACKGROUND_READ,
-  ...NO_FOCUS_REFETCH,
-  enabled: (query) => (seen || query.state.data !== undefined) && unlessRefused(query),
-  refetchOnMount: false,
-  refetchOnReconnect: seen,
-});
+const HOVERED_CARD_READ = { ...NO_FOCUS_REFETCH, enabled: unlessRefused };
+const SETTLED_CARD_READ = { ...HOVERED_CARD_READ, ...BACKGROUND_READ };
+const CACHED_CARD_READ: RefetchOptions = { ...SETTLED_CARD_READ, enabled: false };
+
+/** Before visibility settles, show the cache without making the query active. Afterward,
+ * TanStack Query refetches on enable if the cache is aged or invalidated. Hover is foreground. */
+export const cardRefetch = (settled: boolean, hovered = false): RefetchOptions =>
+  hovered ? HOVERED_CARD_READ : settled ? SETTLED_CARD_READ : CACHED_CARD_READ;
 
 // Share four slots across background proxied summaries and checks (one or up to two POSTs).
 const MAX_PROXY_READ_JOBS = 4;

@@ -11,18 +11,35 @@ import { usePullRequestStatus } from './pullRequestStatus';
 import { cardRefetch } from './queries';
 import { pluginRootStyle } from './theme';
 
-/** Whether `element` has been on screen; at once where the browser cannot tell. */
-export function useOnScreenOnce(element: Element | null): boolean {
-  const [seen, setSeen] = useState(() => typeof IntersectionObserver === 'undefined');
+// Wait past the host's 280 ms page slide and 260 ms swipe settle.
+const VISIBILITY_SETTLE_MS = 300;
+
+/** Latches after continuous intersection, or immediately if the browser cannot observe it. */
+export function useSettledVisibility(element: Element | null): boolean {
+  const [settled, setSettled] = useState(() => typeof IntersectionObserver === 'undefined');
   useEffect(() => {
-    if (seen || element === null) return undefined;
+    if (settled || element === null) return undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let observing = true;
     const observer = new IntersectionObserver((entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) setSeen(true);
+      if (!observing) return;
+      // An exit breaks the dwell even if another entry in the same batch re-enters.
+      if (entries.some((entry) => !entry.isIntersecting)) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+      if (entries.at(-1)?.isIntersecting) {
+        timer ??= setTimeout(() => setSettled(true), VISIBILITY_SETTLE_MS);
+      }
     });
     observer.observe(element);
-    return () => observer.disconnect();
-  }, [element, seen]);
-  return seen;
+    return () => {
+      observing = false;
+      observer.disconnect();
+      clearTimeout(timer);
+    };
+  }, [element, settled]);
+  return settled;
 }
 
 export function PullRequestChip({
@@ -38,15 +55,12 @@ export function PullRequestChip({
 }) {
   const t = usePluginTranslation('pull-requests');
   const [element, setElement] = useState<HTMLElement | null>(null);
-  // The Compact view draws every card of a room: a chip waits until it is seen to load uncached status.
-  const seen = useOnScreenOnce(element);
+  const settled = useSettledVisibility(element);
   // The hover card stands in for a title, which would show a second tooltip, a slow one.
   const hoverCardOpen = useHoverCard(element);
-  const refetch = cardRefetch(seen);
-  // An open hover card promotes queued reads without retrying an existing refusal.
   const { pr, state, checks, error, checkList } = usePullRequestStatus(
     pullRequest,
-    hoverCardOpen ? { ...refetch, meta: undefined } : refetch
+    cardRefetch(settled, hoverCardOpen)
   );
   const mark = checks && pullRequestChecksStatePresentation(checks);
   // Until GitHub sent the pull request, or when it refused, the plain icon in the draft's tone.

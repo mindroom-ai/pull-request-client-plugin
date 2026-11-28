@@ -14,7 +14,7 @@ import { useRoomNavigate } from '@mindroom/client-sdk/room';
 import { useScreenSize } from '@mindroom/client-sdk/ui';
 import { BranchChip } from './BranchChip';
 import { pullRequestUrl, type PullRequestRef } from './github';
-import { PullRequestChip, useOnScreenOnce } from './PullRequestChip';
+import { PullRequestChip, useSettledVisibility } from './PullRequestChip';
 import { answerOf, cardRefetch, usePullRequests } from './queries';
 import { pluginRootStyle } from './theme';
 import { orderPullRequests } from './ThreadDetails';
@@ -61,11 +61,11 @@ function CardChips({
   const panel = useRoomSidePanel('pull-requests', 'pull-request');
   const { navigateRoomThread } = useRoomNavigate();
   const [element, setElement] = useState<HTMLElement | null>(null);
-  const seen = useOnScreenOnce(element);
+  const visibilitySettled = useSettledVisibility(element);
   const { via, pending } = useGitHubAccess();
   const queries = usePullRequests(
     pullRequests,
-    via === undefined ? { enabled: false } : cardRefetch(seen)
+    cardRefetch(visibilitySettled && via !== undefined)
   );
   const settledRanks = useRef<ReadonlyMap<string, number> | undefined>(undefined);
   const previous = settledRanks.current;
